@@ -58,16 +58,18 @@ export const FILM_PAGE = FILM_FILE;
  * (SPEC §1), drawn with it, so its pictures on the timeline show what was changed in it.
  * @param {string} root @param {string} base @param {string} rel @param {number} ms @param {number} width
  * @param {object[] | null} [overrides]
+ * @param {{ motion?: import('../../src/motion.mjs').MotionInstance, viewport?: { width: number, height: number }, clipId?: string }} [context]
  */
-export async function pageFrame(root, base, rel, ms, width, overrides = null) {
+export async function pageFrame(root, base, rel, ms, width, overrides = null, context = {}) {
   const w = Math.max(32, Math.min(960, Math.round(width / 2) * 2 || 160));
   /* `rel` is the request's: a page of the project only, never one reached by `../` or a link out of the folder */
   const page = inProject(root, rel);
   const info = page ? await stat(page).catch(() => null) : null;
   if (!info?.isFile()) throw new PageFrameError(`${rel} is not there`);
   /* `black`: how frames are drawn (frames drawn on white before are not reused) */
+  const motionKey = context.motion || context.viewport || context.clipId ? JSON.stringify(context) : '';
   const tweaks = overrides?.some((o) => o && typeof o === 'object' && 'at' in o) ? JSON.stringify(overrides) : '';
-  const key = createHash('sha256').update(`black\0${rel}\0${Math.round(ms)}\0${w}${tweaks ? `\0${tweaks}` : ''}`).digest('hex').slice(0, 24);
+  const key = createHash('sha256').update(`black\0${rel}\0${Math.round(ms)}\0${w}\0${motionKey}${tweaks ? `\0${tweaks}` : ''}`).digest('hex').slice(0, 24);
   const dir = join(root, TOOL_DIR, 'cache', 'pageframes');
   const file = join(dir, `${key}.jpg`);
   /* a frame is good while every file the page loaded to draw it is as it was then: the page, and its styles, code,
@@ -89,8 +91,8 @@ export async function pageFrame(root, base, rel, ms, width, overrides = null) {
   if (pending) return pending;
   const made = (async () => {
     /* a page drawn with tweaks is one of its own: the page kept open for another clip of the same file has none */
-    const drawn = tweaks ? `${version}:${createHash('sha256').update(tweaks).digest('hex').slice(0, 12)}` : version;
-    const { jpeg, duration, loaded } = await draw(pageUrl(base, rel), ms, w, drawn, base, tweaks ? overrides : null).catch((e) => {
+    const drawn = tweaks || motionKey ? `${version}:${createHash('sha256').update(tweaks + motionKey).digest('hex').slice(0, 12)}` : version;
+    const { jpeg, duration, loaded } = await draw(pageUrl(base, rel), ms, w, drawn, base, tweaks ? overrides : null, context).catch((e) => {
       failures.set(id, { error: e, at: Date.now() });
       if (failures.size > 500) failures.delete(failures.keys().next().value ?? '');
       throw e;
@@ -192,8 +194,12 @@ async function closeBrowser() {
  * Draw `url` at `ms`, `w` px wide. `loaded`: the project's files the page (and every page inside it) loaded, project
  * relative (`base`: where the project is served), so the frame is known stale when one of them changes.
  */
-function draw(/** @type {string} */ url, /** @type {number} */ ms, /** @type {number} */ w, /** @type {string} */ version, /** @type {string} */ base, /** @type {object[] | null} */ overrides = null) {
+function draw(/** @type {string} */ url, /** @type {number} */ ms, /** @type {number} */ w, /** @type {string} */ version, /** @type {string} */ base, /** @type {object[] | null} */ overrides = null, /** @type {{ motion?: import('../../src/motion.mjs').MotionInstance, viewport?: { width: number, height: number }, clipId?: string }} */ context = {}) {
   return withPage(url, w, version, async (page) => {
+    if (context.viewport) {
+      await page.page.setViewportSize(context.viewport);
+      await page.cdp.send('Emulation.setDeviceMetricsOverride', { ...context.viewport, deviceScaleFactor: w / context.viewport.width, mobile: false });
+    }
     const duration = lengthOf(page);
     const end = duration != null ? Math.max(0, duration - 1e-3) : Infinity;
     /* a poster: the fullest of a few moments around the middle (a page's middle is often a scene's first, faded-in
@@ -201,7 +207,7 @@ function draw(/** @type {string} */ url, /** @type {number} */ ms, /** @type {nu
     const moments = ms < 0 ? POSTER_AT.map((f) => Math.min(end, (duration ?? NO_END_SPAN) * f)) : [Math.min(ms / 1000, end)];
     let jpeg = null;
     for (const t of moments) {
-      await page.seek(Math.max(0, t), { timeoutMs: FRAME_MS });
+      await page.seek(Math.max(0, t), { timeoutMs: FRAME_MS, ...context });
       /* the clip's tweaks, as the film's timeline applies them after each frame (src/overrides.mjs) */
       if (overrides) {
         await page.page.evaluate(async (list) => {

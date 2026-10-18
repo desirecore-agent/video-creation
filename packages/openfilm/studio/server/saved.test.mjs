@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeFolder, moveFile } from './files.mjs';
@@ -135,4 +135,24 @@ test('a place in the library is named from saved/', () => {
   assert.equal(libraryRel('saved/a/b.png'), 'a/b.png');
   assert.throws(() => libraryRel('assets/a.png'), /a place in Saved/);
   assert.throws(() => libraryRel(7), /a place in Saved/);
+});
+
+
+test('Saved导入拒绝项目外的祖先链接，保留外部目录和已有人工文件', async () => {
+  const source = project();
+  const path = await saveClip(source, 'title', { name: 'Bounded' });
+  const target = mkdtempSync(join(tmpdir(), 'saved-bounded-'));
+  const outside = mkdtempSync(join(tmpdir(), 'saved-outside-'));
+  try {
+    writeFileSync(join(outside, 'human.txt'), '人工文件');
+    symlinkSync(outside, join(target, 'saved'), process.platform === 'win32' ? 'junction' : 'dir');
+    await assert.rejects(takeSaved(target, path), /not a path inside/);
+    assert.equal(existsSync(join(outside, 'Bounded')), false);
+    assert.equal(readFileSync(join(outside, 'human.txt'), 'utf8'), '人工文件');
+    rmSync(join(target, 'saved'));
+    mkdirSync(join(target, 'saved'), { recursive: true });
+    symlinkSync(outside, join(target, 'saved', 'Bounded'), process.platform === 'win32' ? 'junction' : 'dir');
+    await assert.rejects(takeSaved(target, path), /not a path inside/);
+    assert.equal(existsSync(join(outside, 'pages')), false);
+  } finally { rmSync(target, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
 });

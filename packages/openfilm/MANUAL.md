@@ -83,3 +83,15 @@ Run them in the film's folder. Each one's `--help` lists its options:
 The words of a sound or a video are a WebVTT beside it with the same name (`vo/1.wav` → `vo/1.vtt`): a cue per subtitle line, a timestamp tag at each word. Studio makes the film's subtitles from them; never draw subtitles in a page.
 
 Media can come from `get`, any service the person uses (with its API docs and their key), or your own code. Save it under `assets/`.
+
+## 通用动效与程序化场景
+
+字幕和旁白都是可选输入。产品演示、数据图示、音乐短片、品牌片头、流程解释可以直接由 HTML、SVG、Canvas 或 WebGL 场景构成；仍在 `film.html` 编排，不要再建立一条 Overlay 时间线。
+
+需要人继续调参的场景，声明 `script#film-motion[type=application/json]` 构件描述：`version:1`、稳定 `id`、`name`、`description`、Draft-07 `paramsSchema` 与 `defaults`，可选 `dataSchema`／`data`。片段用正式 `motion` 属性保存参数、结构化数据、属性轨、可选 markers 和人工锁。完整格式和默认值合并规则见 `SPEC.md` 第 6 节；每个可调字段写清 `description`。
+
+场景使用 `frame(t,context)` 的 `context.params`、`data`、`viewport` 和 `events` 绘制。它们在绘图前已完成默认值合成和关键帧采样；Canvas 和 WebGL 不需要伪造 DOM 控件。DOM 元素仍可人工覆盖，覆盖在每帧场景绘制后生效。自由场景可以继续只写 `frame(t)`，不必被强制改造成构件。
+
+SDK 从项目 `video-creation-motion/motion.mjs` 导入，使用绝对时间工具实现插值、贝塞尔缓动、解析弹簧、错峰、循环、嵌套局部时钟、路径及确定性粒子。不要逐帧累加位置、弹簧积分或触发一次性事件；随机拖动播放头也必须显示完整画面。
+
+保存前检查所有关键帧端点；渲染时最终参数也会被校验。关键帧的 `ease` 是该帧到下一帧的出段；受 integer、enum、const、multipleOf 及条件、联合或非凸 Schema 约束的变化段使用 `step`（共享 `motionTrackRequiresStep` 判断），不要生成端点合法、中途违法的连续轨。`markers` 每帧返回截至当前时刻的全量集合，可选择表达步骤、节拍或字幕，不能要求字幕文件存在。人工锁保护对应输入及驱动它的轨，修改前读取真实 revision，冲突必须明确报告。

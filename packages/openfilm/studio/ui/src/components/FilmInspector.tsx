@@ -60,6 +60,7 @@ import type { MaskSession } from '@/lib/stage-mask';
 import type { MaskShape } from '@/lib/clip-mask';
 import type { FadeMs } from '@/lib/clip-fade';
 import type { FoundKind } from '@/lib/transitions';
+import { MotionSection } from './MotionSection';
 import { TemplateSection, type TemplateHost } from './TemplateSection';
 
 /** A change of a layer's words (kept as its `text` override). `expect` is what it said before: painted back on refusal. */
@@ -176,7 +177,10 @@ export const FilmInspector = React.memo(function FilmInspector({
   fades,
   transition,
   templateOf,
+  timeMs = 0,
 }: {
+  /** 动效检查器使用同一播放头，不建立第二条时间线。 */
+  timeMs?: number;
   element: StageElement | null;
   /** The clips selected on the timeline. A layer picked on the picture wins: one selection at a time. */
   clips?: readonly TimelineBlock[];
@@ -311,6 +315,7 @@ export const FilmInspector = React.memo(function FilmInspector({
           <ClipPanel
             key={clip.id}
             block={clip}
+            timeMs={timeMs}
             onMain={mainTrack != null && parseFilmDocLoc(clip.loc ?? '')?.track === mainTrack}
             geometry={geometry && geometry.kind === 'clip' && geometry.loc === clip.loc ? geometry : null}
             onEdit={onEditClips}
@@ -1376,8 +1381,9 @@ function clipsLook(
  */
 function ClipPanel({
   block, onMain, geometry, stage, badges, onEdit, onPreviewClip, pageChangesOf, replaceEntries, clipLookOf, onPreviewLook, onStartCrop, onEditMask, maskAsk, onMaskAsked, fades,
-  templateOf,
+  templateOf, timeMs,
 }: {
+  timeMs: number;
   fades?: ReadonlyMap<string, FadeMs>;
   templateOf?: (block: TimelineBlock) => TemplateHost | null;
   replaceEntries?: (block: TimelineBlock) => ContextMenuEntry[];
@@ -1428,7 +1434,7 @@ function ClipPanel({
   const template = React.useMemo(
     () => (block.kind === 'mg' && docLoc && templateOf ? templateOf(block) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [templateOf, block.clipId, block.kind, docLoc],
+    [templateOf, block.clipId, block.kind, block.src, block.startMs, block.endMs, block.inMs, block.speed, docLoc],
   );
 
   return (
@@ -1450,7 +1456,8 @@ function ClipPanel({
         </p>
       ) : (
         <>
-          {/* a page's own controls first: what a template is used for */}
+          {template?.commitMotion ? <MotionSection host={template} timeMs={timeMs} commit={template.commitMotion} /> : null}
+          {/* 原自由场景继续使用已有模板控件。 */}
           {template ? (
             <TemplateSection host={template} commit={(next) => commit([{ loc: loc!, prop: 'overrides', value: next as unknown as Record<string, unknown> | null }])} />
           ) : null}

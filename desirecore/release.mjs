@@ -4,9 +4,9 @@
  * No dependency installation, app registration, startup, or upload happens here.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -27,6 +27,7 @@ const RUNTIME_TREES = [
   `${PACKAGE}/bin`, `${PACKAGE}/src`, `${PACKAGE}/studio/server`,
   `${PACKAGE}/studio/ui/dist`, `${PACKAGE}/skills`, `${PACKAGE}/examples-index`,
   'desirecore/licenses',
+  'examples/general-motion',
 ];
 
 /** Full license/notice texts from the installed packages actually used by this build. */
@@ -76,6 +77,7 @@ export function writeDependencyLicenses({ root = SOURCE_ROOT, check = false } = 
     if (dependencies) for (const dependency of Object.keys(metadata.dependencies ?? {}).sort()) visit(dependency, manifestPath);
   };
   for (const name of ['ajv']) visit(name, resolve(root, 'package.json'));
+  visit('ajv-formats', resolve(root, PACKAGE, 'package.json'));
   for (const name of ['@fontsource-variable/inter', 'react', 'react-dom', 'lucide-react', 'playwright-core'])
     visit(name, resolve(root, PACKAGE, 'package.json'));
   // Build-generated runtime/CSS helpers carry these licenses; their compiler dependency trees are not shipped.
@@ -225,7 +227,15 @@ export function writeRelease({ root = SOURCE_ROOT, output = resolve(root, 'desir
   return { materialRoot: output, manifestPath: 'app-release.json', manifest, payloadBytes: payload.reduce((sum, file) => sum + file.bytes.length, 0) };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+// 目录链接和 /tmp 别名需比较实际文件；stdin 或普通 import 不应执行生成器。
+function isDirectEntry() {
+  const entry = process.argv[1];
+  if (!entry || entry === '-' || !existsSync(entry)) return false;
+  try { return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(entry)); }
+  catch { return false; }
+}
+
+if (isDirectEntry()) {
   try {
     const args = process.argv.slice(2);
     let output; let check = false; let licensesOnly = false;

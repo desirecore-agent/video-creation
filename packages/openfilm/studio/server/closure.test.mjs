@@ -147,3 +147,18 @@ test('a picture an override draws in a page is the film\'s, named from the page\
   for (const path of ['pages/lower.html', 'pages/logo.png', 'assets/new-logo.png', 'pages/bg.jpg']) assert.ok(held.has(path), path);
   assert.ok(!held.has('assets/unused.png'));
 });
+
+
+test('动效 manifest 显式资源纳入同一依赖闭包，支持中文空格，缺失时明确失败', async () => {
+  const manifest = { version: 1, id: 'resource-test', name: '依赖测试', description: '显式资源闭包', paramsSchema: { type: 'object', additionalProperties: false }, defaults: {}, assets: ['images/测试 图.png'] };
+  const root = folder({
+    'film.html': '<section><iframe id="a" src="scene/main.html"></iframe></section>',
+    'scene/main.html': `<script id="film-motion" type="application/json">${JSON.stringify(manifest)}</script>`,
+    'scene/images/测试 图.png': 'image',
+  });
+  const closure = await filmClosure(folderView(root));
+  assert.ok(closure.has('scene/images/测试 图.png'));
+  manifest.assets.push('images/missing.png');
+  writeFileSync(join(root, 'scene/main.html'), `<script id="film-motion" type="application/json">${JSON.stringify(manifest)}</script>`);
+  await assert.rejects(filmClosure(folderView(root)), /missing.png/);
+});

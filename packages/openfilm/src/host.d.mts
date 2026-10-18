@@ -1,4 +1,5 @@
-import type { Browser, Page } from 'playwright-core';
+import type { MotionInstance } from './motion.mjs';
+import type { Browser, Page, CDPSession } from 'playwright-core';
 export declare const HOST_FLAG: string;
 export declare const SEEK_INSIDE_FRAME: string;
 export declare const FILM_CLOCK: string;
@@ -20,8 +21,9 @@ export declare class FilmPage {
   static open(browser: Browser, origin: string, entry: string, opts?: { scale?: number; transparent?: boolean; black?: boolean; readyMs?: number; offline?: boolean; network?: PageNetwork; waitMs?: number }): Promise<FilmPage>;
   page: Page;
   meta: FilmMeta;
+  cdp: CDPSession;
   problems: Array<{ kind: string; message: string }>;
-  seek(t: number, opts?: { timeoutMs?: number }): Promise<void>;
+  seek(t: number, opts?: { timeoutMs?: number; motion?: MotionInstance; viewport?: { width: number; height: number }; clipId?: string; filmTime?: number }): Promise<void>;
   capture(opts?: { format?: 'png' | 'jpeg'; quality?: number }): Promise<Buffer>;
   close(): Promise<void>;
 }

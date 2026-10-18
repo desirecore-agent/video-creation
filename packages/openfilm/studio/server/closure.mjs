@@ -24,6 +24,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { FILM_FILE, readFilmFile } from '../../src/film-doc.mjs';
 import { TOOL_DIR } from './projects.mjs';
+import { motionManifestFromHtml } from './motion-manifest.mjs';
 
 /**
  * A project's files as the closure reads them, by folder-relative path with `/`. `size`: a file's bytes, or null
@@ -313,6 +314,14 @@ export async function filmClosure(view) {
     const pageDir = posix.dirname(page) === '.' ? '' : posix.dirname(page);
     if (ext === 'html' || ext === 'htm' || ext === 'svg') {
       if (path !== FILM_FILE && ext !== 'svg') await besidePage(path);
+      // 显式构件依赖不能使用脚本字符串猜测，文件名可以包含中文与空格。
+      if (path !== FILM_FILE && ext !== 'svg') {
+        const manifest = motionManifestFromHtml(text);
+        for (const asset of manifest?.assets ?? []) {
+          const dependency = projectPath(asset, here);
+          if (!dependency || !await take(dependency, path, imports)) throw new Error(`${path}: 动效资源不存在或不在工程内: ${asset}`);
+        }
+      }
       const found = htmlRefs(text);
       const map = { ...imports, ...found.imports };
       for (const r of found.refs) await ref(r, [here], ext === 'svg' ? page : path, map);

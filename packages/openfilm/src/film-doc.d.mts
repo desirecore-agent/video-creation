@@ -1,3 +1,5 @@
+import type { MotionInstance } from './motion.mjs';
+
 /** film.html, as read by film-doc.mjs: the types of a project's edit (the value its file says). */
 
 /** What a clip is, from its file: a web page (.html), a video, a still picture or a sound. */
@@ -48,6 +50,8 @@ export type FilmClip = {
   time?: FilmTimeSpan;
   /** pictures: pages, videos, stills */
   box?: FilmBox;
+  /** 页面实际布局尺寸。 */
+  size?: { w: number; h: number };
   /** videos and sounds */
   volume?: number;
   /** videos and sounds */
@@ -60,6 +64,8 @@ export type FilmClip = {
   sound?: true;
   /** the person's changes made in Studio: a page's elements (entries with `at`), any clip's fades (the one without) */
   overrides?: FilmOverride[];
+  /** 页面场景的结构化输入与关键帧，先于 frame 求值。 */
+  motion?: MotionInstance;
   /** attributes kept as they are: alt, title, lang, dir, data-*, aria-* (and a sound's class) */
   attrs?: Record<string, string>;
 }

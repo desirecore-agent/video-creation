@@ -69,6 +69,7 @@ import { PROJECT_PARTS, TOOL_DIR } from './projects.mjs';
 import { exportsRoot, studioHomeDir } from '../../src/locations.mjs';
 import { createExportJobStore } from './export-job-store.mjs';
 import { snapshotFilm } from './export-snapshot.mjs';
+import { normalizeVideoExportOptions } from './video-export-options.mjs';
 export { exportRuntimeSchema } from './export-snapshot.mjs';
 
 /** The exports folder: the one chosen in Settings, else the Desktop, where a file just made is found (src/locations.mjs). */
@@ -80,7 +81,7 @@ export { exportsRoot };
  * @typedef {'standard' | 'high' | 'master'} Quality
  * @typedef {{ frame?: FrameId, fill?: 'contain' | 'cover', burnSubtitles?: boolean }} Framing
  * @typedef {Framing & { kind: 'video', codec?: VideoCodec, shortEdge?: number, scale?: number,
- *   fps?: number, quality?: Quality, audio?: boolean, clip?: string, preset?: string, sidecar?: 'srt' | 'vtt', hardware?: boolean }} VideoAsk
+ *   fps?: number, quality?: Quality, audio?: boolean, clip?: string, preset?: string, sidecar?: 'srt' | 'vtt', hardware?: boolean, alpha?: boolean, samples?: number, shutter?: number }} VideoAsk
  * @typedef {Framing & { kind: 'gif', width?: number, fps?: number }} GifAsk
  * @typedef {{ kind: 'audio', format?: 'wav' | 'm4a' | 'mp3', mix?: boolean, stems?: boolean }} AudioAsk
  * @typedef {Framing & { kind: 'stills', format?: 'png' | 'jpg', shortEdge?: number, at?: number[] }} StillsAsk
@@ -258,6 +259,11 @@ const between = (/** @type {unknown} */ v, /** @type {number} */ lo, /** @type {
 
 /** Check what was asked: a kind Studio exports, each field what it takes. Throws an ExportError saying what is wrong. */
 function checked(/** @type {ExportAsk} */ ask) {
+  if (ask?.kind === 'video') {
+    const { kind, ...options } = ask;
+    try { return { kind, ...normalizeVideoExportOptions(options) }; }
+    catch (error) { throw new ExportError(error instanceof Error ? error.message : String(error)); }
+  }
   const kinds = ['video', 'gif', 'audio', 'stills', 'poster', 'subtitles', 'slides', 'nle', 'project'];
   if (!ask || typeof ask !== 'object' || !kinds.includes(ask.kind)) throw new ExportError(`export one of: ${kinds.join(', ')}`);
   if (ask.range !== undefined && !(Array.isArray(ask.range) && ask.range.length === 2 && isNum(ask.range[0]) && isNum(ask.range[1]) && ask.range[0] >= 0 && ask.range[1] > ask.range[0])) {
@@ -269,16 +275,6 @@ function checked(/** @type {ExportAsk} */ ask) {
   if ('shortEdge' in ask && !between(ask.shortEdge, 64, MAX_DIM)) throw new ExportError(`shortEdge: 64 to ${MAX_DIM} pixels`);
   if ('burnSubtitles' in ask && ask.burnSubtitles !== undefined && typeof ask.burnSubtitles !== 'boolean') throw new ExportError('burnSubtitles: true or false');
   switch (ask.kind) {
-    case 'video':
-      if (ask.codec !== undefined && !CODECS.includes(ask.codec)) throw new ExportError(`codec: ${CODECS.join(', ')}`);
-      if (!between(ask.fps, 1, 120)) throw new ExportError('fps: 1 to 120');
-      if (!between(ask.scale, 0.25, 4)) throw new ExportError('scale: 0.25 to 4');
-      if (ask.quality !== undefined && !['standard', 'high', 'master'].includes(ask.quality)) throw new ExportError('quality: standard, high or master');
-      if (ask.hardware !== undefined && typeof ask.hardware !== 'boolean') throw new ExportError('hardware: true or false');
-      if (ask.clip !== undefined && (typeof ask.clip !== 'string' || !ask.clip || ask.clip.length > 200)) throw new ExportError(`clip: a clip id of ${FILM_FILE}`);
-      if (ask.preset !== undefined && (typeof ask.preset !== 'string' || ask.preset.length > 60)) throw new ExportError('preset: a name, at most 60 characters');
-      if (ask.sidecar !== undefined && ask.sidecar !== 'srt' && ask.sidecar !== 'vtt') throw new ExportError('sidecar: srt or vtt');
-      break;
     case 'gif':
       if (!between(ask.width, 64, 1920)) throw new ExportError('width: 64 to 1920 pixels');
       if (!between(ask.fps, 1, 50)) throw new ExportError('fps: 1 to 50');
@@ -504,6 +500,7 @@ html,body{margin:0;width:${box.w}px;height:${box.h}px;overflow:hidden;background
 #subs{position:absolute;left:0;top:0;width:${box.w}px;height:${box.h}px}
 </style></head><body><div id="subs"></div><script type="module">
 import { filmSubtitleFrameHtml } from './film-subtitle.mjs';
+import { drawFrame } from '/__film/motion.mjs';
 const cues = ${json(cues)};
 const style = ${json({ ...style, on: true })};
 const size = { w: ${box.w}, h: ${box.h} };
@@ -531,7 +528,7 @@ window.film = {
   ready,
   async frame(t) {
     inner.filmHost?.time?.(t);
-    await inner.film.frame(t);
+    await drawFrame(inner.film, t, { document: inner.document, viewport: { width: inner.innerWidth, height: inner.innerHeight } });
     inner.filmHost?.settle?.(t);
     subs.innerHTML = filmSubtitleFrameHtml(cues, style, size, t * 1000);
     await document.fonts?.ready;
@@ -866,7 +863,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
   async function exportVideo(job, root, dir, signal) {
     const ask = /** @type {VideoAsk & { range?: [number, number] }} */ (job.ask);
     const codec = ask.codec ?? 'h264';
-    const alpha = ALPHA_CODECS.has(codec);
+    const alpha = ask.alpha ?? ALPHA_CODECS.has(codec);
     const clip = ask.clip ? await clipFilm(root, ask.clip) : null;
     const burn = clip ? null : await burned(root, ask, alpha);
     const scratch = codec === 'png' ? await exportScratch(root) : null;
@@ -895,7 +892,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
       const how = (chip) => {
         const { encoder, format } = encoding(codec, quality, size, fps ?? 30, have, chip);
         const container = /** @type {{ pix?: string }} */ (format).pix ?? (codec === 'h264' || codec === 'hevc' ? `${TO_709},format=yuv420p` : codec === 'vp9' ? 'format=yuva420p' : 'format=yuva444p10le');
-        return { encoder, opts: { fps, scale: place.scale, alpha, silent: ask.audio === false || codec === 'png', format: { ...format, pix: `${place.vf},${container}` }, ...(clip || burn ? { root } : {}) } };
+        return { encoder, opts: { fps, samples: ask.samples, shutter: ask.shutter, scale: place.scale, alpha, silent: ask.audio === false || codec === 'png', format: { ...format, pix: `${place.vf},${container}` }, ...(clip || burn ? { root } : {}) } };
       };
       let { encoder, opts } = how(hw);
       update(job, { encoder });

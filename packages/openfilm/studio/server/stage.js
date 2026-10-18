@@ -1545,7 +1545,7 @@
      * text with its selector and its words now; and its pictures, each <img> and each box painted with one image, with
      * the address drawn now. Null when the clip is not a page on the picture now.
      */
-    controls({ clip }) {
+    async controls({ clip }) {
       const c = clipById(clip);
       const doc = c?.kind === 'page' ? c.win?.document : null;
       if (!doc?.documentElement || !doc.body) return null;
@@ -1584,7 +1584,16 @@
         const { at, n } = locOf(el);
         images.push({ at, ...(n ? { n } : {}), label: el.id ? nameOf(el) : (img && el.alt) || '', kind: img ? 'img' : 'bg', src });
       }
-      return { vars, texts, images, page: c.win.location.href };
+      // 使用与预览、导出相同的声明读取器，不静默吞掉非法 Schema。
+      let motionManifest = null;
+      let motionError = null;
+      try {
+        if (doc.getElementById('film-motion')) {
+          const { readMotionManifest } = await import(new URL('__film/motion.mjs', location.href).href);
+          motionManifest = readMotionManifest(doc);
+        }
+      } catch (error) { motionError = String(error?.message ?? error); }
+      return { vars, texts, images, page: c.win.location.href, motionManifest, motionError };
     },
   };
 
@@ -1598,7 +1607,8 @@
       listenAll();
       /* the line being typed was drawn anew (an undo, the page rewritten): what was typed is kept, the box closes */
       if (editing && !editing.el.isConnected) finishText(true);
-      result = fn ? fn(args) ?? null : null;
+      // 声明读取可能加载 SDK；等结果完成后再跨窗口发送可克隆的 JSON。
+      result = fn ? (await fn(args)) ?? null : null;
     } catch (error) {
       post({ type: 'stage', seq, result: null, error: String(error?.message ?? error) });
       return;

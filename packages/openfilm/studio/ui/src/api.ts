@@ -2,6 +2,7 @@
  * Studio's API, as the editor calls it (studio/server/server.mjs). Same origin, so the launch key travels as the
  * cookie `/open` set; writes are refused from any other origin.
  */
+import type { MotionChange, MotionInstance, MotionManifest } from '@/lib/motion-editor';
 import type { ExportJob } from '@/lib/export-jobs';
 import { watchStudioVersion } from '@/lib/studio-version';
 
@@ -11,8 +12,13 @@ export interface StudioVersion { version: string; latest: string | null; newer: 
   /** the update Studio runs from the top bar (lib/web-update), or one that failed */
   update?: { status: 'updating' | 'failed'; version: string; error?: string } }
 
+/** 可编辑构件由工程真实声明和内置样片发现，保持源文件与依赖闭包。 */
+export type MotionComponent = { source: 'project' | 'builtin'; ref?: string; src: string; manifest: MotionManifest; sourceDigest: string };
+export type MotionCatalog = { rev: string; components: MotionComponent[]; problems: unknown[]; scope: 'project-and-builtin' };
+
 export type Project = { id: string; path: string; name: string; openedAt: number; missing: boolean; working?: boolean };
 export type Clip = { src: string; id: string; at?: number; time?: [number] | [number, number];
+  motion?: MotionInstance;
   box?: { x: number; y: number; w?: number; h?: number; r?: number }; volume?: number; speed?: number; overrides?: unknown[];
   /** a page that sets no size of its own: the px it is laid out at (the stage's without it) */
   size?: { w: number; h: number };
@@ -29,6 +35,8 @@ export type MediaFile = { path: string; kind: 'video' | 'image' | 'audio' | 'pag
 export type ProjectSettings = { fps?: number; trackNames?: { name: string; index: number; clips: string[] }[]; trackHeights?: { height: number; index: number; clips: string[] }[] };
 export type Listing = { files: MediaFile[]; folders: string[]; pages: { path: string; size: number; mtime: number }[] };
 export type Op =
+  | { op: 'motion'; clip: string; changes: MotionChange[] }
+  | { op: 'motion-locks'; clip: string; locked: string[] }
   | { op: 'set'; clip: string; field: string; value?: unknown }
   | { op: 'move'; clip: string; at: number; track?: number; newTrack?: number }
   | { op: 'insert'; clip?: Partial<Clip> & { src: string }; from?: string; at?: number; after?: string; track?: number | { insert: number }; newTrack?: number; link?: string | null }
@@ -111,6 +119,8 @@ export const api = {
   /** the person opened it here: the one `openfilm open` alone comes back to */
   opened: (id: string) => call<{ project: Project }>(`${p(id)}/opened`, { method: 'POST' }),
   edit: (id: string, base: string | null, ops: Op[]) => call<{ text: string; rev: string; value: Film; doc: Film; rebased: boolean }>(`${p(id)}/edit`, { method: 'POST', json: { base, ops } }),
+  motionCatalog: (id: string) => call<MotionCatalog>(`${p(id)}/motion/catalog`),
+  takeMotion: (id: string, base: string, component: string) => call<{ rev: string; clip: Clip; component: string }>(`${p(id)}/motion/take`, { method: 'POST', json: { base, component } }),
   files: (id: string) => call<Listing>(`${p(id)}/files`),
   /** the editor's settings of the project (`.film/settings.json`): its frame rate, its tracks' names */
   settings: (id: string) => call<{ settings: ProjectSettings }>(`${p(id)}/settings`).then((r) => r.settings),

@@ -20,7 +20,7 @@ import { createServer } from 'node:http';
 import { mkdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { EditError, clipOverrides, editProjectFilm, readProjectFilm } from './film.mjs';
+import { EditError, editProjectFilm, readProjectFilm } from './film.mjs';
 import { FileError, bringIn, collect, extractAudio, freezeFrame, importFile, inside, listFiles, makeFolder, moveCheck, moveFile, readable, relink, trashFile } from './files.mjs';
 import { ExportError, createExports, draftApps, exportCapabilities, exportsRoot, projectSizes } from './exports.mjs';
 import { MediaError, frame, loudness, poster, probe, waveform } from './derived.mjs';
@@ -55,6 +55,7 @@ import { transitionPageRoutes } from './transition-pages.mjs';
 import { createAsks, getRoute, subtitleTranscriber, subtitleTranslator } from './get.mjs';
 import { LOCATION_KEYS, locations, usableFolder } from '../../src/locations.mjs';
 import { PRODUCT, MANAGED_UPDATE_MESSAGE } from '../../src/product.mjs';
+import { catalogProjectMotion, inspectProjectMotion, installProjectMotionSdk, takeBuiltinMotion } from './motion-project.mjs';
 
 /** @typedef {import('./http.mjs').Req} Req @typedef {import('./http.mjs').Res} Res */
 
@@ -591,6 +592,29 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
       }
       throw new HttpError(404, 'no such history action');
     }
+    // 动效与自由场景共用原影片、鉴权、revision 和编辑队列。
+    if (rest === 'motion/catalog' && req.method === 'GET') return json(res, 200, await catalogProjectMotion(project.path));
+    if (rest === 'motion' && req.method === 'GET') return json(res, 200, await inspectProjectMotion(project.path, url.searchParams.get('clip') ?? undefined));
+    if (rest === 'motion/take' && req.method === 'POST') {
+      const body = await readJson(req);
+      if (!body || typeof body !== 'object' || Object.keys(body).some((key) => !['base', 'component'].includes(key))) throw new HttpError(400, '构件导入只接受 base 与 component。');
+      return json(res, 200, await takeBuiltinMotion(project.path, body.base, body.component));
+    }
+    if (rest === 'motion/sdk' && req.method === 'POST') {
+      const body = await readJson(req);
+      if (!body || typeof body !== 'object' || Object.keys(body).some((key) => key !== 'base')) throw new HttpError(400, 'SDK 安装只接受真实 base revision。');
+      return json(res, 200, await installProjectMotionSdk(project.path, body.base));
+    }
+    if (rest === 'motion' && req.method === 'PATCH') {
+      const body = await readJson(req);
+      if (!body || typeof body !== 'object' || Object.keys(body).some((key) => !['base', 'clip', 'changes'].includes(key)) || typeof body.base !== 'string' || !/^[a-f0-9]{16}$/.test(body.base) || typeof body.clip !== 'string' || !body.clip) throw new HttpError(400, '动效修改需要真实 base、clip 与 changes。');
+      try { return json(res, 200, await editProjectFilm(project.path, body.base, [{ op: 'motion', clip: body.clip, changes: body.changes }])); }
+      catch (error) {
+        if (!(error instanceof EditError)) throw error;
+        const now = await readProjectFilm(project.path);
+        throw new HttpError(error.kind === 'conflict' ? 409 : 422, error.message, { rev: now.rev, doc: now.doc });
+      }
+    }
     if (rest === 'edit' && req.method === 'POST') {
       const { base = null, ops } = /** @type {{ base?: string | null, ops?: import('./film.mjs').Op[] }} */ (await readJson(req));
       try {
@@ -722,9 +746,17 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
       /* a web page has no file to cut a frame from: it is drawn, as an export draws it (pageframes.mjs); a page clip's
          frame (`clip`, its id) with the person's changes in it, as the film shows them */
       const clipId = what === 'frame' ? url.searchParams.get('clip') : null;
-      const tweaks = clipId && isPage(at) ? await clipOverrides(project.path, clipId) : null;
+      let tweaks = null, motionContext = {};
+      if (clipId && isPage(at)) {
+        const film = await readProjectFilm(project.path);
+        const clip = film.value?.tracks.flatMap((track) => track.clips).find((item) => item.id === clipId && item.src === at);
+        if (!clip) throw new HttpError(404, '找不到此页面对应的影片片段。');
+        tweaks = Array.isArray(clip.overrides) ? clip.overrides : null;
+        const size = /** @type {{ w?: number, h?: number } | undefined} */ (clip.size);
+        motionContext = { motion: clip.motion, clipId, viewport: { width: size?.w ?? film.doc?.stage.w ?? 1920, height: size?.h ?? film.doc?.stage.h ?? 1080 } };
+      }
       const page = isPage(at) && (what === 'poster' || what === 'frame')
-        ? () => pageFrame(project.path, pages.folderUrl(project), at, what === 'poster' ? -1 : Number(url.searchParams.get('ms')), what === 'poster' ? 480 : Number(url.searchParams.get('w')), tweaks).catch((e) => {
+        ? () => pageFrame(project.path, pages.folderUrl(project), at, what === 'poster' ? -1 : Number(url.searchParams.get('ms')), what === 'poster' ? 480 : Number(url.searchParams.get('w')), tweaks, motionContext).catch((e) => {
           throw new HttpError(e instanceof PageFrameError ? 404 : 422, String(e?.message ?? e));
         })
         : null;
@@ -985,14 +1017,18 @@ async function savedCall(fn) {
  * A saved clip's picture, from the middle of what it shows: a page drawn with the changes made in it, a video's frame,
  * a still's own; a sound has none.
  * @param {string} root @param {string} base the project's folder as the pages are served (pageframes.mjs)
- * @param {{ src: string, time?: unknown, overrides?: unknown }} clip @param {number} durationMs
+ * @param {{ src: string, time?: unknown, overrides?: unknown, motion?: unknown, size?: unknown, id?: unknown }} clip @param {number} durationMs
  * @returns {Promise<Buffer | null>}
  */
 async function clipPoster(root, base, clip, durationMs) {
   const kind = clipKind(clip.src);
   const from = Array.isArray(clip.time) && typeof clip.time[0] === 'number' ? clip.time[0] * 1000 : 0;
   const ms = durationMs > 0 ? from + durationMs / 2 : -1;
-  if (kind === 'page') return pageFrame(root, base, clip.src, ms, 480, Array.isArray(clip.overrides) ? clip.overrides : null);
+  if (kind === 'page') {
+    const film = await readProjectFilm(root);
+    const size = /** @type {{ w?: number, h?: number } | undefined} */ (clip.size);
+    return pageFrame(root, base, clip.src, ms, 480, Array.isArray(clip.overrides) ? clip.overrides : null, { motion: /** @type {import('../../src/motion.mjs').MotionInstance | undefined} */ (clip.motion), clipId: typeof clip.id === 'string' ? clip.id : undefined, viewport: { width: size?.w ?? film.doc?.stage.w ?? 1920, height: size?.h ?? film.doc?.stage.h ?? 1080 } });
+  }
   if (kind === 'video') return frame(root, clip.src, Math.max(0, ms), 480);
   if (kind === 'still') return poster(root, clip.src);
   return null;

@@ -10,6 +10,7 @@ import * as React from 'react';
 import { HardDriveUpload, ImageIcon, RotateCcw } from 'lucide-react';
 
 import { useT } from '@/i18n';
+import type { MotionInstance } from '@/lib/motion-editor';
 import type { FilmOverride } from '@/lib/film';
 import {
   ROOT, changedImage, changedText, changedVar, fieldOf, isFontVar, labelOf, relativeTo, valueOf, withImage, withText, withVar,
@@ -25,6 +26,15 @@ type T = ReturnType<typeof useT>;
 
 /** What the section needs of the clip: its controls as the page has them, its overrides, and the picture. */
 export interface TemplateHost {
+  /** 实例参数来自当前 film.html，时间沿用场景源秒时钟。 */
+  motion?: () => MotionInstance | undefined;
+  motionKey?: string;
+  /** 实际显示的预览文档换代后通知读取者，避免读取尚未替换的旧页面。 */
+  onPageChanged?: (listener: () => void) => () => void;
+  motionTime?: (filmMs: number) => number;
+  motionSeek?: (sourceTime: number) => void;
+  motionDuration?: number;
+  commitMotion?: (next: MotionInstance) => Promise<string | null>;
   /** Null when the clip is not on the picture now (the page is read where it is drawn). */
   read: () => Promise<TemplateControls | null>;
   overrides: () => readonly FilmOverride[] | undefined;
@@ -57,19 +67,24 @@ export function TemplateSection({ host, commit }: {
   React.useEffect(() => {
     let live = true;
     let timer = 0;
+    let reading = 0;
     const read = () => {
+      const seq = ++reading;
       void host.read().catch(() => null).then((next) => {
-        if (!live) return;
+        if (!live || seq !== reading) return;
         setControls((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
         if (!next) timer = window.setTimeout(read, OFF_PICTURE_EVERY_MS);
       });
     };
     /* the picture shows a written change a moment after it is kept */
+    const stop = host.onPageChanged?.(() => { window.clearTimeout(timer); read(); });
     timer = window.setTimeout(read, 120);
-    return () => { live = false; window.clearTimeout(timer); };
+    return () => { live = false; stop?.(); window.clearTimeout(timer); };
   }, [host, kept]);
 
   if (controls === undefined) return null;
+  // 显式声明的场景使用 Schema 参数，避免再把画面中的临时文字当成模板输入。
+  if (controls?.motionManifest || controls?.motionError) return null;
   if (controls && !controls.vars.length && !controls.texts.length && !controls.images?.length) return null;
   const setVar = (name: string, value: string | null) => commit(withVar(overrides, name, value));
   const setText = (at: string, n: number | undefined, value: string | null) => commit(withText(overrides, at, n, value));

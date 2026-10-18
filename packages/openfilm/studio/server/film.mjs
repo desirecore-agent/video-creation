@@ -15,6 +15,10 @@ import { join, resolve } from 'node:path';
 import { FILM_FILE, filmHtml, readFilm, readFilmFile } from '../../src/film-doc.mjs';
 import { EditError, applyOps } from './ops.mjs';
 import { writeAtomic } from './atomic.mjs';
+import { motionValueAt, validateMotionChanges, motionAncestorsUnchanged } from './motion-edits.mjs';
+import { validateMotionInputs } from '../../src/motion.mjs';
+import { checkMotionLocks } from '../../src/motion-schema.mjs';
+import { readSceneMotion } from './motion-manifest.mjs';
 
 export { EditError };
 
@@ -43,6 +47,12 @@ const serial = async (key, task) => {
   finally { if (edits.get(key) === next) edits.delete(key); }
 };
 
+/** 项目辅助材料与影片写入共用同一进程内串行边界；回调中不能递归调用编辑入口。
+ * @template T @param {string} root @param {() => Promise<T>} task */
+export async function withProjectFilmEdit(root, task) {
+  return serial(await projectKey(root), task);
+}
+
 /** Rebase only fields whose old value can be proven unchanged. Structural edits use a fresh revision. */
 /** @param {FilmValue | null | undefined} before @param {FilmValue | null} current @param {Op[]} ops */
 function checkRebase(before, current, ops) {
@@ -55,7 +65,13 @@ function checkRebase(before, current, ops) {
     }
   };
   for (const op of ops) {
-    if (op.op === 'set') check(op.clip, [op.field]);
+    if (op.op === 'motion') {
+      try { validateMotionChanges(op.changes); } catch (error) { throw new EditError(error instanceof Error ? error.message : String(error), 'invalid'); }
+      const a = clip(before, op.clip), b = clip(current, op.clip);
+      if (!a || !b || !isDeepStrictEqual(a.src, b.src)) throw new EditError('动效片段或场景来源已变更，请重读后修改。', 'conflict');
+      for (const change of op.changes) if (!motionAncestorsUnchanged(a.motion, b.motion, change.path) || !isDeepStrictEqual(motionValueAt(a.motion, change.path), motionValueAt(b.motion, change.path))) throw new EditError(`动效字段 ${change.path.join('.')} 已变更，请重读后修改。`, 'conflict');
+    }
+    else if (op.op === 'set') check(op.clip, [op.field]);
     else if (op.op === 'fields') check(op.clip, Object.keys(op.fields ?? {}).filter((k) => k !== 'id'));
     else if (op.op === 'props') {
       for (const edit of op.edits ?? []) {
@@ -120,6 +136,41 @@ async function writeFilm(root, value, before = '') {
   return { text, rev: revOf(text) };
 }
 
+/** 参数与关键帧必须满足场景声明；记录源码摘要，写前检测同期场景变化。
+ * @param {string} root @param {FilmValue} value */
+async function checkedMotionSources(root, value) {
+  /** @type {Map<string, Awaited<ReturnType<typeof readSceneMotion>>>} */
+  const sources = new Map();
+  for (const clip of value.tracks.flatMap((track) => track.clips)) {
+    if (clip.motion === undefined) continue;
+    let scene = sources.get(clip.src);
+    if (!scene) {
+      try { scene = await readSceneMotion(root, clip.src); }
+      catch (error) { throw new EditError(`${clip.src}: ${error instanceof Error ? error.message : String(error)}`, 'invalid'); }
+      sources.set(clip.src, scene);
+    }
+    const problems = validateMotionInputs(scene.manifest, /** @type {Parameters<typeof validateMotionInputs>[1]} */ (clip.motion));
+    if (problems.length) throw new EditError(`${clip.id}: ${problems.join('\n')}`, 'invalid');
+  }
+  return sources;
+}
+/** @param {string} root @param {Map<string, Awaited<ReturnType<typeof readSceneMotion>>>} sources */
+async function checkMotionSourcesUnchanged(root, sources) {
+  for (const [src, before] of sources) {
+    let after;
+    try { after = await readSceneMotion(root, src); } catch { throw new EditError(`${src}: 场景在编辑期间发生变更，请重读后修改。`, 'conflict'); }
+    if (after.sourceDigest !== before.sourceDigest) throw new EditError(`${src}: 场景在编辑期间发生变更，请重读后修改。`, 'conflict');
+  }
+}
+/** @param {FilmValue | null} before @param {FilmValue} after */
+function checkFilmMotionLocks(before, after) {
+  for (const clip of before?.tracks?.flatMap((track) => track.clips) ?? []) {
+    const now = after.tracks.flatMap((track) => track.clips).find((item) => item.id === clip.id);
+    const problems = checkMotionLocks(clip.motion, now?.motion);
+    if (problems.length) throw new EditError(problems.join('\n'), 'conflict');
+  }
+}
+
 /** A whole-film write also cooperates with clip edits, and refuses a stale `before` text.
  * @param {string} root @param {FilmValue} value @param {string} [before] */
 export async function writeProjectFilm(root, value, before = '') {
@@ -127,6 +178,10 @@ export async function writeProjectFilm(root, value, before = '') {
   return serial(key, async () => {
     const current = await readProjectFilm(root);
     if (current.text !== before) throw new EditError('film.html changed before this write; reload before editing', 'conflict');
+    checkFilmMotionLocks(current.value, value);
+    const sources = await checkedMotionSources(root, value);
+    await checkMotionSourcesUnchanged(root, sources);
+    if ((await readProjectFilm(root)).rev !== current.rev) throw new EditError('film.html changed while preparing this write; reload before editing', 'conflict');
     const written = await writeFilm(root, value, before);
     remember(key, written.rev, value);
     return written;
@@ -140,9 +195,11 @@ export async function writeProjectFilm(root, value, before = '') {
  * @param {string} root @param {string | null} base @param {Op[]} ops
  */
 export async function editProjectFilm(root, base, ops) {
+  if (!Array.isArray(ops) || !ops.length || ops.length > 1000 || ops.some((op) => !op || typeof op !== 'object' || typeof op.op !== 'string')) throw new EditError('an edit needs 1 to 1000 operation objects', 'invalid');
   const key = await projectKey(root);
   return serial(key, async () => {
     const current = await readProjectFilm(root);
+    if (ops.some((op) => op.op === 'motion' || op.op === 'motion-locks') && (typeof base !== 'string' || !/^[a-f0-9]{16}$/.test(base))) throw new EditError('动效编辑必须携带 inspect 返回的真实 revision。', 'invalid');
     /* a film.html that does not read is the agent's to fix: Studio never writes over it */
     if (!current.value && current.text.trim()) throw new EditError(current.problems.join('\n'), 'invalid');
     if (base != null && base !== current.rev) {
@@ -153,6 +210,8 @@ export async function editProjectFilm(root, base, ops) {
     const value = applyOps(/** @type {FilmValue} */ (structuredClone(current.value ?? EMPTY_FILM)), ops);
     const { doc, problems } = readFilm(value);
     if (!doc) throw new EditError(problems.join('\n'), 'invalid');
+    const sources = await checkedMotionSources(root, value);
+    await checkMotionSourcesUnchanged(root, sources);
     /* Detect writes from an ordinary editor while this edit was being prepared. This is an optimistic check,
        not an OS-level CAS: all cooperating writers should call this revision-aware API. */
     if ((await readProjectFilm(root)).rev !== current.rev) throw new EditError('film.html changed while preparing this edit; reload before editing', 'conflict');

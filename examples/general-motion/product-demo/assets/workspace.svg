@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+<defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#6666ff"/><stop offset="1" stop-color="#48d4bd"/></linearGradient></defs>
+<rect width="1440" height="900" rx="32" fill="#f7f8fb"/><path d="M32 0h1376a32 32 0 0 1 32 32v48H0V32A32 32 0 0 1 32 0" fill="#fff"/>
+<circle cx="34" cy="40" r="7" fill="#ff8f93"/><circle cx="58" cy="40" r="7" fill="#ffd277"/><circle cx="82" cy="40" r="7" fill="#8bdbbb"/>
+<text x="126" y="48" fill="#252b45" font-family="sans-serif" font-size="24" font-weight="700">灵感工作台</text>
+<rect x="24" y="106" width="236" height="766" rx="18" fill="#fff"/><rect x="44" y="140" width="196" height="54" rx="14" fill="#edecff"/>
+<g font-family="sans-serif" font-size="22" fill="#6f768d"><text x="72" y="175" fill="#6054d7">全部项目</text><text x="72" y="249">素材收藏</text><text x="72" y="323">协作空间</text><text x="72" y="397">导出记录</text></g>
+<text x="300" y="160" font-family="sans-serif" font-size="32" font-weight="700" fill="#252b45">让灵感，在这里成形</text><text x="300" y="202" font-family="sans-serif" font-size="20" fill="#8b91a5">从一个想法，到一次漂亮的交付</text>
+<rect x="300" y="244" width="1098" height="320" rx="24" fill="#181d40"/><circle cx="1110" cy="395" r="120" fill="url(#g)"/><circle cx="1110" cy="395" r="72" fill="#181d40"/>
+<text x="344" y="326" font-family="sans-serif" font-size="20" fill="#babef9">本周精选</text><text x="344" y="390" font-family="sans-serif" font-size="42" font-weight="700" fill="#fff">把复杂，整理成清晰</text>
+<rect x="344" y="452" width="166" height="54" rx="27" fill="#8ee6ca"/><text x="376" y="487" font-family="sans-serif" font-size="22" fill="#173c37">打开项目 →</text>
+<g fill="#fff"><rect x="300" y="594" width="348" height="246" rx="22"/><rect x="674" y="594" width="348" height="246" rx="22"/><rect x="1048" y="594" width="348" height="246" rx="22"/></g>
+<g font-family="sans-serif"><text x="328" y="650" fill="#8b91a5" font-size="20">设计探索</text><text x="702" y="650" fill="#8b91a5" font-size="20">产品发布</text><text x="1076" y="650" fill="#8b91a5" font-size="20">教学内容</text><text x="328" y="714" fill="#252b45" font-size="30" font-weight="700">18 个想法</text><text x="702" y="714" fill="#252b45" font-size="30" font-weight="700">6 个场景</text><text x="1076" y="714" fill="#252b45" font-size="30" font-weight="700">3 次交付</text></g>
+<g fill="#edecff"><rect x="328" y="758" width="280" height="12" rx="6"/><rect x="702" y="758" width="280" height="12" rx="6"/><rect x="1076" y="758" width="280" height="12" rx="6"/></g><g fill="#8278eb"><rect x="328" y="758" width="192" height="12" rx="6"/><rect x="702" y="758" width="224" height="12" rx="6"/><rect x="1076" y="758" width="148" height="12" rx="6"/></g>
+</svg>

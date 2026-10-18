@@ -120,6 +120,8 @@ let uploadSeq = 0;
 
 export interface MediaPoolProps {
   projectId: string;
+  /** 复用当前素材空间的可选构件入口，折叠后不占用素材浏览区。 */
+  motionLibrary?: React.ReactNode;
   /** The project's media and pages; null while the first listing loads (the pane stays blank). */
   listing: MediaListing | null;
   sources: MediaSources;
@@ -194,6 +196,7 @@ export interface MediaPoolProps {
 
 export function MediaPool({
   projectId,
+  motionLibrary,
   listing: media,
   sources,
   usedSrcs = [],
@@ -915,6 +918,8 @@ export function MediaPool({
           </>
         )}
       </div>
+
+      {motionLibrary}
 
       {notice ? (
         <div className="mx-2.5 mb-2 flex shrink-0 items-start gap-2 rounded-md bg-[var(--bg-hover)] px-2 py-1.5 text-[12px] text-[var(--text-muted)]">

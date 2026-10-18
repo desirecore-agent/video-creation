@@ -1,8 +1,9 @@
+import { validateMotionInstance } from './motion-schema.mjs';
 /**
  * film.html: what it says. The one reading of a project's edit, shared by everything that plays it: Studio (its
  * preview and its export), and `look` / `render` (the timeline, timeline.mjs). A film that one of them accepts the
- * other accepts, and the same clip lands at the same seconds and the same place in both. Plain JavaScript with no
- * dependencies, so a browser page can import it as it is.
+ * other accepts, and the same clip lands at the same seconds and the same place in both.
+ * 动效校验复用 Ajv；浏览器由宿主提供同源自包含校验模块，Node 直接加载依赖。
  *
  * The file is HTML; what it says is a value (`{ stage, tracks: [{ clips }] }`), the one every reader and editor works
  * on. The file is read into that value and the value written back into the file, changing only what changed.
@@ -94,7 +95,7 @@ const pair = (v, ok) => Array.isArray(v) && v.length === 2 && ok(v[0]) && ok(v[1
 
 /** The fields each kind of clip takes, in the order they are written back. */
 const CLIP_FIELDS = {
-  page: ['src', 'id', 'at', 'time', 'box', 'size', 'class', 'style', 'overrides', 'attrs'],
+  page: ['src', 'id', 'at', 'time', 'box', 'size', 'class', 'style', 'motion', 'overrides', 'attrs'],
   video: ['src', 'id', 'at', 'time', 'box', 'volume', 'speed', 'class', 'style', 'overrides', 'attrs'],
   still: ['src', 'id', 'at', 'time', 'box', 'class', 'style', 'overrides', 'attrs'],
   sound: ['src', 'id', 'sound', 'at', 'time', 'volume', 'speed', 'overrides', 'attrs'],
@@ -207,6 +208,7 @@ function readClip(raw, where, problems) {
   if (raw.size !== undefined && !(isObject(raw.size) && Object.keys(raw.size).length === 2 && [raw.size.w, raw.size.h].every((v) => Number.isInteger(v) && v > 0 && v <= PAGE_SIZE_MAX))) {
     problems.push(`${at}size is the px a page is laid out at, whole numbers up to ${PAGE_SIZE_MAX}: { "w": 1920, "h": 1080 }.`);
   }
+  if (raw.motion !== undefined) problems.push(...validateMotionInstance(raw.motion).problems.map((p) => `${at}${p}`));
   if (raw.overrides !== undefined) {
     if (!Array.isArray(raw.overrides) || raw.overrides.length > 200) problems.push(`${at}overrides has to be a list (at most 200).`);
     else {
@@ -481,7 +483,7 @@ const TRACK_FLAGS = ['hidden', 'muted', 'locked'];
 const TIMED = /^(animation|transition)(-|$)/;
 const STILL_CSS = 'a film\'s CSS holds still — what moves is a web page of its own, a clip (its animation runs on the clip\'s time; in film.html it would run on the film\'s).';
 /** A clip's attributes, each with what it says. */
-const CLIP_ATTRIBUTES = new Set(['id', 'src', 'at', 'speed', 'volume', 'muted', 'size', 'class', 'style', 'overrides']);
+const CLIP_ATTRIBUTES = new Set(['id', 'src', 'at', 'speed', 'volume', 'muted', 'size', 'class', 'style', 'motion', 'overrides']);
 
 /** What one kind of clip does not take, and why. */
 const NO_SOUND = 'has no sound: a sound is a clip of its own, an <audio> (or a <video>\'s own sound)';
@@ -696,6 +698,10 @@ function clipOfTag(tag, where, problems) {
       else raw.size = { w: Number(m[1]), h: Number(m[2]) };
     }
     else if (name === 'muted') muted = true;
+    else if (name === 'motion') {
+      if (kind !== 'page') problems.push(`${where}: motion 只适用于页面片段。`);
+      else try { raw.motion = JSON.parse(value); } catch { problems.push(`${where}: motion 必须是有效 JSON。`); }
+    }
     else if (name === 'overrides') {
       try { raw.overrides = JSON.parse(value); }
       catch { problems.push(`${where}: overrides is Studio's list of the person's changes, as JSON — it does not read as JSON.`); }
@@ -898,6 +904,7 @@ export function clipTag(clip) {
     ...(clip.style ? [clip.style] : []),
   ];
   if (style.length) parts.push(`style="${escapeAttr(style.join('; '))}"`);
+  if (clip.motion) parts.push(`motion='${JSON.stringify(clip.motion).replace(/&/g, '&amp;').replace(/'/g, '&#39;')}'`);
   if (clip.overrides?.length) parts.push(`overrides='${JSON.stringify(clip.overrides).replace(/&/g, '&amp;').replace(/'/g, '&#39;')}'`);
   for (const [k, v] of Object.entries(clip.attrs ?? {})) parts.push(`${k}="${escapeAttr(v)}"`);
   return `<${tag} ${parts.join(' ')}>${tag === 'img' ? '' : `</${tag}>`}`;

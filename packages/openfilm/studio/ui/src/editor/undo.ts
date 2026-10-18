@@ -3,6 +3,7 @@
  * Worked out from the two films, not by remembering the files, so undoing puts back one clip without putting back
  * what the agent changed meanwhile.
  */
+import { motionChanges } from '../lib/motion-editor.ts';
 import type { Clip, Film, Op } from '../api';
 import { DEFAULT_STAGE } from '../../../../src/film-doc.mjs';
 
@@ -69,6 +70,16 @@ export function inverse(before: Film, after: Film, ops: Op[]): Op[] {
   const ids = new Set<string>();
   const undo: Op[] = [];
   for (const op of ops) {
+    // 动效按实际属性反向编辑，撤销不会覆盖智能体同期修改的其他参数或轨道。
+    if (op.op === 'motion') {
+      const beforeMotion = was.get(op.clip)?.row.motion ?? { version: 1 as const };
+      const afterMotion = now.get(op.clip)?.row.motion ?? { version: 1 as const };
+      const all = motionChanges(afterMotion, beforeMotion);
+      const changed = all.filter((change) => op.changes.some((asked) => asked.path.every((part, i) => change.path[i] === part) || change.path.every((part, i) => asked.path[i] === part)));
+      if (changed.length) undo.push({ op: 'motion', clip: op.clip, changes: changed });
+      continue;
+    }
+    if (op.op === 'motion-locks') { undo.push({ op: 'motion-locks', clip: op.clip, locked: was.get(op.clip)?.row.motion?.locked ?? [] }); continue; }
     if (op.op === 'track') { undo.push({ op: 'track', track: op.track, field: op.field, value: Boolean(before.tracks[op.track]?.[op.field]) }); continue; }
     if (op.op === 'reorder') { undo.push({ op: 'reorder', from: op.to, to: op.from }); continue; }
     if (op.op === 'stage') { const { w, h } = before.stage ?? DEFAULT_STAGE; undo.push({ op: 'stage', w, h }); continue; }

@@ -22,6 +22,10 @@
 
 `desirecore/` 为 DesireCore 安装描述、启动器与工具桥。集成保留文件作为作品事实源，并补充编辑冲突反馈、渲染状态持久化与输入快照等执行可靠性。具体契约以代码、Schema 和测试为准。
 
+通用动效新增 `src/motion.mjs`、`src/motion-schema.mjs`、同源离线浏览器 SDK、编辑器参数/关键帧、版本化修改工具与 `examples/general-motion/` 四个原创样片。继续使用同一 film.html、FilmPage、Saved 依赖闭包与导出队列。新增逻辑与样片按本仓库 MIT 许可提供；合成声音可由样片中的生成脚本重现。
+
+Overlay Studio（https://github.com/jeszhou/overlay-studio，参考提交 `e35e1aff9dae3b3addc21f68f3bcd51f95bdc1a8`）仅用于理解动效产品设计。该项目采用有限制的自定义许可，本仓库没有复制、修改或分发其代码、构件模板、技能、素材或运行包。新增实现的来源是现有 MIT 内核与独立编写的代码。
+
 ## 许可与分发
 
 原 `LICENSE` 的 MIT 版权与许可全文不变；`TRADEMARK.md` 和内核 `THIRD_PARTY_NOTICES.md` 继续保留。OpenFilm 名称仅用于来源声明和兼容契约；本产品不自称官方版本。MIT 允许使用、修改和分发，但仍须在分发中带上原版权和许可。

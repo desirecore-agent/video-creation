@@ -6,6 +6,7 @@
 - `packages/openfilm` 是复用内核，原目录名仅用于来源和兼容；不得恢复官方 npm 更新、桌面版下载或上游发布 workflow。
 - 应用品牌和发行策略从 product.json 读取；新增可配置字段提供 Draft-07 Schema 和 description。
 - `film.html` 是作品事实源。保留 `window.film`、`window.openfilmHost`、`.film/` 和兼容环境变量；更改前检查版本，保留人工 overrides 和锁定轨道。
+- 通用动效沿用同一时间线、FilmPage、Saved 与导出队列；`film-motion` 描述、实例参数/关键帧的字段以 SPEC.md 与 Draft-07 Schema 为准。允许智能体自主编写场景，不能要求所有影片使用预设或字幕。`pnpm build` 同时生成离线 SDK 与样片依赖；动效验证分为 `pnpm test:motion` 和实际浏览器的 `pnpm test:motion:runtime`，完整样片和平台证据归 MOTION-VERIFICATION.md。
 - 智能体执行、审批与聊天归 DesireCore。不要重建上游独立桌面聊天执行器，不要在应用中固定智能体的创作流程。
 - `apps/desktop` 和 `packages/shared` 留存作来源参考，排除默认构建、测试和运行。
 - `pnpm test` 是定向 smoke；验证修改运行相应单文件/单目录测试。不运行整个上游仓库的完整测试，不扩大为所有 package。保留的 test:upstream 仅供维护者明确选用，不作为本地惯例。

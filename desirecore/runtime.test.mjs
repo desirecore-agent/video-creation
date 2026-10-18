@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runtimeConfig, runtimeIdentity, managedDocumentNavigation } from './config.mjs';
 import { connectStudio } from './client.mjs';
 import { createHash } from 'node:crypto';
@@ -54,9 +56,11 @@ test('MCP初始化和工具目录无需运行应用且标准输出只有JSON-RPC
   await ended;
   const replies = text.trim().split('\n').map(JSON.parse);
   assert.equal(replies[0].result.protocolVersion, '2025-06-18');
+  assert.equal(replies[0].result.serverInfo.version, JSON.parse(readFileSync(new URL('../packages/openfilm/package.json', import.meta.url), 'utf8')).version);
   const patch = replies[1].result.tools.find((tool) => tool.name === 'video_patch');
   assert.deepEqual(patch.inputSchema.required, ['base', 'ops']);
-  assert.equal(replies[1].result.tools.length, 7);
+  assert.deepEqual(replies[1].result.tools.filter((tool) => tool.name.startsWith('video_motion_')).map((tool) => tool.name), ['video_motion_catalog', 'video_motion_inspect', 'video_motion_install', 'video_motion_take', 'video_motion_patch']);
+  assert.equal(replies[1].result.tools.length, 12);
 });
 
 test('导出回执等待失败明确结果未知，不自动重复提交', async () => {
@@ -78,4 +82,38 @@ test('等待失败/中断立即返回，不将中断当作成功；超时不取�
   const client = { jobs: async () => [{ id: 'a', status: 'interrupted' }] };
   assert.equal((await waitForJob(client, 'a')).status, 'interrupted');
   await assert.rejects(waitForJob({ jobs: async () => [{ id: 'a', status: 'running' }] }, 'a', { timeoutMs: 5, intervalMs: 2 }), /等待超时/);
+});
+
+
+test('目录链接正式入口实际执行并保留错误退出码，兼容preserve-symlinks-main', () => {
+  const root = mkdtempSync(join(tmpdir(), 'video-entry-link-'));
+  try {
+    const alias = join(root, 'app-link');
+    symlinkSync(fileURLToPath(new URL('..', import.meta.url)), alias, process.platform === 'win32' ? 'junction' : 'dir');
+    for (const flags of [[], ['--preserve-symlinks-main']]) {
+      const cli = spawnSync(process.execPath, [...flags, join(alias, 'desirecore', 'cli.mjs'), 'unknown-entry-command', '--home', join(root, 'unused-home')], { encoding: 'utf8', timeout: 15_000, env: { ...process.env, APP_DATA_DIR: join(root, 'unused-home') } });
+      assert.equal(cli.status, 1, cli.stderr);
+      assert.equal(cli.stdout, '');
+      assert.match(cli.stderr, /未知命令：unknown-entry-command/);
+      const release = spawnSync(process.execPath, [...flags, join(alias, 'desirecore', 'release.mjs'), '--unknown-entry-option'], { encoding: 'utf8', timeout: 15_000 });
+      assert.equal(release.status, 1, release.stderr);
+      assert.equal(release.stdout, '');
+      assert.match(release.stderr, /Unknown or incomplete argument: --unknown-entry-option/);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('stdin导入正式模块没有main输出、副作用或不存在argv路径异常', () => {
+  const root = mkdtempSync(join(tmpdir(), 'video-entry-import-'));
+  try {
+    const alias = join(root, 'app-link');
+    symlinkSync(fileURLToPath(new URL('..', import.meta.url)), alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const home = join(root, 'must-not-be-created');
+    const imports = ['cli.mjs', 'release.mjs', 'mcp.mjs', 'setup-runtime.mjs'].map((file) => `await import(${JSON.stringify(pathToFileURL(join(alias, 'desirecore', file)).href)});`).join('\n');
+    const child = spawnSync(process.execPath, ['--input-type=module', '-'], { input: imports, cwd: root, encoding: 'utf8', timeout: 15_000, env: { ...process.env, APP_DATA_DIR: home } });
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stdout, '');
+    assert.equal(child.stderr, '');
+    assert.equal(existsSync(home), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

@@ -4,6 +4,7 @@
 // Studio plays and exports by; how each looks is the file's own CSS. Track 0, the first <section>, is on top.
 import { clipFade, clipSpan, clipTag, declarations, fadeGain, filmHead, fittedFade, kindOf, parseFilm, pictureRect, readFilmFile, sourceAt } from './film-doc.mjs';
 import { override, restore } from './overrides.mjs';
+import { drawFrame, freezeMotionInstance } from './motion.mjs';
 
 /* the file as written (without what the host puts in it), read as every reader reads it */
 const own = new URL(location.href);
@@ -490,6 +491,7 @@ const sounds = [];
 function settle(c, row, track, ti) {
   const where = `clip "${row.id}" (${row.src})`;
   c.row = row;
+  c.motion = freezeMotionInstance(row.motion);
   c.ti = ti;
   c.track = ti;
   c.at = row.at ?? 0;
@@ -678,7 +680,7 @@ async function drawClip(c, t, live, playing, turn, coming, going) {
   const local = sourceAt(c.span, t - c.at, c.row, c.native);
   c.win.filmHost?.time?.(local);
   /* a page's error says which clip and which of its own seconds, not only the film's t */
-  try { await c.child.frame(local); }
+  try { await drawFrame(c.child, local, { document: c.win.document, motion: c.motion, viewport: { width: c.nw, height: c.nh }, filmTime: t, clipId: c.id }); }
   catch (e) { throw new Error(`clip "${c.id}" (${c.src}) at its ${Number(local.toFixed(3))}s: ${e?.message ?? e}`); }
   c.win.filmHost?.settle?.(local);
   if (!live) await mediaShown(c.win.document);
@@ -846,7 +848,7 @@ async function cue(c, row, track, t, fresh) {
     if (!c.child) return;
     const local = sourceAt(span, t - at, row, c.native);
     c.win.filmHost?.time?.(local);
-    await c.child.frame(local);
+    await drawFrame(c.child, local, { document: c.win.document, motion: freezeMotionInstance(row.motion), viewport: { width: c.nw, height: c.nh }, filmTime: t, clipId: c.id });
     c.win.filmHost?.settle?.(local);
     c.drawn = true;
     override(c, c.overrides);

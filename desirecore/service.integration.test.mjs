@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,6 +55,14 @@ test('真实受管服务隔离数据、签入、导演上下文与HTTP编辑共�
     const manual = await client.patch(original.rev, [{ op: 'set', clip: 'intro', field: 'overrides', value: [{ at: '#title', text: '人工修改' }] }]);
     await assert.rejects(client.patch(original.rev, [{ op: 'set', clip: 'intro', field: 'overrides', value: [] }]), (error) => error.status === 409);
     assert.equal((await client.inspect()).rev, manual.rev);
+    const alias = join(home, '应用目录链接');
+    symlinkSync(fileURLToPath(new URL('..', import.meta.url)), alias, process.platform === 'win32' ? 'junction' : 'dir');
+    for (const flags of [[], ['--preserve-symlinks-main']]) {
+      const printed = execFileSync(process.execPath, [...flags, join(alias, 'desirecore', 'cli.mjs'), 'inspect', project, '--home', home], { encoding: 'utf8', timeout: 15_000, env: { ...process.env, APP_DATA_DIR: home } });
+      const inspected = JSON.parse(printed);
+      assert.equal(inspected.rev, manual.rev);
+      assert.equal(inspected.doc.tracks[0].clips[0].id, 'intro');
+    }
   } finally {
     child.kill('SIGTERM');
     await exited;

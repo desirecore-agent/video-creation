@@ -9,7 +9,7 @@
 import * as React from 'react';
 import { BookmarkPlus, ClipboardCopy, ClipboardPaste, GalleryVerticalEnd, Layers, LibraryBig, MessageSquarePlus, Settings2, TriangleAlert } from 'lucide-react';
 import { applyOps } from '../../../server/ops.mjs';
-import { api, ApiError, PREFS_EVENT, projectEvents, type Clip, type Film, type Listing, type Op, type ProjectFilm, type ProjectSettings } from '@/api';
+import { api, ApiError, PREFS_EVENT, projectEvents, type Clip, type Film, type Listing, type MotionComponent, type Op, type ProjectFilm, type ProjectSettings } from '@/api';
 import { useT } from '@/i18n';
 import { useFilm, type Step } from '@/editor/use-film';
 import { Player } from '@/editor/player';
@@ -73,6 +73,7 @@ import type { LayerRow } from '@/lib/layers-tree';
 import { SourcePreview } from './SourcePreview';
 import { ResourceInspector } from './ResourceInspector';
 import { FilmInspector } from './FilmInspector';
+import { MotionLibrary } from './MotionLibrary';
 import { Timeline, timelineFitHeight, type TimelineCommands, type TimelineHistory } from './Timeline';
 import { useEditorTools } from './use-editor-tools';
 import { AudioMeters, METERS_W } from './AudioMeters';
@@ -98,6 +99,7 @@ import { FontScopeContext, type FontScope } from '@/lib/use-fonts';
 import { stageMenu, stageRecoveryMenu, type StageArrangeResult, type StageMenuContext } from './stage-menu';
 import type { StageEditFailure, StageTextEdit } from './FilmInspector';
 import { layerTarget, pageClipOf, recoverLayer } from '@/lib/stage-layers';
+import { motionChanges, type MotionInstance } from '@/lib/motion-editor';
 import type { TemplateControls } from '@/lib/template-controls';
 import type { TemplateHost } from './TemplateSection';
 import { SAVED, refreshSaved, savedActions, savedSources, useSavedListing } from '@/lib/saved';
@@ -1197,9 +1199,30 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     if (paths.length && paths.every(Boolean)) return savedActions.bring(paths, into);
     return savedActions.upload(files, into, onProgress, t('assets.uploadFailed'));
   }, [t]);
+  const insertMotionComponent = async (component: MotionComponent, _catalogRev: string): Promise<string | null> => {
+    // 先等已有编辑落盘，再取得最新版本；导入只复制依赖，不另建工程。
+    await film.settled();
+    const fresh = await api.motionCatalog(projectId);
+    const selected = fresh.components.find((item) => item.source === component.source && (item.source === 'builtin' ? item.ref === component.ref : item.src === component.src));
+    if (!selected) return t('motion.componentChanged');
+    let source: Partial<Clip> & { src: string };
+    if (selected.source === 'builtin') source = (await api.takeMotion(projectId, fresh.rev, selected.ref!)).clip;
+    else source = { src: selected.src, motion: { version: 1 } };
+    const id = `motion-${crypto.randomUUID()}`;
+    const at = snapToFrame(timeRef.current);
+    pause();
+    const failed = await edit([{ op: 'insert', clip: { ...source, id }, at: at / 1000, track: { insert: 0 } }], 'history.stepMotion', true);
+    if (failed) return failed;
+    setStageElement(null); setSelectedKeys([id]); setInspectorContent('selection'); setInspectorOpen(true);
+    seek(at);
+    refreshSaved();
+    return null;
+  };
+  const motionLibrary = <MotionLibrary projectId={projectId} filesTick={filesTick} onInsert={insertMotionComponent} />;
   const mediaPool = () => (mediaScope === 'saved' ? (
     <MediaPool
       key="saved"
+      motionLibrary={motionLibrary}
       projectId={SAVED}
       listing={savedListing}
       sources={savedSources}
@@ -1220,6 +1243,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
   ) : (
     <MediaPool
       key="project"
+      motionLibrary={motionLibrary}
       projectId={projectId}
       listing={listing}
       sources={mediaSources}
@@ -1602,7 +1626,23 @@ export function ProjectView({ projectId, onProject, onLeave }: {
   const templateOf = React.useCallback((block: TimelineBlock): TemplateHost | null => {
     const clip = block.clipId;
     if (!clip) return null;
+    const current = () => filmRef.current?.tracks.flatMap((track) => track.clips).find((row) => row.id === clip);
     return {
+      motion: () => current()?.motion,
+      motionKey: `${projectId}:${clip}`,
+      onPageChanged: (listener) => preview.current?.onStage?.((event) => { if (event.event === 'reset') listener(); }) ?? (() => {}),
+      motionTime: (filmMs) => Math.max(0, ((filmMs - block.startMs) * (block.speed ?? 1) + (block.inMs ?? 0)) / 1000),
+      motionSeek: (sourceTime) => seek(block.startMs + (sourceTime * 1000 - (block.inMs ?? 0)) / (block.speed ?? 1)),
+      motionDuration: Math.max(0.1, ((block.endMs - block.startMs) * (block.speed ?? 1) + (block.inMs ?? 0)) / 1000),
+      commitMotion: (next: MotionInstance) => {
+        const old = current()?.motion ?? { version: 1 as const };
+        const row = blocksRef.current.find((b) => b.clipId === clip);
+        if (!row?.loc || lockedEdits([{ loc: row.loc, prop: 'motion', value: next as unknown as Record<string, unknown> }], filmRef.current).length) return Promise.resolve(t('timeline.trackLocked'));
+        const changes = motionChanges(old, next);
+        const lockChanged = JSON.stringify(old.locked ?? []) !== JSON.stringify(next.locked ?? []);
+        const ops: Op[] = lockChanged ? [{ op: 'motion-locks', clip, locked: next.locked ?? [] }] : changes.length ? [{ op: 'motion', clip, changes }] : [];
+        return ops.length ? edit(ops, 'history.stepMotion', true) : Promise.resolve(null);
+      },
       read: () => askStage<TemplateControls>('controls', { clip }),
       overrides: () => {
         const at = parseFilmDocLoc(blocksRef.current.find((b) => b.clipId === clip)?.loc ?? '');
@@ -1615,7 +1655,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
       pictures: () => (listingRef.current?.files ?? []).filter((f) => /\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(f.path)).map((f) => ({ path: f.path, name: f.path.split('/').pop() ?? f.path })),
       pickPicture: () => pickReplacement('picture'),
     };
-  }, [askStage, pickReplacement]);
+  }, [askStage, pickReplacement, seek, edit, t, projectId, filesTick]);
   /* a clip's own CSS as film.html has it, and the look the player measured (the Inspector's Look section) */
   const clipLookOf = React.useCallback((clipLoc: string) => {
     const at = parseFilmDocLoc(clipLoc);
@@ -2856,6 +2896,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
                       clips={selectedBlocks}
                       mainTrack={mainTrack}
                       onEditClips={editClips}
+                      timeMs={timeMs}
                       width={inspectorShownWidth}
                       onClose={closeInspector}
                       onEditStyle={editStageStyle}

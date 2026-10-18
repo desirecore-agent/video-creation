@@ -66,3 +66,45 @@ node desirecore/cli.mjs setup-runtime --home <明确的应用数据目录>
 Studio 只通过原有 app 级鉴权的 `/api/desirecore/context` 返回这项接线；它不是平台通用查询接口。顶层页面经宿主确认获得有限 `window.desirecoreApp` 桥；声明的 `publishSelection`／`requestWork` 还需用户明确授予。应用可准备完整选区提案，最终提交由平台自己的控件接纳。影片页面不获得该桥。首版受管顶层签入针对 Electron，Web 隔离 iframe 的 cookie/bootstrap 和实际音视频兼容仍需独立验收。
 
 OpenFilm 的原许可证、商标政策和第三方声明保留在材料中。产品界面使用“视频创作”，智能体使用“视频导演”；引用上游名称用于准确来源与版权说明。外部浏览器、编解码器和媒体模型服务的许可与费用，按实际使用的组件另行处理。
+
+## 通用动效与自由场景工具合同
+
+影片仍以 `film.html` 为唯一时间线。动效页面可在 `script#film-motion[type="application/json"]` 声明构件、参数 Draft-07 Schema、默认值和结构化数据；片段的 `motion` 保存参数覆盖、属性关键帧、事件锚点和人工锁。`video_inspect`／`video_patch` 仍允许智能体自主编写、组合 HTML/CSS/SVG/Canvas/WebGL 场景；没有 manifest 的旧 `frame(t)` 页面继续工作，不要求任务使用构件或字幕。
+
+CLI 与 MCP 均绑定一个真实项目，使用启动服务已有鉴权、编辑串行与 revision：
+
+| CLI | MCP | 结果与边界 |
+| --- | --- | --- |
+| `motion-catalog <项目>` | `video_motion_catalog {}` | 读取项目与应用自带样片中真实 manifest；返回参数 Schema 和内置构件 `ref`，不下载模板。项目页面沿编辑器已有非隐藏目录、最多三级的发现范围。 |
+| `motion-inspect <项目> [片段ID]` | `video_motion_inspect {clip?}` | 返回 `{rev, clips:[{clip,src,motion,manifest,sourceDigest,problems}]}`，实际错误留在 problems，不以空对象掩盖坏声明。 |
+| `motion-install <项目> --base <rev>` | `video_motion_install {base}` | 将本应用固定自包含 SDK 复制到 `video-creation-motion/motion.mjs`；返回真实 SHA-256。模块内保留根 MIT 及实际依赖的完整 MIT／BSD 许可原文，单文件复制时也携带。无联网和任意 npm 安装，已存在不同字节则冲突并保留。页面通过相对 ES module import 引用。 |
+| `motion-take <项目> <ref> --base <rev>` | `video_motion_take {base,component}` | 从当前 catalog 的 builtin ref 沿既有 Saved 依赖闭包复制资源，返回 `{rev,clip,component,saved}`。只导入资源，影片没改则 revision 保持；随后以返回 revision 调用 `video_patch` 的 `insert` 自主选择位置与轨道。 |
+| `motion-patch <项目> <片段ID> --base <rev> --ops <文件>` | `video_motion_patch {base,clip,changes}` | 文件内容为 changes 数组；按参数路径、属性轨路径、事件 ID 定位，保留其他值和同期人工编辑。 |
+
+局部修改示例：
+
+```json
+[
+  {"path":["params","title"],"value":"新的标题"},
+  {"path":["tracks","params.opacity"],"value":{"path":"params.opacity","keyframes":[{"t":0,"value":0,"ease":"ease-out"},{"t":1,"value":1}]}},
+  {"path":["markers","beat-1"],"value":{"id":"beat-1","t":1,"name":"音乐强调"}},
+  {"path":["markers","old-beat"],"remove":true}
+]
+```
+
+`params`／`data` 可按对象字段嵌套修改，数组数据作为整体替换，避免位置移动后修改错误项。单条属性轨按 `path` 整体比较和替换，事件按 `id` 比较和替换；同一目标同期变更返回 HTTP 409／CLI 退出码 3，其他独立字段可以在已知基线上重放。所有参数和全部关键帧写入前都通过真实场景 Schema；非法领域值返回 HTTP 422，影片保持原字节。通用 `fields`、移除片段及整片重写也检查旧人工锁，不能通过便利入口绕过。
+
+锁属于编辑意图。用户明确要求调整锁时，沿既有 `patch` 提交独立操作 `{"op":"motion-locks","clip":"真实ID","locked":["params.title"]}`；`locked` 为保留的完整锁列表，`[]` 表示明确解锁全部。它只改锁，要求最新真实 revision，不在旧版本上自动重放。没有明确要求时，不为实现其他修改而先解除人工锁。
+
+HTTP 合同分别为 `GET /api/projects/:id/motion/catalog`、`GET /api/projects/:id/motion?clip=<ID>`、`POST .../motion/sdk {base}`、`POST .../motion/take {base,component}`、`PATCH .../motion {base,clip,changes}`。这些路径不向影片 iframe 暴露平台凭据，也不赋予新平台权限。
+
+## 输出参数与实际回执
+
+`render`／`video_render` 复用同一视频参数 Schema 和既有固定输入快照、持久导出队列、查询、取消与明确重试，不另建任务系统。支持 `codec`、`alpha`、`fps`、`quality`、`frame`／`fill`／`shortEdge` 或明确 `width`＋`height`、`range`、`clip`／`scale`、`samples`／`shutter`、音频、硬件编码与字幕旁文件。MCP 另有 `output` 输出目录；CLI 对应 `--output`。
+
+- `fps` 允许 1 到 120 的数字及 `24000/1001`、`30000/1001`、`60000/1001`。数字简写 23.976、29.97、59.94 规范为对应精确 NTSC 比值，同一数值用于求帧和编码。
+- H.264／HEVC 输出 MP4；VP9 输出 WebM；ProRes 422 HQ、ProRes 4444、HEVC alpha 输出 MOV；PNG 为帧序列 ZIP。`alpha:true` 只接受实际支持透明的 VP9、ProRes 4444、HEVC alpha 和 PNG。特定编码器是否安装仍由真实运行能力决定，失败保存在任务回执。
+- `width`／`height` 须一起提供、为 64 到 4096 的偶数，不能同时提供 `frame`／`shortEdge`／`clip`／`scale`。画幅宽高比为 1:4 到 4:1；`clip` 以原片段画幅和 `scale` 输出，`range` 使用片段本地秒。整片 `range` 使用工程秒。
+- `samples:1` 不做运动模糊；2 到 32 使用内核现有快门区间平均。透明输出先以 16 位预乘颜色进行平均，再还原直通颜色，避免移动或淡出的透明边缘出现黑边。`shutter` 是一帧的 0 到 1 比例，必须同时提供 `samples`。PNG 序列不含音频；不支持的字段或组合直接拒绝，不静默忽略。
+
+CLI 示例：`node desirecore/cli.mjs render <项目> --codec vp9 --alpha --fps 30000/1001 --width 1080 --height 1920 --range 0-3 --samples 8 --shutter 0.5 --no-audio --wait`。立即返回的是提交回执；以 `video_jobs` 或 CLI `jobs` 的实际 `status`、`outputs`、`error` 和输入快照为事实源。`done` 才表示完成，`failed`、`cancelled`、`interrupted` 都不是成功；`--wait` 对这些终态返回非零。MCP 工具消息出现 `isError` 或回执终态失败时，即使 stdio 进程退出 0，也不能宣称样片成功。超时结果未知时先查原记录，不自动重复提交。
