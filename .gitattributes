@@ -6,3 +6,6 @@
 *.mp3 binary
 *.mp4 binary
 *.woff2 binary
+
+# 保留第三方许可原始字节，使发布清单哈希跨 Git 检出保持一致
+desirecore/licenses/** -text
