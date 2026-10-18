@@ -1,0 +1,51 @@
+name: Runtime acceptance
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: video-creation-runtime-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  linux-runtime:
+    name: Linux runtime smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm build
+      - name: Prepare actual browser and media dependencies
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          pnpm --filter @desirecore-agent/video-creation exec playwright-core install-deps chromium
+          node desirecore/cli.mjs setup-runtime --home "$RUNNER_TEMP/video-creation-smoke/应用 数据"
+      - run: node --test desirecore/platform-smoke.test.mjs
+      - name: Exercise the local service, MCP and MP4 export
+        shell: bash
+        run: node desirecore/platform-smoke.mjs --workdir "$RUNNER_TEMP/video-creation-smoke" --evidence "$RUNNER_TEMP/video-creation-linux-evidence.json" --label github-linux-x64
+      - name: Keep bounded evidence in the job log and summary
+        if: always()
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, appendFileSync, existsSync } from 'node:fs';
+          import { join } from 'node:path';
+          const file = join(process.env.RUNNER_TEMP, 'video-creation-linux-evidence.json');
+          if (existsSync(file)) {
+            const evidence = readFileSync(file, 'utf8');
+            process.stdout.write(evidence);
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Real Linux runtime evidence\n\n\`\`\`json\n${evidence}\`\`\`\n`);
+          }
+          JS
+# Windows and macOS use the same harness against their real runtime. No Actions artifacts are uploaded.

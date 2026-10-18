@@ -38,7 +38,8 @@ export function createExportJobStore(dir) {
       const file = pathOf(job.id), temp = `${file}.${process.pid}.tmp`;
       try {
         writeFileSync(temp, `${JSON.stringify({ version: 1, job, source }, null, 2)}\n`, { mode: 0o600 });
-        const fd = openSync(temp, 'r');
+        // Windows 的 FlushFileBuffers 要求可写句柄，不能对只读句柄 fsync。
+        const fd = openSync(temp, 'r+');
         try { fsyncSync(fd); } finally { closeSync(fd); }
         renameSync(temp, file);
       } finally { rmSync(temp, { force: true }); }
