@@ -72,17 +72,30 @@ export function energyPeak(pcm, sampleRate, { from = 0.85, to = 1.15, binMs = 4 
   return best;
 }
 
-/** 从实际解码的视频像素寻找第一根绿色节拍条的显现帧，而非从场景声明推定编码结果。 */
-export function firstVisibleBeat(rgb, width, height, point) {
+/** 在真实 DOM 标记边界内寻找连续两帧的 2×2 绿色块，返回最初帧而非确认帧。 */
+export function firstVisibleBeat(rgb, width, height, rect) {
   const stride = width * height * 3;
-  assert.ok(Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0 && Buffer.isBuffer(rgb) && rgb.length % stride === 0, '视频 RGB 帧不完整');
-  assert.ok(point && Number.isFinite(point.x) && Number.isFinite(point.y), '缺少真实帧中的节拍条位置');
-  const x = Math.max(0, Math.min(width - 1, Math.floor(point.x))), y = Math.max(0, Math.min(height - 1, Math.floor(point.y)));
+  assert.ok(Number.isSafeInteger(width) && Number.isSafeInteger(height) && width > 0 && height > 0 && Number.isSafeInteger(stride) && Buffer.isBuffer(rgb) && rgb.length > 0 && rgb.length % stride === 0, '视频 RGB 帧不完整');
+  assert.ok(rect && ['x', 'y', 'width', 'height'].every((key) => Number.isFinite(rect[key])) && rect.x >= 0 && rect.y >= 0 && rect.width > 0 && rect.height > 0 && rect.x + rect.width <= width && rect.y + rect.height <= height, '缺少有效的真实 DOM 节拍条边界');
+  // 只检查完整落在 DOM 边界内的像素，不扩张至相邻图标或背景。
+  const left = Math.ceil(rect.x), top = Math.ceil(rect.y), right = Math.floor(rect.x + rect.width), bottom = Math.floor(rect.y + rect.height);
+  assert.ok(right - left >= 2 && bottom - top >= 2, '节拍条边界不足以容纳完整的 2×2 像素块');
+  const green = (start) => rgb[start + 1] - rgb[start] > 35 && rgb[start + 1] > 110;
+  const blockAt = (frame) => {
+    const base = frame * stride;
+    for (let y = top; y < bottom - 1; y++) for (let x = left; x < right - 1; x++) {
+      const offsets = [base + (y * width + x) * 3, base + (y * width + x + 1) * 3, base + ((y + 1) * width + x) * 3, base + ((y + 1) * width + x + 1) * 3];
+      if (offsets.every(green)) return { frame, point: { x, y }, pixel: [...rgb.subarray(offsets[0], offsets[0] + 3)], pixels: offsets.map((offset) => [...rgb.subarray(offset, offset + 3)]), block: { x, y, width: 2, height: 2 } };
+    }
+    return null;
+  };
+  let previous = null;
   for (let frame = 0; frame < rgb.length / stride; frame++) {
-    const start = frame * stride + (y * width + x) * 3;
-    if (rgb[start + 1] - rgb[start] > 35 && rgb[start + 1] > 110) return { frame, pixel: [...rgb.subarray(start, start + 3)], point: { x, y } };
+    const current = blockAt(frame);
+    if (previous && current) return { ...previous, rect: { ...rect }, confirmedByFrame: frame };
+    previous = current;
   }
-  throw new Error('真实视频里没有找到预期的绿色节拍条');
+  throw new Error('真实视频的标记边界内没有连续两帧显现的 2×2 绿色节拍块');
 }
 
 /** 在真实场景中采集文字、主区域和主体的矩形；SVG 字号换算为最终画面像素。 */
@@ -204,7 +217,7 @@ async function sampleFrame(browser, folder, time, evidenceFile) {
     page = await FilmPage.open(browser, site.url, 'film.html', { offline: true }); await page.seek(time);
     const png = await page.capture(); if (evidenceFile) await writeFile(evidenceFile, png);
     const scene = page.page.frames().find((frame) => /\/scene\.html(?:[?#]|$)/.test(frame.url())); assert.ok(scene, '场景 iframe 未加载');
-    const state = await scene.evaluate(() => { const marker = document.querySelector('#beat i:first-child')?.getBoundingClientRect(); return { title: document.getElementById('title')?.textContent, accent: document.body.style.getPropertyValue('--accent'), event: document.body.dataset.event, portrait: document.body.classList.contains('portrait'), captions: document.getElementById('captions') ? getComputedStyle(document.getElementById('captions')).display : null, value: document.getElementById('number')?.textContent, viewport: [innerWidth, innerHeight], beatPoint: marker ? { x: marker.x + marker.width / 2, y: marker.y + marker.height / 2 } : null }; });
+    const state = await scene.evaluate(() => { const marker = document.querySelector('#beat i:first-child')?.getBoundingClientRect(); return { title: document.getElementById('title')?.textContent, accent: document.body.style.getPropertyValue('--accent'), event: document.body.dataset.event, portrait: document.body.classList.contains('portrait'), captions: document.getElementById('captions') ? getComputedStyle(document.getElementById('captions')).display : null, value: document.getElementById('number')?.textContent, viewport: [innerWidth, innerHeight], beatPoint: marker ? { x: marker.x + marker.width / 2, y: marker.y + marker.height / 2 } : null, beatRect: marker ? { x: marker.x, y: marker.y, width: marker.width, height: marker.height } : null }; });
     assert.equal(page.problems.length, 0, JSON.stringify(page.problems));
     const layout = await scene.evaluate(collectSampleLayout);
     return { png, state, layout, width: page.meta.width, height: page.meta.height };
@@ -312,7 +325,7 @@ export async function runGeneralMotionSmoke({ workdir, evidencePath, sourceCommi
       const pcm = command('ffmpeg', ['-v', 'error', '-i', done.out, '-vn', '-ac', '1', '-ar', '24000', '-f', 'f32le', '-'], { encoding: null }); const peak = energyPeak(pcm, 24000);
       const prev = await sampleFrame(browser, join(projects, 'product-demo'), (Math.ceil(fps) - 1) / fps); const event = await sampleFrame(browser, join(projects, 'product-demo'), 1);
       assert.equal(prev.state.event, 'off'); assert.equal(event.state.event, 'on');
-      const rgb = command('ffmpeg', ['-v', 'error', '-i', done.out, '-an', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'], { encoding: null }); const visible = firstVisibleBeat(rgb, 320, 180, event.state.beatPoint); const visualTime = visible.frame / fps;
+      const rgb = command('ffmpeg', ['-v', 'error', '-i', done.out, '-an', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'], { encoding: null }); const visible = firstVisibleBeat(rgb, 320, 180, event.state.beatRect); const visualTime = visible.frame / fps;
       assert.ok(Math.abs(visualTime - 1) <= 1 / fps, `实际编码的视觉事件偏离标记：${visualTime}`); assert.ok(Math.abs(peak.time - visualTime) <= 1 / fps, `实际音画事件误差超过一帧：${peak.time - visualTime}`);
       exports.push({ jobId: done.id, inputRevision: done.inputSnapshot?.filmRevision, path: done.out, sha256: await hashFile(done.out), ...checked, measuredAudioPeak: peak, measuredVisibleBeat: visible, visualEventTime: visualTime, previousVisualFrame: (Math.ceil(fps) - 1) / fps, syncErrorSeconds: Math.abs(peak.time - visualTime) });
     }
