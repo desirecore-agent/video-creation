@@ -214,3 +214,73 @@ screen before it captures.
 ## 5. Versioning
 
 This is version 0.1. Attributes may be added (§1 says when); their absence must keep meaning what it means today.
+
+## 6. 通用动效输入（motion.version = 1）
+
+该扩展仍由 `film.html` 决定片段时间、位置及层序；没有第二条时间线。没有构件描述、没有 `motion` 属性的场景保持原有 `frame(t)` 调用。智能体可以使用构件、组合场景，或直接编写任意 HTML、CSS、SVG、Canvas、WebGL 场景，不要求字幕或预设。
+
+### 构件描述
+
+场景可声明唯一的 `<script id="film-motion" type="application/json">`。内容满足 `src/motion-schema.mjs` 导出的 `motionManifestSchema`（Draft-07），例如：
+
+```html
+<script id="film-motion" type="application/json">
+{
+  "version": 1,
+  "id": "example.chart",
+  "name": "数据图示",
+  "description": "按绝对时间显示可编辑标题与结构化数值。",
+  "paramsSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["title", "progress"],
+    "properties": {
+      "title": {"type": "string", "description": "画面标题"},
+      "progress": {"type": "number", "minimum": 0, "maximum": 1, "description": "揭示进度"}
+    }
+  },
+  "defaults": {"title": "季度趋势", "progress": 0},
+  "dataSchema": {"type": "array", "items": {"type": "number"}},
+  "data": [12, 24, 18]
+}
+</script>
+```
+
+`paramsSchema` 的根类型是 object，`defaults` 是满足它的完整默认值。`dataSchema` 和 `data` 可选；数据不是用分隔符编码的字符串。运行时使用 Ajv 的同一份完整 Draft-07 校验，不为浏览器实现另一套规则；只接受同步 Schema，不读取远程引用。关键字段应写 `description`。可用 `assets` 声明场景目录内的本地相对资源；这些显式依赖（包括含中文、空格的文件名）由既有依赖闭包纳入 Saved、历史和导出快照；不存在或越界的资源明确报错。HTML、CSS、ES module 的既有引用发现继续生效。
+
+### 工程实例
+
+页面片段正式支持 `motion` JSON 属性，仅适用于 iframe 页面。读取、写回和错误报告与其他影片字段共用 `film-doc.mjs`：
+
+```html
+<iframe id="chart" src="scenes/chart.html#t=0,6"
+  motion='{"version":1,"params":{"title":"人工标题"},"tracks":[{"path":"params.progress","keyframes":[{"t":0,"value":0,"ease":"ease-in-out"},{"t":2,"value":1}]}],"markers":[{"id":"beat-1","t":1,"name":"强调"}],"locked":["params.title"]}'></iframe>
+```
+
+- `params` 深合并构件默认值；数组整体替换。`data` 整体覆盖默认结构化数据。
+- `tracks` 中每轨由 `path` 和 `keyframes` 构成。路径如 `params.opacity`、`data.series.0.value`，必须已存在于合成输入；禁止原型路径。关键帧 `t` 为场景源秒，严格递增。区间外保持端点；时间不随播放历史累计。若目标 Schema 含 integer、enum、const 或 multipleOf 等离散约束，变化段必须显式指定 `ease: "step"`；含 patternProperties、dependencies、数组附加项或本地递归引用时同样检查；递归引用按 Schema 与剩余路径共同去重。父对象轨按内部约束保守处理。not、if、contains、anyOf、oneOf 与 uniqueItems 等条件、联合或非凸约束也保守要求变化段使用 step，不尝试求解条件分支或用有限采样证明全区间合法。编辑器通过共享 `motionTrackRequiresStep(manifest,path)` 判断，不维护第二套规则；最终求帧仍由 Ajv 严格校验。
+- `ease` 描述当前关键帧到下一帧的出段，支持 `linear`、`ease-in`、`ease-out`、`ease-in-out`、`step` 和 `[x1,y1,x2,y2]` 三次贝塞尔。横向控制点在 0..1。
+- 可选轨 `clock` 为 `{offset,speed,duration,loop}`：先 `(time-offset)*speed`，再截断或循环；`loop` 是 `repeat` 或 `pingpong`，循环必须指定正 `duration`。它只映射属性轨，不改变影片剪辑或音轨。
+- `markers` 是 `{id,t,name?,data?}` 的可选集合，可表达步骤、字幕、音乐节拍或其他锚点。每次求帧返回所有 `t <= 当前源秒` 的锚点，先按时间再按标识排序；场景不能依赖一次性回调的触发历史。
+- `locked` 是人工锁定的参数／数据路径。编辑操作必须比较编辑前后实例，保护值、覆盖路径的属性轨及锁本身；删除片段也不能绕过锁。明确的人工解锁是独立操作。锁不限制智能体选择其他创作方式。
+
+### 求帧顺序与 SDK
+
+SDK 是自包含的项目本地 ES module：`video-creation-motion/motion.mjs`，可被既有依赖闭包复制。宿主也在任意项目相对的 `__film/motion.mjs` 提供同一构建产物。直接打开场景的自主播放可调用 SDK `drawFrame(window.film,t,{document})`；宿主播放不自行启动循环。
+
+声明构件的场景按以下顺序求帧：读取并校验构件 → 默认值与实例输入合成 → 属性轨采样 → 校验最终输入 → 可选 `await film.prepare(context)` → `await film.frame(t,context)` → 原有 DOM 人工 overrides。参数因此可以在 Canvas、WebGL 或程序化绘图之前使用。
+
+```js
+window.film = {
+  duration: 6,
+  frame(t, context) {
+    const { params, data, viewport, events } = context;
+    // 使用当前完整输入绘制；不依赖上一帧。
+  }
+};
+```
+
+`context` 为 `{version:1,time,filmTime,clipId,params,data,viewport:{width,height},events}`。`time` 与第一个参数同为场景源秒；`filmTime` 是影片秒；单页时默认等于 `time`。`viewport` 是该场景实际布局尺寸：无自有固定尺寸时跟随片段 `size` 或影片 stage。预览、首帧、缩略图、单页、时间线和导出通过相同 `drawFrame` 入口。既有 DOM overrides 保持最后应用，不转成第二套输入。
+
+SDK 导出：`mix(a,b,p)`、`ease(p,kind)`、解析解 `spring(time,options)`、`stagger(index,{each,from})`、`mapTime(time,clock)`、`loopTime(time,duration,mode)`、`samplePath(points,p,{closed})`、`seeded(seed,index)`、`sampleTrack(track,time)`、`sampleMotion(manifest,motion,time)`、`readMotionManifest(document)`、`frameContext(time,options)`、`drawFrame(film,time,options)`。具体签名见 `src/motion.d.mts`。工程更新边界用 `freezeMotionInstance` 校验、复制并冻结实例；宿主仅复用不可变契约／实例的结构准入，不缓存时间、输入值或采样结果。`mix` 支持数字、相同维度向量、同键对象、十六进制颜色及同单位数值字符串；其他值按离散值保持。`samplePath` 是按弧长的二维折线，复杂曲线可由场景预采样为点；`mapTime` 可嵌套组合；弹簧不逐帧积分，种子不保留游标。

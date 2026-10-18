@@ -18,7 +18,7 @@
  * from the computer is (the same bytes there already are that file), a bundle's files go to `saved/<its place>/` there
  * once (taken again, what is there is used). Changing one never changes the other.
  */
-import { existsSync, createReadStream } from 'node:fs';
+import { constants, existsSync, createReadStream } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, posix } from 'node:path';
 import { FILM_FILE, clipKind, filmHtml } from '../../src/film-doc.mjs';
@@ -304,11 +304,15 @@ export async function takeSaved(root, path) {
   for (const entry of await readdir(from, { recursive: true, withFileTypes: true }).catch(() => [])) {
     if (!entry.isFile()) continue;
     const src = join(entry.parentPath ?? entry.path, entry.name);
-    const to = join(root, base, src.slice(from.length + 1));
+    const target = `${base}/${src.slice(from.length + 1)}`;
+    const to = inside(root, target);
     /* there already (taken before, maybe changed since in this project): it stays as it is */
     if ((await stat(to).catch(() => null))?.isFile()) continue;
     await mkdir(dirname(to), { recursive: true });
-    await copyFile(src, to);
+    // 目录和已有文件可能由人工调整；复制前重查边界，且绝不覆盖同期创建的文件。
+    inside(root, target);
+    try { await copyFile(src, to, constants.COPYFILE_EXCL); }
+    catch (error) { if (/** @type {NodeJS.ErrnoException} */ (error).code !== 'EEXIST') throw error; }
   }
   if (item.kind === 'page') return { path: `${base}/${item.path}` };
   if (item.kind === 'group') return { clips: item.clips.map((/** @type {any} */ c) => ({ track: c.track, at: c.at, clip: { ...c.clip, src: `${base}/${c.clip.src}` } })) };

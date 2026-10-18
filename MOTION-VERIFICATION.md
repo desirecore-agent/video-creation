@@ -1,0 +1,47 @@
+# 通用动效验收
+
+本记录仅对应本轮通用动效扩展，不覆盖或重标记首版应用的 `VERIFICATION.md`。
+
+## 原创样片
+
+- `examples/general-motion/product-demo`：24 秒，无字幕、无旁白。原创界面 SVG、镜头缩放、路径引导、卡片组合及确定性合成音乐。
+- `examples/general-motion/data-story`：24 秒，三组结构化演示数据、SVG 折线、增长数字、注释；数据不代表真实业务指标。
+- `examples/general-motion/optional-caption`：24 秒，流程图示、Canvas 粒子、文本事件和合成节奏；关闭字幕仍能独立表达，不要求 SRT 或 TTS。
+- `examples/general-motion/alpha-title`：6 秒透明标题层；仅以 WebM 或 ProRes 4444 MOV 验证 alpha，不宣称 MP4 透明。
+
+场景、SVG 和声音均由本仓库独立创作，按 MIT 提供；没有复制 Overlay Studio 的代码、模板或素材。`make-audio.mjs` 可复现 PCM 声音。只使用操作系统可用字体，不分发字体。
+
+## 可复现入口
+
+先构建应用，再准备可直接打开的样片：
+
+```sh
+pnpm build
+node examples/general-motion/prepare-samples.mjs
+node --test --test-concurrency=1 desirecore/general-motion-smoke.test.mjs
+node desirecore/general-motion-smoke.mjs --workdir <全新绝对目录> --evidence <绝对JSON路径>
+```
+
+`--showcase` 额外逐个生成三个 1080p30 完整 MP4 和一个 1080p30 ProRes 4444 MOV。所有真实导出默认单浏览器，样片和应用数据使用本轮独立目录；harness 从未访问平台身份或模型，也不上传素材。
+
+有界实跑覆盖：四个场景乱序和重复求帧的像素差异；参数首帧生效；真实 revision、结构化数据、人工 DOM override 与动效锁；横、竖、方实际 stage 布局；关闭可选字幕；Saved 复制后的独立资源闭包；真实 MCP 标准输入输出；12 与 30 fps 导出、实际解码声音的节拍偏差；WebM／ProRes alpha 解码和异色背景合成；精确取消、进程中断、重启后保留记录与显式重试。显式重试重新冻结当前输入，未声称断点续渲。
+
+## 运行结果
+
+2026-10-18 的 macOS ARM64 诊断已完成默认有界实跑：Darwin 25.6.0、Node 25.6.1、Chromium 149.0.7827.55、FFmpeg 6.0。源码基线为 `c0d83af1b6443f8aad13ade6adf510f8d6536e1d`，工作区包含本轮未提交修改，因此本次只作为实现诊断，不能替代最终准确提交的跨平台验收。
+
+原始记录 `.verification/motion-macos-diagnostic-f.json`，SHA-256 为 `e08f2b2c56962e21af2ee8c64d90edf11113eb9fe41d11fe612883d7245669af`，含运行源码及 SDK 哈希和全部任务回执。八组检查均通过；四场景乱序求帧的像素差异均为零。12／30 fps 的两秒真实 MP4 分别有 24／60 帧，首次视觉节拍都在 1 秒，解码 PCM 能量峰在 1.008 秒，相差 8 毫秒。VP9 WebM 和 ProRes 4444 MOV 解码 alpha 均覆盖 0 到 255，异色背景合成通过。取消、中断、重启后的记录保留及新 revision 的显式重试通过；最终服务经标准输入 EOF 调用正式生命周期关闭，退出码 0、无终止信号。
+
+上述 f 记录只通过当时的技术断言。后续人工目视发现小画幅的固定最小字号、图标和内边距导致遮挡；原来的画幅检查仅证明 viewport 尺寸，不能证明可读。因此 f 不作为样片视觉验收通过的依据。
+
+随后重排四个场景：页眉、主体、脚注及字幕使用各自的网格空间；横屏、竖屏和方形按比例安排卡片与流程节点；图表轴标签按实际 SVG 显示比例保持至少 8 像素，注释保留完整可读内容。`.verification/motion-layout-20261018-c` 保存 40 张真实 FilmPage 代表帧及矩形数据：三个 24 秒场景分别在 6／14／22 秒，透明层在 2 秒，覆盖 320×180、180×320、240×240 和 1920×1080。另有三画幅的人工标题／字距／数据修改检查。四场景的新布局乱序求帧像素差异仍为零。
+
+这些代表帧均经过人工目视。正式 harness 已增加文字边界、实际字号、文字互遮、主区域互遮、主体越界及覆盖无关主体的断言；SVG 字号按最终画面像素计算，正常的文字与自身容器包含不算遮挡。六项定向测试通过，新增回归拒绝小字、越界和遮挡的伪通过。该目录的 `manifest.json` 记录本次源码／SDK 哈希；仍属于未提交源码上的定向布局诊断，新布局的完整运行及跨平台结果须在最终冻结提交后补齐。
+
+诊断暴露并修复了知识片的浏览器历史栅格差异：节点在半透明／缩放期间改变合成层，Canvas 也会切换绘制后端。样片显式固定三个节点的合成层和小粒子层的 CPU 栅格后，`[14, 0.1, 23, 14]` 的差异降为零；没有放宽验收阈值。基线、单项对照、修复后的首帧／重复帧／差异图保存在 `.verification/motion-optional-diagnostic-20261018`。这是样片的明确绘制选择，未将任意自由场景强制改成 CPU 渲染。
+
+验收包装还修复了两个 harness 问题：override 字段改用正式合同要求的 `letterSpacing`；服务启动包装改为独立 `.mjs` 入口，避免 `--eval` 参数被渲染 worker 的 `fork` 继承。定向回归以真实子进程验证 EOF 正常关闭、HTTP 端口释放、退出码 0，并确认被 fork 的子进程没有额外 Node 执行参数。旧诊断失败记录保留，未重新标记成功。
+
+完整 1080p 样片、Windows、Linux 及最终提交上的验收仍待执行。最终记录需保留准确提交、工作区状态、SDK／运行文件哈希、OS／架构、Chromium／FFmpeg 版本、任务回执、编码、尺寸、帧数、输出哈希和清理结果。
+
+Linux 仅能按实际运行环境记录，容器无桌面或独立 GPU 时不得称作桌面实机验收。未覆盖付费媒体、三维角色动画、影视跟踪或签名安装包。

@@ -396,8 +396,8 @@ export function ExportCenter(props: ExportCenterProps) {
       case 'alpha': {
         const a = s.alpha;
         return alphaBlock
-          ? [{ kind: 'video', codec: alphaCodec, clip: alphaBlock.clipId, scale: a.scale, fps: a.fps, quality: 'high', audio: a.audio, label: alphaBlock.label }]
-          : [{ kind: 'video', codec: alphaCodec, frame: 'native', shortEdge: a.shortEdge, fps: a.fps, quality: 'high', audio: a.audio, label: codecName(alphaCodec), ...ranged }];
+          ? [{ kind: 'video', codec: alphaCodec, clip: alphaBlock.clipId, scale: a.scale, fps: a.fps, quality: 'high', audio: alphaCodec === 'png' ? false : a.audio, label: alphaBlock.label }]
+          : [{ kind: 'video', codec: alphaCodec, frame: 'native', shortEdge: a.shortEdge, fps: a.fps, quality: 'high', audio: alphaCodec === 'png' ? false : a.audio, label: codecName(alphaCodec), ...ranged }];
       }
       case 'gif':
         return [{ kind: 'gif', frame: resolveFrame(s.gif.frame), fill: s.gif.fill, width: s.gif.width, fps: s.gif.fps, label: 'GIF', ...burn(s.gif.burn), ...ranged }];

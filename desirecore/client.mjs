@@ -2,6 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
+import { normalizeVideoExportOptions } from '../packages/openfilm/studio/server/video-export-options.mjs';
 
 export async function connectStudio(config, request = fetch) {
   let run;
@@ -45,13 +46,18 @@ export async function projectClient(config, folder, options) {
   const base = `/api/projects/${encodeURIComponent(project.id)}`;
   return { ...studio, project, base,
     inspect: () => studio.call(base),
+    motionCatalog: () => studio.call(`${base}/motion/catalog`),
+    motionInspect: (clip) => studio.call(`${base}/motion${clip ? `?clip=${encodeURIComponent(clip)}` : ''}`),
+    motionInstall: (revision) => studio.call(`${base}/motion/sdk`, { base: revision }),
+    motionTake: (revision, component) => studio.call(`${base}/motion/take`, { base: revision, component }),
+    motionPatch: (revision, clip, changes) => studio.call(`${base}/motion`, { base: revision, clip, changes }, 'PATCH'),
     patch: (revision, ops) => {
       if (typeof revision !== 'string' || !/^[a-f0-9]{16}$/.test(revision)) throw new Error('patch 必须携带 inspect 返回的真实 revision。');
       if (!Array.isArray(ops) || !ops.length || ops.length > 1000) throw new Error('patch 需要 1 到 1000 项明确操作。');
       return studio.call(`${base}/edit`, { base: revision, ops });
     },
     jobs: async () => (await studio.call(`${base}/exports?statusOnly=1`)).exports,
-    render: async (ask = {}, folder) => (await studio.call(`${base}/exports`, { jobs: [{ kind: 'video', fps: config.renderFps, quality: config.renderQuality, ...ask }], ...(folder ? { folder: resolve(folder) } : {}) }, 'POST', { timeoutMs: config.prepareTimeoutMs ?? 15 * 60_000, unknownReceipt: true })).exports[0],
+    render: async (ask = {}, folder) => (await studio.call(`${base}/exports`, { jobs: [{ kind: 'video', ...normalizeVideoExportOptions({ fps: config.renderFps ?? 30, quality: config.renderQuality ?? 'standard', ...ask }) }], ...(folder ? { folder: resolve(folder) } : {}) }, 'POST', { timeoutMs: config.prepareTimeoutMs ?? 15 * 60_000, unknownReceipt: true })).exports[0],
     retry: (id) => studio.call(`${base}/exports/${encodeURIComponent(id)}/retry`, {}, 'POST', { timeoutMs: config.prepareTimeoutMs ?? 15 * 60_000, unknownReceipt: true }),
     cancel: (id) => studio.call(`${base}/exports/${encodeURIComponent(id)}`, undefined, 'DELETE'),
   };

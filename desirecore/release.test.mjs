@@ -26,6 +26,7 @@ function fixture() {
     'desirecore/cli.mjs', 'desirecore/application-lock.mjs', 'desirecore/client.mjs', 'desirecore/config.mjs', 'desirecore/config.schema.json',
     'desirecore/mcp.mjs', 'desirecore/setup-runtime.mjs', 'desirecore/ffmpeg-runtime.mjs',
     'desirecore/licenses/example/LICENSE', 'desirecore/licenses/manifest.json',
+    'examples/general-motion/product-demo/scene.html', 'examples/general-motion/product-demo/motion.mjs',
   ];
   for (const file of files) put(root, file);
   put(root, 'packages/openfilm/package.json', JSON.stringify({ name: '@desirecore-agent/video-creation', version: '0.2.0' }));
@@ -110,6 +111,7 @@ test('extracts full notices from actual dependency graphs and recognizes the fon
     put(root, `${path}/index.js`, 'private dependency code is not copied');
   };
   addPackage('ajv', { dependencies: { 'ajv-child': '1.0.0' } }); addPackage('ajv-child');
+  addPackage('ajv-formats', { dependencies: { ajv: '1.0.0' } });
   addPackage('@fontsource-variable/inter', { license: 'MIT', text: 'Original font copyright\nSIL OPEN FONT LICENSE Version 1.1\nFull OFL text' });
   addPackage('react'); addPackage('react-dom', { dependencies: { scheduler: '1.0.0' } }); addPackage('scheduler');
   addPackage('lucide-react'); addPackage('playwright-core', { license: 'Apache-2.0' });
@@ -117,7 +119,7 @@ test('extracts full notices from actual dependency graphs and recognizes the fon
   put(root, 'node_modules/playwright-core/ThirdPartyNotices.txt', 'Full bundled third-party notices');
   addPackage('vite', { dependencies: { 'not-shipped-compiler': '1.0.0' } }); addPackage('tailwindcss');
   const summary = writeDependencyLicenses({ root });
-  assert.equal(summary.packages, 10);
+  assert.equal(summary.packages, 11);
   const index = JSON.parse(readFileSync(join(root, 'desirecore/licenses/manifest.json'), 'utf8'));
   const font = index.packages.find(pkg => pkg.name === '@fontsource-variable/inter');
   assert.equal(font.license, 'OFL-1.1');

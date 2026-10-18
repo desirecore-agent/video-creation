@@ -8,7 +8,7 @@
   "properties": {
     "port": { "type": "integer", "minimum": 0, "maximum": 65534, "description": "编辑器监听端口；0 由系统分配。预览使用独立端口。" },
     "directorAgentId": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9_-]+$", "description": "已真实安装并关联的视频导演 ID；不能用仓库名猜测，不会因此获得工具权限。" },
-    "renderFps": { "type": "integer", "minimum": 1, "maximum": 60, "description": "领域命令默认导出帧率。" },
+    "renderFps": { "type": "number", "minimum": 1, "maximum": 120, "description": "领域命令默认导出帧率；23.976、29.97、59.94 统一按精确 NTSC 比值取帧。" },
     "renderQuality": { "enum": ["standard", "high", "master"], "description": "复用内核的视频编码质量档位。" },
     "prepareTimeoutMs": { "type": "integer", "minimum": 1000, "maximum": 3600000, "description": "等待大素材快照与提交回执的毫秒数，默认15分钟；超时不取消后台任务，应先查询 jobs，避免重复提交。" }
   }

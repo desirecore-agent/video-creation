@@ -1,6 +1,6 @@
 {
   "name": "@desirecore-agent/video-creation",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "视频创作：与视频导演协作的时间线编辑器、文件化影片格式和本地渲染内核。",
   "license": "MIT",
   "homepage": "https://github.com/desirecore-agent/video-creation",
@@ -34,7 +34,9 @@
     "./skills-cli": "./src/skills-cli.mjs",
     "./studio": "./studio/server/server.mjs",
     "./studio-ui/*": "./studio/ui/src/*",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./motion": "./src/motion.mjs",
+    "./motion-schema": "./src/motion-schema.mjs"
   },
   "files": [
     "README.md",
@@ -59,6 +61,8 @@
     "node": ">=22.2"
   },
   "dependencies": {
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1",
     "playwright-core": "1.61.1"
   },
   "scripts": {

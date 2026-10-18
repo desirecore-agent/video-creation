@@ -5,6 +5,8 @@
  * no clock, nothing but the film's value.
  */
 import { FILM_FILE, clipFade, clipIdFor, clipKind, clipSpeed, kindOf } from '../../src/film-doc.mjs';
+import { checkMotionLocks, validateMotionInstance } from '../../src/motion-schema.mjs';
+import { applyMotionChanges } from './motion-edits.mjs';
 
 /** @typedef {{ src: string, id: string, [field: string]: unknown }} Clip */
 /** @typedef {{ clips: Clip[], locked?: boolean, hidden?: boolean, muted?: boolean }} Track */
@@ -12,6 +14,8 @@ import { FILM_FILE, clipFade, clipIdFor, clipKind, clipSpeed, kindOf } from '../
 /**
  * @typedef {(
  *   | { op: 'set', clip: string, field: string, value?: unknown }
+ *   | { op: 'motion', clip: string, changes: { path: string[], value?: unknown, remove?: true }[] }
+ *   | { op: 'motion-locks', clip: string, locked: string[] }
  *   | { op: 'move', clip: string, at: number, track?: number, newTrack?: number }
  *   | { op: 'insert', clip?: Partial<Clip> & { src: string }, from?: string, at?: number, after?: string, track?: number | { insert: number }, newTrack?: number, link?: string | null }
  *   | { op: 'remove', clip: string }
@@ -73,9 +77,25 @@ const SETTABLE = new Set(['at', 'time', 'box', 'size', 'volume', 'speed', 'overr
 
 /** @param {FilmValue} value @param {Op[]} ops */
 export function applyOps(value, ops) {
-  if (!Array.isArray(ops) || !ops.length) throw new EditError('an edit needs at least one operation', 'invalid');
+  if (!Array.isArray(ops) || !ops.length || ops.length > 1000 || ops.some((op) => !op || typeof op !== 'object' || typeof op.op !== 'string')) throw new EditError('an edit needs 1 to 1000 operation objects', 'invalid');
   for (const op of ops) {
+    const beforeMotion = value.tracks.flatMap((track) => track.clips).filter((clip) => clip.motion).map((clip) => ({ id: clip.id, motion: structuredClone(clip.motion) }));
     switch (op.op) {
+      case 'motion': {
+        const { clip } = find(value, op.clip);
+        if (kindOf(clip) !== 'page') throw new EditError('动效参数仅用于页面片段。', 'invalid');
+        try { clip.motion = applyMotionChanges(clip.motion, op.changes); }
+        catch (error) { throw new EditError(error instanceof Error ? error.message : String(error), 'invalid'); }
+        break;
+      }
+      case 'motion-locks': {
+        const { clip } = find(value, op.clip);
+        const next = { ...(clip.motion ?? { version: 1 }), locked: op.locked };
+        const checked = validateMotionInstance(next);
+        if (!checked.value) throw new EditError(checked.problems.join('\n'), 'invalid');
+        clip.motion = next;
+        break;
+      }
       case 'set': {
         if (!SETTABLE.has(op.field)) throw new EditError(`Studio does not set "${op.field}" on a clip`, 'invalid');
         const { clip } = find(value, op.clip);
@@ -204,6 +224,13 @@ export function applyOps(value, ops) {
       }
       default:
         throw new EditError(`unknown operation ${/** @type {{ op?: string }} */ (op).op}`, 'invalid');
+    }
+    // 每个操作检查旧锁，防止整片段替换、移除或通用 fields 绕过人工锁定。
+    for (const prior of beforeMotion) {
+      if (op.op === 'motion-locks' && op.clip === prior.id) continue;
+      const after = value.tracks.flatMap((track) => track.clips).find((clip) => clip.id === prior.id)?.motion;
+      const problems = checkMotionLocks(prior.motion, after);
+      if (problems.length) throw new EditError(problems.join('\n'), 'conflict');
     }
   }
   /* after the whole edit, so every operation in it names tracks as the ones before it left them */

@@ -73,6 +73,19 @@ export function folderFiles(root, { inject = `<script>${HOST_FLAG}</script>`, ti
       res.writeHead(200, { ...extraHeaders, 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' }).end(TIMELINE);
       return true;
     }
+    if (path.endsWith('/__film/motion-schema.mjs')) {
+      // 共用一个浏览器模块实例，避免格式读取和时间线分别加载一份 Ajv。
+      res.writeHead(200, { ...extraHeaders, 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' }).end("export * from './motion.mjs';");
+      return true;
+    }
+    if (path.endsWith('/__film/motion.mjs')) {
+      // 构建后的 SDK 包含相同 Ajv 校验，浏览器无需解析 Node 包名。
+      try {
+        const sdk = readFileSync(fileURLToPath(new URL('../studio/ui/dist/motion.mjs', import.meta.url)), 'utf8');
+        res.writeHead(200, { ...extraHeaders, 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' }).end(sdk);
+      } catch { res.writeHead(503, extraHeaders).end('动效 SDK 尚未构建，请先运行 build:ui'); }
+      return true;
+    }
     if (path.endsWith('/__film/film-doc.mjs')) {
       res.writeHead(200, { ...extraHeaders, 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' }).end(FILM_DOC);
       return true;
@@ -378,11 +391,13 @@ export class FilmPage {
   }
 
   /** Draw t and wait until the picture is complete; a frame that never finishes fails after `timeoutMs`. */
-  async seek(t, { timeoutMs = 60_000 } = {}) {
-    const drawn = this.page.evaluate(async (t) => {
+  async seek(t, { timeoutMs = 60_000, motion, viewport, clipId, filmTime } = {}) {
+    if (viewport) await this.page.setViewportSize(viewport);
+    const drawn = this.page.evaluate(async ({ t, motion, viewport, clipId, filmTime }) => {
       if (!window.film || typeof window.film.frame !== 'function') throw new Error('window.film.frame is gone (the page reloaded or replaced it)');
       window.filmHost?.time?.(t);
-      await window.film.frame(t);
+      const { drawFrame, freezeMotionInstance } = await import(new URL('__film/motion.mjs', location.href).href);
+      await drawFrame(window.film, t, { document, motion: freezeMotionInstance(motion), viewport: viewport ?? { width: innerWidth, height: innerHeight }, clipId, filmTime });
       window.filmHost?.settle?.(t);
       // media the page moved but did not wait for: until the new frame is decoded, then until it is on screen
       // (`seeked` comes before the compositor shows the frame; captured then, it is still the previous one). One not
@@ -396,7 +411,7 @@ export class FilmPage {
         : null));
       // two frames: the first commits style and layout, the second lets layers (filters, 3D) finish rasterizing
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-    }, t).catch((e) => {
+    }, { t, motion, viewport, clipId, filmTime }).catch((e) => {
       const why = String(e.message).replace(/^page\.evaluate: /, '').split('\n')[0].replace(/^Error: /, '');
       /* files that failed, by their path in the folder, once, and not the ones the reason names already */
       const origin = new URL(this.page.url()).origin;

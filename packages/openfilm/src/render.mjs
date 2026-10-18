@@ -169,9 +169,17 @@ export function renderWorkers(requested, frames, threads = availableParallelism(
   return Math.min(count, budget, Math.max(1, frames));
 }
 
+/** 透明模糊先预乘再平均，最后还原直通颜色，避免透明边缘混入黑色。 */
+export function renderBlurFilter(samples, fps, alpha = false) {
+  if (samples <= 1) return '';
+  const average = `tmix=frames=${samples},select='eq(mod(n\\,${samples})\\,${samples - 1})',`;
+  const colors = alpha ? `format=gbrap16le,premultiply=planes=7:inplace=1,${average}unpremultiply=planes=7:inplace=1,` : average;
+  return `${colors}setpts=N/(${fps}*TB),`;
+}
+
 /** Frames [a, b) of one page into one file; sub-frames are averaged by ffmpeg (tmix) and every n-th kept. */
 async function encode({ film, a, b, file }, { fps, samples, shutter, duration, format, onFrame, still, signal }) {
-  const blur = samples > 1 ? `tmix=frames=${samples},select='eq(mod(n\\,${samples})\\,${samples - 1})',setpts=N/(${fps}*TB),` : '';
+  const blur = renderBlurFilter(samples, fps, still === 'png');
   const enc = ffmpeg(['-f', 'image2pipe', '-framerate', String(fps * samples), '-c:v', still === 'png' ? 'png' : 'mjpeg', '-i', '-',
     '-vf', blur + format.pix, '-r', String(fps), ...format.video, file], { input: true });
   /* a cancelled render stops its encoder at once: the frames ffmpeg still holds are thrown away, not encoded (a 4K

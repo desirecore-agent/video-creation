@@ -18,11 +18,16 @@
     "examples:sync": "node scripts/sync-examples.mjs",
     "dev:core": "pnpm --filter @desirecore-agent/video-creation dev",
     "test:reliability": "node --test --test-concurrency=1 packages/openfilm/studio/server/film.test.mjs packages/openfilm/studio/server/export-snapshot.test.mjs packages/openfilm/studio/server/exports-reliability.test.mjs",
-    "app:release": "node desirecore/release.mjs"
+    "app:release": "node desirecore/release.mjs",
+    "build:motion": "node scripts/build-motion-sdk.mjs",
+    "samples:motion": "node examples/general-motion/prepare-samples.mjs",
+    "test:motion": "node --test --test-concurrency=1 packages/openfilm/src/motion.test.mjs packages/openfilm/studio/server/motion-project.test.mjs packages/openfilm/studio/server/saved.test.mjs packages/openfilm/studio/server/closure.test.mjs desirecore/export-options.test.mjs desirecore/general-motion-smoke.test.mjs packages/openfilm/studio/ui/src/lib/motion-editor.test.ts packages/openfilm/studio/ui/src/editor/undo.test.ts",
+    "test:motion:runtime": "node --test --test-concurrency=1 packages/openfilm/src/motion-host.test.mjs packages/openfilm/studio/server/motion-pageframes.test.mjs desirecore/motion.integration.test.mjs packages/openfilm/src/render-alpha.test.mjs packages/openfilm/studio/server/motion-stage.test.mjs"
   },
   "devDependencies": {
     "@changesets/changelog-github": "0.5.2",
-    "@changesets/cli": "2.31.1"
+    "@changesets/cli": "2.31.1",
+    "esbuild": "0.28.2"
   },
   "dependencies": {
     "ajv": "8.17.1"

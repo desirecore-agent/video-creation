@@ -60,8 +60,15 @@
          be composited); a page on its own draws its frame. A frame that does not come within a moment is let go: one
          stuck page or video must not stop the picture. */
       const watch = editor()?.watch;
+      // 自由单页与影片内片段使用同一求帧协议；旧 frame(t) 由 SDK 保持兼容。
+      const singlePage = async () => {
+        const { drawFrame } = await import(new URL('__film/motion.mjs', location.href).href);
+        window.filmHost?.time?.(t);
+        await drawFrame(f, t, { document, viewport: { width: innerWidth, height: innerHeight } });
+        window.filmHost?.settle?.(t);
+      };
       let timer;
-      await Promise.race([watch ? watch(t) : f.frame(t), new Promise((done) => { timer = setTimeout(done, behind ? BEHIND_WAIT_MS : FRAME_WAIT_MS); })]);
+      await Promise.race([watch ? watch(t) : singlePage(), new Promise((done) => { timer = setTimeout(done, behind ? BEHIND_WAIT_MS : FRAME_WAIT_MS); })]);
       clearTimeout(timer);
       post({ type: 'seeked', t, seq });
     } catch (e) { fail(e); }

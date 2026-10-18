@@ -8,3 +8,13 @@ Studio's editor (`studio/ui/dist`) bundles:
 - **Lucide** icons (`lucide-react`): ISC License, © Lucide Contributors.
 
 The CLI depends on **playwright-core** (Apache License 2.0), which downloads a headless Chromium on first use.
+
+Motion manifests and instances are validated by **Ajv 8.17.1** and
+**ajv-formats 3.0.1** (MIT). The offline motion SDK bundles these validators and
+their runtime dependencies. Full license texts for the actual installed runtime
+and bundled dependencies are retained under `desirecore/licenses/`; its
+`manifest.json` lists versions, sources and notice hashes.
+
+The general-motion SDK and `examples/general-motion/` are original additions
+under this repository's MIT license. Overlay Studio was a design reference;
+none of its restricted code, templates, skills or assets are distributed here.

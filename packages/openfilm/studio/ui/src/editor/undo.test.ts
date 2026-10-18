@@ -98,3 +98,22 @@ test('undoing a delete the agent already put back: the clip is not put back twic
   /* the agent writes the film back as it was, then the person presses ⌘Z */
   assert.deepEqual(apply(structuredClone(f), undo), f);
 });
+
+test('动效撤销只恢复本次字段，保留智能体同期改动的其他参数、轨和数据', () => {
+  const f = film([{ src: 'scene.html', id: 'scene', motion: { version: 1, params: { title: '原标题', opacity: 1 }, data: [{ value: 2 }], tracks: [{ path: 'params.opacity', keyframes: [{ t: 0, value: 0 }, { t: 1, value: 1 }] }] } }]);
+  const ops: Op[] = [{ op: 'motion', clip: 'scene', changes: [{ path: ['params', 'title'], value: '人工标题' }] }];
+  const after = apply(f, ops);
+  const undo = inverse(f, after, ops);
+  assert.deepEqual(undo, [{ op: 'motion', clip: 'scene', changes: [{ path: ['params', 'title'], value: '原标题' }] }]);
+  const agent = apply(after, [{ op: 'motion', clip: 'scene', changes: [{ path: ['params', 'opacity'], value: 0.5 }, { path: ['data'], value: [{ value: 20 }] }] }]);
+  const restored = apply(agent, undo);
+  assert.equal(restored.tracks[0]!.clips[0]!.motion?.params?.title, '原标题');
+  assert.equal(restored.tracks[0]!.clips[0]!.motion?.params?.opacity, 0.5);
+  assert.deepEqual(restored.tracks[0]!.clips[0]!.motion?.data, [{ value: 20 }]);
+});
+
+test('动效轨和标记按稳定标识撤销，显式锁操作独立可撤销', () => {
+  const f = film([{ src: 'scene.html', id: 'scene', motion: { version: 1, params: { opacity: 1 }, locked: [], markers: [{ id: 'intro', t: 1, name: '原标记' }], tracks: [{ path: 'params.opacity', keyframes: [{ t: 0, value: 1 }] }] } }]);
+  roundTrip(f, [{ op: 'motion', clip: 'scene', changes: [{ path: ['tracks', 'params.opacity'], value: { path: 'params.opacity', keyframes: [{ t: 0, value: 0 }, { t: 2, value: 1 }] } }, { path: ['markers', 'intro'], value: { id: 'intro', t: 2, name: '新标记' } }] }]);
+  roundTrip(f, [{ op: 'motion-locks', clip: 'scene', locked: ['params.opacity'] }]);
+});

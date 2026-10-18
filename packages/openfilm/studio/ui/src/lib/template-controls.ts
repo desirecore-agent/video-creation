@@ -10,11 +10,15 @@
  * Pure: no React, no DOM, so `node --test` runs it (src/template-controls.test.mjs).
  */
 
+import type { MotionManifest } from './motion-editor.ts';
 import type { FilmOverride } from './film.ts';
 import { nextOverrides, overrideOf } from './film-overrides.ts';
 
 /** What the page said: its custom properties and its words, each as it is now. */
 export interface TemplateControls {
+  /** 显式动效声明；非法声明单独显示错误，不假装成普通模板。 */
+  motionManifest?: MotionManifest | null;
+  motionError?: string | null;
   vars: Array<{ name: string; value: string }>;
   texts: Array<{ at: string; n?: number; label: string; value: string }>;
   /** Its pictures: an <img>, or a box painted with one image (`bg`); `src` is the address it draws now. */

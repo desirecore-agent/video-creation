@@ -577,7 +577,7 @@ test('burned-in subtitles: drawn over the frame, bars included; a subtitle file 
   assert.deepEqual(video.outputs.map((f) => f.slice(exportsRoot().length + 1)), ['Burn 360p 0-1s.mp4', 'Burn 360p 0-1s.vtt']);
   assert.match(readFileSync(video.outputs[1], 'utf8'), /^WEBVTT\n\n00:00:00\.000 --> 00:00:00\.800\n<v Ann>Hello there\n\n00:00:00\.800 --> 00:00:01\.000\nAnd welcome\n$/);
   assert.equal(frameCount(video.out), 5);
-  assert.deepEqual(readdirSync(join(root, '.film', 'cache', 'export')), [], 'the page drawing them is gone');
+  assert.deepEqual(existsSync(join(root, '.film', 'cache', 'export')) ? readdirSync(join(root, '.film', 'cache', 'export')) : [], [], 'the page drawing them is gone');
 });
 
 test('a zip of many files, readable', async () => {
