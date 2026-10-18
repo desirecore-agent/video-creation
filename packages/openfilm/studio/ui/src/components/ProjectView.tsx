@@ -7,7 +7,7 @@
  * are written one at a time (see editor/use-film.ts); the agent's writes come in through the folder's events.
  */
 import * as React from 'react';
-import { BookmarkPlus, ClipboardCopy, ClipboardPaste, GalleryVerticalEnd, Layers, LibraryBig, MessageSquarePlus, MonitorDown, Settings2, TriangleAlert } from 'lucide-react';
+import { BookmarkPlus, ClipboardCopy, ClipboardPaste, GalleryVerticalEnd, Layers, LibraryBig, MessageSquarePlus, Settings2, TriangleAlert } from 'lucide-react';
 import { applyOps } from '../../../server/ops.mjs';
 import { api, ApiError, PREFS_EVENT, projectEvents, type Clip, type Film, type Listing, type Op, type ProjectFilm, type ProjectSettings } from '@/api';
 import { useT } from '@/i18n';
@@ -49,7 +49,6 @@ import { factsOfProbe, mediaListingOf, resourceKindOf, srcHitsAsset, warmProject
 import { BrandLoadingScreen } from './BrandLoadingScreen';
 import { BrandLogo } from './BrandLogo';
 import { SettingsModal, type SettingsSection } from './settings/SettingsModal';
-import { DesktopDialog } from './DesktopDialog';
 import type { ContextMenuEntry } from './ContextMenu';
 import { studioHost, useHostPanel, type CommunityItem, type HostPanel, type StageBox, type StudioCommand, type StudioRef } from '../lib/host';
 import { clipRef, fileRef, layerRef, markRange, momentRef, rangeRef, regionRef, stillUrl, subtitleRef, trackRef, type ClipFrameSource, type FilmRange } from '@/lib/studio-refs';
@@ -90,6 +89,7 @@ import { LiveTime, type PlaybackClock } from './LiveTime';
 import { Toast, useToast } from './Toast';
 import { SpendAsks } from './SpendAsks';
 import { ExportCenter } from './export/ExportCenter';
+import { DirectorControl } from './DirectorControl';
 import { PasteAttrsDialog } from './PasteAttrsDialog';
 import { ExportTray, type ExportTrayHandle } from './export/ExportTray';
 import { FilmStageSelect, type FilmStageControl, type LayerGeometry, type StageClipEdit, type StagePick } from './FilmStageSelect';
@@ -2447,7 +2447,6 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     setSubtitleProblem(null);
     void subs.transcribe().then((r) => { if (!r.ok) setSubtitleProblem({ text: r.error ?? '', connect: !!r.needsTranscriber }); });
   }, [subs, subtitleProblem]);
-  const [desktopOpen, setDesktopOpen] = React.useState(false);
   const headerOpsRef = React.useRef<HTMLDivElement>(null);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [historyAnchor, setHistoryAnchor] = React.useState<{ x: number; y: number } | null>(null);
@@ -2561,13 +2560,6 @@ export function ProjectView({ projectId, onProject, onLeave }: {
               </Tooltip>}
               <UpdateButton />
               <WebUpdateButton />
-              {!studioHost && <Tooltip label={t('desktop.title')} side="bottom">
-                <button type="button" aria-haspopup="dialog" onClick={() => setDesktopOpen(true)}
-                  className={`flex h-[26px] shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-[var(--text-dim)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text)] ${desktopOpen ? 'bg-[var(--bg-hover)] text-[var(--text)]' : ''}`}>
-                  <MonitorDown size={14} />
-                  {t('nav.desktop')}
-                </button>
-              </Tooltip>}
             </div>
             {inTabs ? (
               <TabStrip onRename={startRename} onNew={() => setProjectsOpen(true)} editor={renaming ? (
@@ -2592,6 +2584,8 @@ export function ProjectView({ projectId, onProject, onLeave }: {
               ) : undefined} />
             ) : <div className="min-w-0 flex-1" />}
             <div ref={headerOpsRef} className="pointer-events-auto flex min-w-0 items-center justify-end gap-1">
+              <DirectorControl className={`${TOP_BTN} xl:w-auto xl:px-2`} context={() => ({ projectId, projectPath: loaded.project.path, filmRevision: film.rev ?? loaded.rev,
+                time: Math.round(timeRef.current) / 1000, refs: selectedRefs(), range: markedRange ? { start: markedRange.startMs / 1000, end: markedRange.endMs / 1000 } : null, stage: stageRef.current })} />
               <ProjectLayoutMenu className={TOP_BTN}
                 /* an app that keeps the media in its own panel opens it there, from its own button: not a pane of Studio's */
                 assets={hostAssets ? null : assetsPaneOpen} onAssets={setAssetsPaneOpen}
@@ -2996,7 +2990,6 @@ export function ProjectView({ projectId, onProject, onLeave }: {
           {mediaPool()}
         </div>
       ) : null}
-      <DesktopDialog open={desktopOpen} onClose={() => setDesktopOpen(false)} />
       <ExportCenter
         open={exportOpen}
         onClose={() => { setExportOpen(false); setExportClipId(null); }}

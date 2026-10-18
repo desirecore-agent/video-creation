@@ -8,6 +8,7 @@
  * shown as `<html lang>`, which an app embedding Studio reads to match it.
  */
 import React from 'react';
+import { PRODUCT } from '../lib/product';
 import { en } from './en.ts';
 import { es } from './es.ts';
 import { ja } from './ja.ts';
@@ -25,7 +26,7 @@ export const LANGUAGES = [
 export type Language = (typeof LANGUAGES)[number]['code'];
 export type LanguageChoice = Language | 'system';
 
-const KEY = 'openfilm.language';
+const KEY = `${PRODUCT.id}.language`;
 
 function node(table: unknown, path: string): unknown {
   let cur = table;
@@ -84,7 +85,7 @@ function current(): Language {
 /** The path in `language`'s table, else in English's, else the path itself. */
 export function lookup(path: string, language: Language = current()): string {
   const words = LANGUAGES.find((l) => l.code === language)?.words;
-  return (words && language !== 'en' ? find(words, path) : null) ?? find(en, path) ?? path;
+  return ((words && language !== 'en' ? find(words, path) : null) ?? find(en, path) ?? path).replaceAll('{productName}', PRODUCT.displayName);
 }
 
 const listeners = new Set<() => void>();
@@ -92,7 +93,7 @@ let shown: Language = current();
 
 function apply() {
   shown = current();
-  if (typeof document !== 'undefined') document.documentElement.lang = shown;
+  if (typeof document !== 'undefined') { document.documentElement.lang = shown; document.title = PRODUCT.displayName; }
   for (const listener of listeners) listener();
 }
 if (typeof window !== 'undefined') {

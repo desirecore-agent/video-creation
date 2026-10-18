@@ -1,38 +1,17 @@
-# openfilm
+# 视频创作内核
 
-The open source AI video agent: films as web pages, the manual that teaches your coding agent to make them, the
-`openfilm` command, and Studio, the editor to change anything in them.
+这是「视频创作」应用直接复用的 OpenFilm 内核，保留上游源码路径以便维护。包名为 `@desirecore-agent/video-creation`，兼容 CLI 名为 `video-creation`，不发布或更新上游 npm 包。
 
-Ask Codex, Claude Code or any coding agent to make a film. It writes the film as web pages (`film.html` cuts them
-together with footage, pictures and sound), and Studio, a local editor in your browser (Chrome or Edge: films are drawn with Chromium), shows it taking shape. Then
-change anything you like, by hand or by asking.
+应用安装、开发与运行见仓库根目录的 [README.zh-CN.md](../../README.zh-CN.md)，来源与许可见 [UPSTREAM.md](../../UPSTREAM.md)。正式入口为根目录的 `node desirecore/cli.mjs`。
 
-## Install
-
-Requires Node 22.2+ and ffmpeg, on macOS, Windows or Linux; the first run downloads a headless Chromium.
+直接调用兼容 CLI：
 
 ```sh
-npx skills add openfilm/openfilm
+node packages/openfilm/bin/openfilm.mjs --help
+node packages/openfilm/bin/openfilm.mjs get
+node packages/openfilm/bin/openfilm.mjs skills
 ```
 
-Then ask your agent for a film. If your agent has no skills, tell it: "Run `npx -y openfilm@latest` and follow the
-manual it prints."
+`film.html`、`window.film`、`.film/` 与 `window.openfilmHost` 保留格式兼容。[MANUAL.md](MANUAL.md) 和 [SPEC.md](SPEC.md) 保留原格式说明；CLI 打印手册时会替换为本应用名称和命令。不要从原始手册执行 `npx openfilm` 或安装上游桌面版来运行本改版。
 
-## Commands
-
-```sh
-openfilm                          # the manual: all an agent needs to know
-openfilm open   [folder | url]    # show a film in Studio (a GitHub address fetches it first)
-openfilm look   [what] [t | a-b]  # check the film, a page or a media file
-openfilm render [a-b]             # the MP4; --4k, --blur, --alpha
-openfilm get    [what]            # voice-over, music, sound effects, transcripts, images, video, from your services
-openfilm capture <url> <file.png> # a picture of a live web page, to show a product as it is
-```
-
-`MANUAL.md` (in this package) is what `openfilm` tells your agent, and `SPEC.md` is the film format, for anyone
-building a player, renderer or editor. Settings, how it works and the source:
-[github.com/openfilm/openfilm](https://github.com/openfilm/openfilm).
-
-## License
-
-[MIT](LICENSE). The OpenFilm name and logo are trademarks: see [TRADEMARK.md](TRADEMARK.md).
+保留 [MIT 许可](../../LICENSE)、[商标政策](TRADEMARK.md)与[第三方声明](THIRD_PARTY_NOTICES.md)。

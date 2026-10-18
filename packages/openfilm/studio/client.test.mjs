@@ -21,7 +21,7 @@ test('the CLI starts one Studio in the background, reuses it, and it cleans up w
   const said = [];
   const first = await ensureStudio((line) => said.push(line));
   try {
-    assert.deepEqual(said, ['Starting OpenFilm Studio…']);
+    assert.deepEqual(said, ['Starting 视频创作…']);
     const again = await ensureStudio((line) => said.push(line));
     assert.equal(again.pid, first.pid, 'the running one is reused');
     assert.equal(said.length, 1);
@@ -50,7 +50,7 @@ test('an older Studio is replaced, and one whose run.json was lost is still foun
   /* an older Studio on the usual port: it says its version, and stops when asked */
   const quits = [];
   const old = createHttpServer((req, res) => {
-    if (req.url === '/api/health') return res.end(JSON.stringify({ product: 'openfilm-studio', pid: 1, version: '0.0.1' }));
+    if (req.url === '/api/health') return res.end(JSON.stringify({ product: 'video-creation-studio', pid: 1, version: '0.0.1' }));
     if (req.url === '/api/quit') { quits.push(req.headers['x-studio-key']); res.end('{}'); old.close(); old.closeAllConnections(); return; }
     res.statusCode = 404; res.end();
   });
@@ -61,7 +61,7 @@ test('an older Studio is replaced, and one whose run.json was lost is still foun
   const studio = await ensureStudio((line) => said.push(line));
   try {
     assert.deepEqual(quits, ['old'], 'the older one was asked to stop');
-    assert.match(said[0], /^Updating OpenFilm Studio to /);
+    assert.match(said[0], /^Updating 视频创作 to /);
     assert.equal(studio.origin, `http://127.0.0.1:${port}`, 'the new one takes its port: pages open on it reconnect');
     assert.equal(studio.key, readFileSync(join(home, 'key'), 'utf8'), 'with the machine\'s key');
     rmSync(join(home, 'run.json'));
@@ -112,7 +112,7 @@ test('`openfilm open` never makes the current folder a project unasked, nor a co
   }
 });
 
-test('a newer openfilm on npm is told from what was learnt (no network when not asked), never an older one', async () => {
+test('managed updates ignore cached upstream npm versions', async () => {
   const { newerOpenfilm } = await import('./client.mjs');
   const home = mkdtempSync(join(tmpdir(), 'of-update-'));
   const was = process.env.OPENFILM_HOME, wasOff = process.env.OPENFILM_NO_UPDATE_CHECK;
@@ -121,7 +121,7 @@ test('a newer openfilm on npm is told from what was learnt (no network when not 
   delete process.env.OPENFILM_NO_UPDATE_CHECK;
   try {
     writeFileSync(join(home, 'update.json'), JSON.stringify({ checkedAt: Date.now(), latest: '99.0.0' }));
-    assert.equal(await newerOpenfilm({ network: false }), '99.0.0');
+    assert.equal(await newerOpenfilm({ network: false }), null);
     writeFileSync(join(home, 'update.json'), JSON.stringify({ checkedAt: Date.now(), latest: '0.0.1' }));
     assert.equal(await newerOpenfilm({ network: false }), null);
   } finally {
@@ -130,8 +130,8 @@ test('a newer openfilm on npm is told from what was learnt (no network when not 
   }
 });
 
-test('`openfilm update` in a source checkout says git pull updates it, and touches nothing', async () => {
+test('the compatibility update command says DesireCore manages updates, and touches nothing', async () => {
   const said = await updateOpenfilm();
   assert.equal(said.ok, true);
-  assert.match(said.lines[0], /source checkout: git pull updates it/);
+  assert.match(said.lines[0], /managed by DesireCore/);
 });

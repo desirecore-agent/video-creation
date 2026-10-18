@@ -52,7 +52,7 @@ import { execFile, fork, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { constants as fsConstants, existsSync, readFileSync, statSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FilmPage, launch } from '../../src/host.mjs';
@@ -66,7 +66,10 @@ import { filmSubtitleCuesInRange, filmSubtitleShown, filmSubtitleSrt, filmSubtit
 import { zipFiles } from './zip.mjs';
 import { inProject } from './files.mjs';
 import { PROJECT_PARTS, TOOL_DIR } from './projects.mjs';
-import { exportsRoot } from '../../src/locations.mjs';
+import { exportsRoot, studioHomeDir } from '../../src/locations.mjs';
+import { createExportJobStore } from './export-job-store.mjs';
+import { snapshotFilm } from './export-snapshot.mjs';
+export { exportRuntimeSchema } from './export-snapshot.mjs';
 
 /** The exports folder: the one chosen in Settings, else the Desktop, where a file just made is found (src/locations.mjs). */
 export { exportsRoot };
@@ -93,10 +96,11 @@ export { exportsRoot };
  * @typedef {import('./film-subtitle.mjs').FilmSubtitleStyle} SubtitleStyle
  * @typedef {'preparing' | 'audio' | 'rendering' | 'encoding' | 'copying' | 'finishing'} ExportPhase
  * @typedef {{ id: string, project: string, name: string, label: string, kind: ExportSpec['kind'], ask: ExportAsk,
- *   status: 'waiting' | 'running' | 'done' | 'failed' | 'cancelled', progress: number, phase: ExportPhase | null,
+ *   status: 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted', progress: number, phase: ExportPhase | null,
  *   framesDone: number, framesTotal: number, rate: number, etaMs: number | null, encoder: string | null,
  *   out?: string, outputs: string[], bytes: number | null, alpha: { any: boolean } | null, error?: string, cancelling?: boolean,
- *   at: number, startedAt: number | null, finishedAt: number | null }} ExportJob
+ *   at: number, startedAt: number | null, finishedAt: number | null, retryOf?: string, temporaryOutputs?: string[],
+ *   inputSnapshot?: { filmRevision: string, bytes: number, files: number, manifest: string, limitations: string[] } }} ExportJob
  */
 
 export class ExportError extends Error {
@@ -412,6 +416,14 @@ async function stageOf(root) {
   }
   const probe = await open(root);
   try { return { w: probe.film.meta.width, h: probe.film.meta.height }; } finally { await probe.close(); }
+}
+
+/** Temporary export media lives under this attempt's input directory, so crash recovery knows its owner.
+ * @param {string} root */
+async function exportScratch(root) {
+  const dir = join(root, TOOL_DIR, 'cache', 'export');
+  await mkdir(dir, { recursive: true });
+  return mkdtemp(join(dir, 'scratch-'));
 }
 
 /** The project's film.html, read. @param {string} root */
@@ -731,16 +743,78 @@ async function rasterize(browser, file, w, h, out) {
  * `captions(root)`: a film's subtitle cues and the person's style for them (captions.mjs by default).
  * `drafts(app)`: 剪映's or CapCut's drafts folder, where its draft goes (null: the exports folder); this computer's by default.
  * @param {{ onChange?: (job: ExportJob) => void, captions?: (root: string) => Promise<{ cues: Cue[], style: SubtitleStyle }>,
- *   drafts?: (app: 'jianying' | 'capcut') => string | null }} [options]
+ *   drafts?: (app: 'jianying' | 'capcut') => string | null, stateDir?: string, snapshotMaxFiles?: number, snapshotMaxBytes?: number }} [options]
  */
-export function createExports({ onChange = () => {}, captions = subtitlesForExport, drafts = defaultDrafts } = {}) {
+export function createExports({ onChange = () => {}, captions = subtitlesForExport, drafts = defaultDrafts,
+  stateDir = join(studioHomeDir(), 'export-jobs'), snapshotMaxFiles = 10000, snapshotMaxBytes = 20 * 2 ** 30 } = {}) {
+  if (!isAbsolute(stateDir)) throw new ExportError('stateDir must be an absolute application-home path');
+  if (!Number.isInteger(snapshotMaxFiles) || snapshotMaxFiles < 1 || snapshotMaxFiles > 100000
+    || !Number.isSafeInteger(snapshotMaxBytes) || snapshotMaxBytes < 1) throw new ExportError('invalid snapshot limits');
+  const store = createExportJobStore(stateDir);
+  const receipts = store.load();
   /** @type {ExportJob[]} */
-  const jobs = [];
+  const jobs = receipts.map((record) => record.job);
+  const sources = new Map(receipts.map((record) => [record.job.id, record.source]));
+  /* A lost process has no running renderer to resume. Retrying is explicit and takes a fresh source snapshot. */
+  for (const job of jobs) {
+    if (job.status === 'running' || job.status === 'waiting') {
+      Object.assign(job, { status: 'interrupted', phase: null, etaMs: null, cancelling: false,
+        error: 'Studio stopped before this export finished. Retry starts a new export from the current saved project.', finishedAt: Date.now() });
+      store.save(job, /** @type {{ root: string, folder: string }} */ (sources.get(job.id)));
+    }
+    for (const staging of job.temporaryOutputs ?? []) {
+      if (basename(staging).startsWith('.') && staging.endsWith(`.partial-${job.id}`)) rm(staging, { recursive: true, force: true }).catch(() => {});
+    }
+    /* Only job-owned inputs are removed. Exported outputs are never deleted during recovery. */
+    rm(join(stateDir, job.id, 'input'), { recursive: true, force: true }).catch(() => {});
+  }
   /** @type {Map<string, { root: string, folder: string, abort: AbortController }>} */
   const work = new Map();
   let running = false;
+  /** @type {Map<string, Promise<string>>} */
+  const preparations = new Map();
+  /* Input copying has its own single lane: an older render must not delay freezing a newer request, and a batch
+     must not start 24 large copies at once. The HTTP caller awaits prepare(id) before acknowledging submission. */
+  let preparationTail = Promise.resolve();
 
-  const update = (/** @type {ExportJob} */ job, /** @type {Partial<ExportJob>} */ change) => { Object.assign(job, change); onChange({ ...job, outputs: [...job.outputs] }); };
+  const update = (/** @type {ExportJob} */ job, /** @type {Partial<ExportJob>} */ change) => {
+    Object.assign(job, change);
+    store.save(job, /** @type {{ root: string, folder: string }} */ (sources.get(job.id)));
+    onChange({ ...job, outputs: [...job.outputs] });
+  };
+
+  /** Schedule input freezing when a job is submitted, independently of when its renderer gets a turn.
+   * @param {ExportJob} job @param {{ root: string, folder: string, abort: AbortController }} item */
+  function prepareInput(job, item) {
+    const snapshotDir = join(stateDir, job.id, 'input');
+    const prepared = preparationTail.then(async () => {
+      if (item.abort.signal.aborted) throw new Error('cancelled');
+      /* A project backup intentionally includes optional history/chat/logs; its live-copy semantics are unchanged. */
+      if (job.ask.kind === 'project') return item.root;
+      const manifest = await snapshotFilm(item.root, snapshotDir, {
+        signal: item.abort.signal, maxFiles: snapshotMaxFiles, maxBytes: snapshotMaxBytes,
+      });
+      if (item.abort.signal.aborted) throw new Error('cancelled');
+      update(job, { inputSnapshot: { filmRevision: manifest.filmRevision, bytes: manifest.bytes, files: manifest.files.length,
+        manifest: join(stateDir, job.id, 'input-manifest.json'), limitations: manifest.limitations } });
+      return snapshotDir;
+    });
+    preparations.set(job.id, prepared);
+    preparationTail = prepared.then(() => {}, () => {});
+    /* A queued job may fail preparation while another job is rendering. Surface that failure immediately and
+       clean only this attempt. A job already running is finalized by next(), which is awaiting the same promise. */
+    prepared.catch(async (error) => {
+      if (job.status === 'waiting') {
+        update(job, { status: item.abort.signal.aborted ? 'cancelled' : 'failed', phase: null, etaMs: null,
+          error: item.abort.signal.aborted ? undefined : error instanceof Error ? error.message : String(error), finishedAt: Date.now() });
+      }
+      if (job.status !== 'running') {
+        await rm(snapshotDir, { recursive: true, force: true }).catch(() => {});
+        work.delete(job.id);
+      }
+    }).catch((error) => { console.error('Export input preparation could not be finalized:', error); });
+    return prepared;
+  }
 
   /** The cues as the person's style shows them (the language picked, or both), and the style. @param {string} root */
   const subtitlesOf = async (root) => {
@@ -795,7 +869,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
     const alpha = ALPHA_CODECS.has(codec);
     const clip = ask.clip ? await clipFilm(root, ask.clip) : null;
     const burn = clip ? null : await burned(root, ask, alpha);
-    const scratch = codec === 'png' ? await mkdtemp(join(tmpdir(), 'openfilm-export-')) : null;
+    const scratch = codec === 'png' ? await exportScratch(root) : null;
     try {
       const stage = clip?.stage ?? await stageOf(root);
       let size, place;
@@ -875,7 +949,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
   /** @param {ExportJob} job @param {string} root @param {string} dir @param {AbortSignal} signal */
   async function exportGif(job, root, dir, signal) {
     const ask = /** @type {GifAsk} */ (job.ask);
-    const scratch = await mkdtemp(join(tmpdir(), 'openfilm-export-'));
+    const scratch = await exportScratch(root);
     const burn = await burned(root, ask);
     try {
       /* with subtitles, the frame is the page drawn */
@@ -1005,7 +1079,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
   async function exportStills(job, root, dir, signal) {
     const ask = /** @type {StillsAsk | PosterAsk} */ (job.ask);
     const ext = ask.format === 'jpg' ? '.jpg' : '.png';
-    const scratch = await mkdtemp(join(tmpdir(), 'openfilm-export-'));
+    const scratch = await exportScratch(root);
     update(job, { encoder: ext === '.jpg' ? 'mjpeg' : 'png' });
     try {
       const { files } = await stillFrames(job, root, ask, ext, scratch, signal);
@@ -1029,7 +1103,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
   async function exportSlides(job, root, dir, signal) {
     const ask = /** @type {SlidesAsk} */ (job.ask);
     const pdf = ask.format === 'pdf';
-    const scratch = await mkdtemp(join(tmpdir(), 'openfilm-export-'));
+    const scratch = await exportScratch(root);
     update(job, { encoder: pdf ? 'pdf' : 'pptx' });
     try {
       const { files, size } = await stillFrames(job, root, { ...ask, shortEdge: ask.shortEdge ?? 1080 }, '.jpg', scratch, signal);
@@ -1065,7 +1139,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
    * into place when whole.
    * @param {ExportJob} job @param {string} root @param {string} out @param {AbortSignal} signal
    */
-  async function exportNle(job, root, out, signal) {
+  async function exportNle(job, root, out, signal, originalRoot = root) {
     const ask = /** @type {NleAsk} */ (job.ask);
     const app = ask.format === 'jianying' || ask.format === 'capcut' ? ask.format : null;
     /* a draft goes where its app lists its drafts, when the app is on this computer */
@@ -1082,6 +1156,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
     const scratch = join(root, '.film', 'cache', 'export', `nle-${randomBytes(4).toString('hex')}`);
     const final = freeFile(dir, baseName(job.name, ask), '');
     const staging = join(dir, `.${basename(final)}.partial-${job.id}`);
+    update(job, { temporaryOutputs: [staging] });
     try {
       await mkdir(scratch, { recursive: true });
       await filmElsewhere(root, scratch, { stage: doc.stage, tracks: doc.tracks.map((t) => ({ clips: t.clips })) });
@@ -1163,6 +1238,11 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
 
       const timeline = planNleTimeline({ stage: doc.stage, duration: duration || 0.001, pictures, sounds },
         { title, fps, audio: mode, media: ask.media ?? 'copy', mediaDir: join(final, 'media'), stems: [...stems.keys()] });
+      for (const file of timeline.files) {
+        if (file.job.kind === 'link' && root !== originalRoot && (file.path === root || file.path.startsWith(root + sep))) {
+          file.path = join(originalRoot, relative(root, file.path));
+        }
+      }
       const staged = (/** @type {import('./nle.mjs').NleFile} */ f) => join(staging, 'media', basename(f.path));
 
       /* each web page (and each picture Basic Motion can't place) drawn alone, full frame, with alpha */
@@ -1244,6 +1324,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
     } finally {
       await rm(scratch, { recursive: true, force: true, maxRetries: 5 });
       await rm(staging, { recursive: true, force: true });
+      update(job, { temporaryOutputs: [] });
     }
   }
 
@@ -1271,6 +1352,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
     }
     const final = freeFile(dir, title, '');
     const staging = join(dir, `.${basename(final)}.partial-${job.id}`);
+    update(job, { temporaryOutputs: [staging] });
     try {
       let bytes = 0;
       for (const f of files) {
@@ -1285,6 +1367,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
       update(job, { out: final, outputs: [final] });
     } finally {
       await rm(staging, { recursive: true, force: true });
+      update(job, { temporaryOutputs: [] });
     }
   }
 
@@ -1294,17 +1377,21 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
     const job = jobs.findLast((j) => j.status === 'waiting');
     if (!job) return;
     running = true;
-    const { root, folder, abort } = /** @type {{ root: string, folder: string, abort: AbortController }} */ (work.get(job.id));
+    const { root: originalRoot, folder, abort } = /** @type {{ root: string, folder: string, abort: AbortController }} */ (work.get(job.id));
+    const snapshotDir = join(stateDir, job.id, 'input');
     try {
-      await mkdir(folder, { recursive: true });
       update(job, { status: 'running', phase: 'preparing', startedAt: Date.now() });
+      await mkdir(folder, { recursive: true });
       const kind = job.ask.kind;
+      /* Reuse exactly the input prepared for this request. Never re-read the source when a queued render starts. */
+      const root = await /** @type {Promise<string>} */ (preparations.get(job.id));
+      if (abort.signal.aborted) throw new Error('cancelled');
       if (kind === 'video') await exportVideo(job, root, folder, abort.signal);
       else if (kind === 'gif') await exportGif(job, root, folder, abort.signal);
       else if (kind === 'audio') await exportSound(job, root, folder, abort.signal);
       else if (kind === 'subtitles') await exportSubtitles(job, root, folder);
       else if (kind === 'slides') await exportSlides(job, root, folder, abort.signal);
-      else if (kind === 'nle') await exportNle(job, root, folder, abort.signal);
+      else if (kind === 'nle') await exportNle(job, root, folder, abort.signal, originalRoot);
       else if (kind === 'project') await exportProject(job, root, folder, abort.signal);
       else await exportStills(job, root, folder, abort.signal);
       if (abort.signal.aborted) throw new Error('cancelled');
@@ -1312,13 +1399,15 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
       update(job, { status: 'done', progress: 1, phase: null, etaMs: null, bytes, finishedAt: Date.now() });
     } catch (e) {
       /* what a cancelled or failed export left half written is not an export */
-      for (const f of job.outputs) await rm(f, { force: true }).catch(() => {});
+      for (const f of job.outputs) await rm(f, { force: true, recursive: true }).catch(() => {});
       const ended = { phase: null, etaMs: null, outputs: [], out: undefined, finishedAt: Date.now() };
       update(job, abort.signal.aborted ? { ...ended, status: 'cancelled' } : { ...ended, status: 'failed', error: e instanceof Error ? e.message : String(e) });
     } finally {
+      /* Receipts and small manifests survive; potentially large input copies belong only to this attempt. */
+      await rm(snapshotDir, { recursive: true, force: true }).catch(() => {});
       work.delete(job.id);
       running = false;
-      next();
+      next().catch((error) => { console.error('Export queue could not advance:', error); });
     }
   }
 
@@ -1330,8 +1419,13 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
       status: 'waiting', progress: 0, phase: null, framesDone: 0, framesTotal: 0, rate: 0, etaMs: null, encoder: null,
       outputs: [], bytes: null, alpha: null, at: Date.now(), startedAt: null, finishedAt: null,
     };
+    const source = { root: project.path, folder };
+    sources.set(job.id, source);
+    store.save(job, source);
     jobs.unshift(job);
-    work.set(job.id, { root: project.path, folder, abort: new AbortController() });
+    const item = { root: project.path, folder, abort: new AbortController() };
+    work.set(job.id, item);
+    prepareInput(job, item);
     onChange({ ...job, outputs: [] });
     return job;
   }
@@ -1340,7 +1434,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
     /** Queue an export of the project at `root`. @param {{ id: string, name: string, path: string }} project @param {ExportAsk} ask @param {{ folder?: string }} [where] */
     start(project, ask, where = {}) {
       const job = queue(project, checked(ask), folderOf(where.folder));
-      next();
+      next().catch((error) => { console.error('Export queue could not start:', error); });
       return { ...job };
     },
     /**
@@ -1352,16 +1446,47 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
       const asks = body.jobs.map((ask) => checked(/** @type {ExportAsk} */ (ask)));
       const folder = folderOf(body.folder);
       const queued = asks.map((ask) => queue(project, ask, folder));
-      next();
+      next().catch((error) => { console.error('Export queue could not start:', error); });
       return queued.map((job) => ({ ...job }));
     },
-    /** The exports of a project, newest first (those of this launch). */
+    /** Retry a failed, cancelled or interrupted attempt. A new snapshot uses the project's current saved inputs. */
+    retry(/** @type {string} */ id) {
+      const previous = jobs.find((job) => job.id === id);
+      if (!previous) throw new ExportError('no such export', 404);
+      if (!['failed', 'cancelled', 'interrupted'].includes(previous.status)) throw new ExportError('only a stopped export can be retried', 409);
+      const source = /** @type {{ root: string, folder: string }} */ (sources.get(id));
+      const job = queue({ id: previous.project, name: previous.name, path: source.root }, checked(previous.ask), source.folder);
+      update(job, { retryOf: id });
+      next().catch((error) => { console.error('Export queue could not retry:', error); });
+      return { ...job };
+    },
+    /** Await before acknowledging an HTTP submission. Returns the fresh receipt with frozen input metadata.
+     * @param {string} id */
+    async prepare(id) {
+      const job = jobs.find((item) => item.id === id);
+      if (!job) throw new ExportError('no such export', 404);
+      try { await preparations.get(id); }
+      catch (error) { throw new ExportError(error instanceof Error ? error.message : String(error), job.status === 'cancelled' ? 409 : 422); }
+      if (job.status === 'cancelled') throw new ExportError('this export was cancelled before submission completed', 409);
+      if (job.status === 'failed') throw new ExportError(job.error ?? 'export preparation failed', 422);
+      return { ...job, outputs: [...job.outputs] };
+    },
+    /** The exports of a project, newest first, including durable receipts from previous launches. */
     list: (/** @type {string} */ projectId) => jobs.filter((j) => j.project === projectId).map((j) => ({ ...j, outputs: [...j.outputs] })),
     /** Cancel a waiting or running export. */
     cancel(/** @type {string} */ id) {
       const job = jobs.find((j) => j.id === id);
       if (!job) throw new ExportError('no such export', 404);
-      if (job.status === 'waiting') { work.delete(id); update(job, { status: 'cancelled', finishedAt: Date.now() }); return; }
+      if (job.status === 'waiting') {
+        work.get(id)?.abort.abort();
+        update(job, { status: 'cancelled', phase: null, finishedAt: Date.now() });
+        /* A completed prepared snapshot also needs releasing; an in-flight copy first observes its abort. */
+        preparations.get(id)?.finally(async () => {
+          await rm(join(stateDir, id, 'input'), { recursive: true, force: true }).catch(() => {});
+          work.delete(id);
+        }).catch(() => {});
+        return;
+      }
       const running = work.get(id);
       if (!running || running.abort.signal.aborted) return;
       /* said at once: stopping a render takes a moment (its browsers and encoders closing) */

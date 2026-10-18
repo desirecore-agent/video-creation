@@ -5,7 +5,7 @@
  * frame, frames per second, how long is left, which encoder), opens or shows what it made, and shows a failure in
  * its own words. It is there only while there are exports to show; the project's event stream tells it every change.
  */
-import { Ban, Check, ChevronDown, ChevronUp, CircleAlert, FolderOpen, Loader2, Play, X } from 'lucide-react';
+import { Ban, Check, ChevronDown, ChevronUp, CircleAlert, FolderOpen, Loader2, Play, RotateCcw, X } from 'lucide-react';
 import React from 'react';
 
 import { projectEvents, studioConnection } from '@/api';
@@ -18,9 +18,13 @@ import {
   formatBytes,
   formatDuration,
   jobIsActive,
+  jobHasFailed,
+  jobCanRetry,
+  latestExportAttempts,
   listExports,
   openExport,
   revealExport,
+  retryExport,
   type ExportJob,
 } from '@/lib/export-jobs';
 
@@ -37,7 +41,8 @@ export interface ExportTrayHandle {
 
 /** Only what is running or just ended: exports finished long ago are in the export folder, not a card. */
 const recent = (job: ExportJob, now: number) => jobIsActive(job)
-  || (job.finishedAt != null && now - job.finishedAt < (job.status === 'failed' ? FAILED_KEPT_MS : DONE_KEPT_MS));
+  || job.status === 'interrupted'
+  || (job.finishedAt != null && now - job.finishedAt < (jobHasFailed(job) ? FAILED_KEPT_MS : DONE_KEPT_MS));
 
 /**
  * `onError`: a finished export that could not be opened or shown (its file moved or deleted since), in a sentence.
@@ -51,6 +56,7 @@ export const ExportTray = React.forwardRef<ExportTrayHandle, { projectId: string
   const [dismissed, setDismissed] = React.useState<Set<string>>(() => new Set());
   /* Cancel was pressed: said at once, before the server's word that it is stopping arrives */
   const [cancelAsked, setCancelAsked] = React.useState<Set<string>>(() => new Set());
+  const [retryAsked, setRetryAsked] = React.useState<Set<string>>(() => new Set());
   const cancelling = (job: ExportJob) => jobIsActive(job) && (job.cancelling || cancelAsked.has(job.id));
   const cancel = (job: ExportJob) => {
     setCancelAsked((s) => new Set(s).add(job.id));
@@ -73,6 +79,18 @@ export const ExportTray = React.forwardRef<ExportTrayHandle, { projectId: string
     });
   }, []);
 
+  const retry = async (job: ExportJob) => {
+    if (retryAsked.has(job.id)) return;
+    setRetryAsked((previous) => new Set(previous).add(job.id));
+    try {
+      const refreshed = await retryExport(projectId, job.id);
+      merge(refreshed);
+      setCollapsed(false);
+      // Keep the original failure as history, and show the newly queued attempt.
+    } catch { onError?.(t('exportTray.retryFailed')); }
+    finally { setRetryAsked((previous) => { const next = new Set(previous); next.delete(job.id); return next; }); }
+  };
+
   React.useImperativeHandle(ref, () => ({
     push: (queued) => {
       setCollapsed(false);
@@ -85,13 +103,14 @@ export const ExportTray = React.forwardRef<ExportTrayHandle, { projectId: string
     setJobs([]);
     setDismissed(new Set());
     setCancelAsked(new Set());
+    setRetryAsked(new Set());
     let live = true;
     void listExports(projectId).then((r) => {
       if (!live) return;
       const now = Date.now();
       setJobs((prev) => {
         const known = new Set(prev.map((j) => j.id));
-        return [...prev, ...r.exports.filter((j) => !known.has(j.id) && recent(j, now))];
+        return [...prev, ...latestExportAttempts(r.exports).filter((j) => !known.has(j.id) && recent(j, now))];
       });
     }).catch(() => {});
     const stop = projectEvents(projectId, (event) => {
@@ -117,17 +136,17 @@ export const ExportTray = React.forwardRef<ExportTrayHandle, { projectId: string
           if (!jobIsActive(j)) return j;
           const known = there.get(j.id);
           if (known) return known;
-          return { ...j, status: 'failed', phase: null, etaMs: null, cancelling: false, error: t('exportTray.studioStopped'), finishedAt: Date.now() };
+          return { ...j, status: 'interrupted', phase: null, etaMs: null, cancelling: false, error: t('exportTray.studioStopped'), finishedAt: Date.now() };
         }));
       }).catch(() => {});
     });
   }, [projectId, t]);
 
-  const visible = jobs.filter((j) => !dismissed.has(j.id));
+  const visible = latestExportAttempts(jobs).filter((j) => !dismissed.has(j.id));
   /* All done and none failed: the card goes by itself after a moment (not while the pointer is on it). A failure
      stays until it is closed: that one needs reading. */
   const [hovered, setHovered] = React.useState(false);
-  const settled = visible.length > 0 && !visible.some(jobIsActive) && !visible.some((j) => j.status === 'failed');
+  const settled = visible.length > 0 && !visible.some(jobIsActive) && !visible.some(jobHasFailed);
   /* the cards shown, as a string: `visible` is a new array on every render (many a second while the film plays),
      which would start the timer over each time */
   const shownIds = visible.map((j) => j.id).join('\n');
@@ -214,6 +233,12 @@ export const ExportTray = React.forwardRef<ExportTrayHandle, { projectId: string
                       <FolderOpen size={13} />
                     </button>
                   </span>
+                ) : jobCanRetry(job) ? (
+                  <button type="button" title={t('exportTray.retryHint')} disabled={retryAsked.has(job.id)} onClick={() => void retry(job)}
+                    className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] text-[var(--text-muted)] transition enabled:hover:bg-[var(--bg-hover)] enabled:hover:text-[var(--text)] disabled:opacity-50">
+                    {retryAsked.has(job.id) ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                    {t(retryAsked.has(job.id) ? 'exportTray.retrying' : 'exportTray.retry')}
+                  </button>
                 ) : null}
               </div>
               <JobLine job={job} cancelling={cancelling(job)} t={t} />
@@ -272,7 +297,7 @@ function JobLine({ job, cancelling, t }: { job: ExportJob; cancelling: boolean; 
     return <p className="mt-0.5 text-[11.5px] text-[var(--text-faint)]">{t('exportTray.cancelled')}</p>;
   }
   /* a long failure is cut to three lines: a click (or the pointer resting on it) shows all of it */
-  const error = job.error || t('exportTray.failed');
+  const error = job.error || t(job.status === 'interrupted' ? 'exportTray.interrupted' : 'exportTray.failed');
   return (
     <p
       role="button"

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
+import { PRODUCT } from '../src/product.mjs';
 
-const USAGE = `openfilm — a film is a function of time: given t, it draws that moment
+const USAGE = `openfilm (${PRODUCT.displayName}) — a film is a function of time: given t, it draws that moment
 
   openfilm open    [folder | url]      start or open a project; Studio shows it to the person
   openfilm look    [what] [t | a-b]    check the film and draw it: a contact sheet with its sound and loudness
@@ -9,7 +10,7 @@ const USAGE = `openfilm — a film is a function of time: given t, it draws that
   openfilm get     [what] [--options]  voice-over, music, sound effects, transcripts, images, video, from a connected service
   openfilm capture <url> <file.png>    a picture of a live web page, to show a product or a site as it is
   openfilm skills                      the skills this film can be made with; \`openfilm skill <name>\` prints one
-  openfilm update                      the newest OpenFilm; Studio starts again on it
+  openfilm update                      how to update this application through DesireCore
 
   Run with no arguments for the manual; \`openfilm <command> --help\` for one command's options; --version for the version.
   look, render and get work on the project around the current folder.
@@ -49,9 +50,8 @@ openfilm skill remove <name>
   Yours are kept in Skills/ beside the projects (~/Movies/OpenFilm/Skills on macOS; OPENFILM_SKILLS names another).`,
   update: `openfilm update
 
-  The newest OpenFilm from npm, and Studio started again on it once nothing is being exported or made; pages open on
-  it come back on the new version. The desktop app's Studio updates with the app, a source checkout with git pull:
-  each is said instead.`,
+  视频创作 updates through DesireCore. A source checkout updates from this repository and must be rebuilt.
+  This command never installs or executes the upstream OpenFilm npm package.`,
   look: `openfilm look [what] [t | a-b]
 
   what   the project (default), a web page (.html), or a media file (video, image, sound)
@@ -96,19 +96,10 @@ const RAW = process.argv.slice(2);
 /* the command as the agent can type it here: the one that ran it when it says so (OPENFILM_RUN: the development
    checkout's .dev/bin/openfilm), through npx always the newest (npx keeps the first one it fetched for a bare name),
    else `openfilm` where it is installed */
-const RUN = process.env.OPENFILM_RUN || (process.env.npm_command === 'exec' ? 'npx -y openfilm@latest' : 'openfilm');
-/**
- * A newer openfilm, said once in a line before what the command prints: looked up on npm (at most daily, briefly) when
- * a session starts (the manual, open), else only as learnt before, so look, render and get never wait for it.
- */
-const updateNotice = async (network) => {
-  const latest = await (await import('../studio/client.mjs')).newerOpenfilm({ network }).catch(() => null);
-  if (latest) console.error(`openfilm ${latest} is out (this is an older one): \`${RUN} update\` updates it, and Studio with it.`);
-};
+const RUN = process.env.VIDEO_CREATION_RUN || process.env.OPENFILM_RUN || PRODUCT.command;
 if (RAW.length === 0) {
   const { readFileSync } = await import('node:fs');
-  await updateNotice(true);
-  console.log(readFileSync(new URL('../MANUAL.md', import.meta.url), 'utf8').replaceAll('npx openfilm', RUN));
+  console.log(readFileSync(new URL('../MANUAL.md', import.meta.url), 'utf8').replaceAll('npx -y openfilm@latest', RUN).replaceAll('npx openfilm', RUN).replaceAll('OpenFilm', PRODUCT.displayName));
   process.exit(0);
 }
 if (RAW.length === 1 && (RAW[0] === '--version' || RAW[0] === '-v')) {
@@ -116,17 +107,16 @@ if (RAW.length === 1 && (RAW[0] === '--version' || RAW[0] === '-v')) {
   console.log(JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
   process.exit(0);
 }
-if (RAW[0] !== 'update') await updateNotice(RAW[0] === 'open');
 if (RAW[0] === 'get') {
   let result;
   try { result = await (await import('../studio/client.mjs')).getMedia(RAW.slice(1), (line) => console.error(line)); }
-  catch (e) { result = { code: 1, lines: [`openfilm get: ${e.message}`] }; }
+  catch (e) { result = { code: 1, lines: [`${RUN} get: ${e.message}`] }; }
   for (const line of result.lines) console.log(line);
   process.exit(result.code);
 }
 
 /* the help speaks the name this was run as: `openfilm` or `npx openfilm` */
-const named = (text) => text.replace(/^( {2})?openfilm(?= )/gm, `$1${RUN}`).replace('`openfilm <command>', `\`${RUN} <command>`);
+const named = (text) => text.replace(/\bopenfilm(?= |`|$)/gm, RUN).replaceAll('OpenFilm', PRODUCT.displayName).replaceAll('~/Movies/视频创作', '~/Movies/VideoCreation');
 let parsed;
 try {
   parsed = parseArgs({

@@ -31,7 +31,7 @@ export const PROJECT_PARTS: readonly ProjectPart[] = ['history', 'chat', 'logs']
 /** How big a project's export is: its work, and each part it has (null: none), in bytes. */
 export type ProjectSizes = { work: number } & Record<ProjectPart, number | null>;
 
-export type ExportJobStatus = 'waiting' | 'running' | 'done' | 'failed' | 'cancelled';
+export type ExportJobStatus = 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted';
 
 export interface ExportJob {
   id: string;
@@ -57,6 +57,8 @@ export interface ExportJob {
   /** Whether a transparent export lets anything through (sampled frames); null when not measured. */
   alpha: { any: boolean } | null;
   error?: string;
+  /** An explicit retry is a new attempt. The previous receipt remains in the server's ledger. */
+  retryOf?: string;
   /** Cancel was asked and the export is stopping (still `running` until it has). */
   cancelling?: boolean;
   at: number;
@@ -112,6 +114,13 @@ export async function cancelExport(projectId: string, jobId: string): Promise<vo
   await call(`${endpoint(projectId)}/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
 }
 
+/** Retry the saved settings against the currently saved project; the server takes a new fixed snapshot. */
+export async function retryExport(projectId: string, jobId: string): Promise<ExportJob[]> {
+  const result = await call<{ export: ExportJob }>(`${endpoint(projectId)}/${encodeURIComponent(jobId)}/retry`, { method: 'POST', json: {} });
+  try { return (await listExports(projectId)).exports; }
+  catch { return [result.export]; } // The queue receipt is still valid if the subsequent ledger refresh fails.
+}
+
 /** Show the export's file in the system's file manager. */
 export async function revealExport(projectId: string, jobId: string): Promise<void> {
   await call(`${endpoint(projectId)}/${encodeURIComponent(jobId)}/reveal`, { method: 'POST', json: {} });
@@ -124,6 +133,20 @@ export async function openExport(projectId: string, jobId: string): Promise<void
 
 export function jobIsActive(job: ExportJob): boolean {
   return job.status === 'waiting' || job.status === 'running';
+}
+
+export function jobHasFailed(job: ExportJob): boolean {
+  return job.status === 'failed' || job.status === 'interrupted';
+}
+
+export function jobCanRetry(job: ExportJob): boolean {
+  return jobHasFailed(job) || job.status === 'cancelled';
+}
+
+/** The tray follows the latest attempt; older receipts remain available in the durable export records. */
+export function latestExportAttempts(jobs: readonly ExportJob[]): ExportJob[] {
+  const superseded = new Set(jobs.flatMap((job) => job.retryOf ? [job.retryOf] : []));
+  return jobs.filter((job) => !superseded.has(job.id));
 }
 
 export function basenameOf(path: string): string {
@@ -165,7 +188,7 @@ export function endedHeadline(jobs: readonly ExportJob[], t: (key: string) => st
   const n = (status: ExportJobStatus) => jobs.filter((j) => j.status === status).length;
   const done = n('done');
   const cancelled = n('cancelled');
-  const failed = n('failed');
+  const failed = n('failed') + n('interrupted');
   if (failed === jobs.length) return { tone: 'err', text: t(failed === 1 ? 'exportTray.failedOne' : 'exportTray.failedAll') };
   if (cancelled === jobs.length) return { tone: 'muted', text: t(cancelled === 1 ? 'exportTray.cancelledOne' : 'exportTray.cancelledAll') };
   if (done === jobs.length) return { tone: 'ok', text: t('exportTray.finished') };

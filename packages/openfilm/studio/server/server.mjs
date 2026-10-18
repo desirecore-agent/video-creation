@@ -13,7 +13,7 @@
  * whose name is pointed at this machine (DNS rebinding) gets nothing, not even /api/health.
  */
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { createReadStream, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
@@ -54,12 +54,13 @@ import { markersRoute } from './markers.mjs';
 import { transitionPageRoutes } from './transition-pages.mjs';
 import { createAsks, getRoute, subtitleTranscriber, subtitleTranslator } from './get.mjs';
 import { LOCATION_KEYS, locations, usableFolder } from '../../src/locations.mjs';
+import { PRODUCT, MANAGED_UPDATE_MESSAGE } from '../../src/product.mjs';
 
 /** @typedef {import('./http.mjs').Req} Req @typedef {import('./http.mjs').Res} Res */
 
 /* the session cookie's name carries the port: cookies are per host, not per port, so two Studios on 127.0.0.1 (an
    installed one and a checkout, say) would otherwise sign each other's pages out */
-const cookieName = (/** @type {number} */ port) => `openfilm_studio_${port}`;
+const cookieName = (/** @type {number} */ port) => `${PRODUCT.id.replaceAll('-', '_')}_studio_${port}`;
 /* and its twin for a page shown inside another site's frame (an agent's preview pane): a SameSite=Strict cookie is
    neither kept nor sent there, so Studio would say "open it from the address…" however it was opened. This one is
    Partitioned (CHIPS): kept for that frame's top-level site only, so a page elsewhere never has it unless it framed the
@@ -67,8 +68,6 @@ const cookieName = (/** @type {number} */ port) => `openfilm_studio_${port}`;
 const framedCookieName = (/** @type {number} */ port) => `${cookieName(port)}_framed`;
 /** How long `/open` waits, after a restart, for the pages of the Studio before to come back (they retry every second). */
 const PAGES_BACK_MS = 3000;
-/** The project's website (package.json `homepage`). */
-const HOMEPAGE = (() => { try { return String(JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).homepage ?? ''); } catch { return ''; } })();
 /** Where the desktop app's installers are (product.json `desktop.updates`): empty in a build from source. */
 const DESKTOP_FILES = (() => { try { return String(JSON.parse(readFileSync(new URL('../../product.json', import.meta.url), 'utf8')).desktop?.updates ?? '').replace(/\/+$/, ''); } catch { return ''; } })();
 
@@ -79,8 +78,8 @@ const DESKTOP_FILES = (() => { try { return String(JSON.parse(readFileSync(new U
  */
 export function desktopInstaller(os, arch, base = DESKTOP_FILES) {
   if (!base || (arch !== 'arm64' && arch !== 'x64')) return null;
-  if (os === 'mac') return `${base}/mac/${arch}/OpenFilm-${arch}.dmg`;
-  if (os === 'win') return `${base}/win/${arch}/OpenFilm-Setup-${arch}.exe`;
+  if (os === 'mac') return `${base}/mac/${arch}/VideoCreation-${arch}.dmg`;
+  if (os === 'win') return `${base}/win/${arch}/VideoCreation-Setup-${arch}.exe`;
   return null;
 }
 
@@ -92,9 +91,9 @@ export function desktopInstaller(os, arch, base = DESKTOP_FILES) {
  * which its window needs). `editorDir`: the built editor to serve (by default studio/ui/dist); an app that builds
  * Studio's editor into a page of its own (its chat beside it) serves that one. `working`: the folders an app's agent
  * is working in right now (an app with a chat), which cannot be deleted meanwhile. Resolves once both servers listen.
- * @param {{ port?: number, key?: string, openBrowser?: (url: string) => void, advertise?: boolean, onQuit?: () => void, stays?: boolean, editorDir?: string, working?: () => string[] }} [options]
+ * @param {{ port?: number, key?: string, openBrowser?: (url: string) => void, advertise?: boolean, onQuit?: () => void, stays?: boolean, editorDir?: string, working?: () => string[], runtimeIdentity?: () => Record<string, string> | null, managedDocumentNavigation?: (headers: import('node:http').IncomingHttpHeaders) => boolean, directorAgentId?: string }} [options]
  */
-export async function startStudio({ port = 4747, key, openBrowser = systemBrowser, advertise = false, onQuit, stays = false, editorDir = EDITOR_DIR, working = () => [] } = {}) {
+export async function startStudio({ port = 4747, key, openBrowser = systemBrowser, advertise = false, onQuit, stays = false, editorDir = EDITOR_DIR, working = () => [], runtimeIdentity = () => null, managedDocumentNavigation = () => false, directorAgentId } = {}) {
   let COOKIE = cookieName(port);
   let FRAMED = framedCookieName(port);
   /** The key from either session cookie. */
@@ -161,10 +160,18 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     const url = new URL(req.url ?? '/', origin);
     const path = url.pathname;
 
+    // 原运行 owner 只读取本代握手证明；不允许跨源页面读取，也不向影片子 frame 注入。
+    if (path === '/api/desirecore/runtime-identity') {
+      const identity = runtimeIdentity();
+      res.setHeader('cache-control', 'no-store');
+      if (req.method !== 'GET' || !identity) return json(res, 404, { error: '此进程没有受管运行身份。' });
+      return json(res, 200, identity);
+    }
+
     /* which Studio this is: the CLI replaces an older one, and finds its own home's when run.json is gone. Asked
        without the key, so it says nothing of the machine: its home only as a digest (homeTag), no process id */
     /* `app`: the desktop app's Studio, which updates with the app (`openfilm update` says so instead) */
-    if (path === '/api/health') return json(res, 200, { product: 'openfilm-studio', version: VERSION, home: homeTag(), filmOrigin, ...(stays ? { app: true } : {}) });
+    if (path === '/api/health') return json(res, 200, { product: PRODUCT.healthProduct, version: VERSION, home: homeTag(), filmOrigin, ...(stays ? { app: true } : {}) });
     const signIn = [`${COOKIE}=${key}; Path=/; HttpOnly; SameSite=Strict`, `${FRAMED}=${key}; Path=/; HttpOnly; Secure; SameSite=None; Partitioned`];
     /** A page's address with the key in it (the address bar is what a person copies). */
     const keyed = (/** @type {string} */ to) => {
@@ -172,6 +179,11 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
       at.searchParams.set('key', String(key));
       return at.pathname + at.search;
     };
+    // 只有受管应用的顶层原生导航可引导已有登录；iframe/跨站请求不换取 key。
+    if (path === '/' && req.method === 'GET' && !sameKey(cookieKey(req)) && !sameKey(url.searchParams.get('key')) && managedDocumentNavigation(req.headers)) {
+      res.writeHead(302, { location: keyed('/'), 'set-cookie': signIn, 'referrer-policy': 'no-referrer', 'cache-control': 'no-store' });
+      return res.end();
+    }
     if (path === '/open') {
       if (!sameKey(url.searchParams.get('key'))) throw new HttpError(403, 'this link is from another Studio launch; use the one `openfilm open` printed');
       const to = url.searchParams.get('to') ?? '/';
@@ -190,6 +202,9 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     }
 
     authorize(req);
+    if (path === '/api/desirecore/context' && req.method === 'GET') {
+      return json(res, 200, { directorAgentId: directorAgentId ?? null, directorName: '视频导演' });
+    }
     const parts = path.slice('/api/'.length).split('/').map(decodeURIComponent);
 
     /* stop: another app is taking over this machine's Studio, or `openfilm open` starts it afresh (`whenIdle`: not
@@ -199,7 +214,7 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
       if (whenIdle && exports.busy()) return json(res, 409, { error: 'an export is running' });
       if (whenIdle && making) return json(res, 409, { error: 'media is being made' });
       /* not busy, but kept (423, not 409: the app asks its own Studio whether it is busy this way) */
-      if (stays) return json(res, 423, { error: 'it is the OpenFilm app\'s, which keeps it' });
+      if (stays) return json(res, 423, { error: 'the host application keeps this Studio running' });
       json(res, 200, { pages: editorPages.size });
       setImmediate(() => (onQuit ?? (() => { void studio.close(); }))());
       return;
@@ -238,21 +253,14 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     if (parts[0] === 'version' && parts.length === 1 && req.method === 'GET') {
       const now = url.searchParams.get('check') === '1';
       const { latest, checkedAt } = await npmOpenfilm({ force: now, waitMs: 4000 });
-      return json(res, 200, { version: VERSION, latest, newer: Boolean(latest && olderThanThis(VERSION, latest)), checkedAt, checking: !process.env.OPENFILM_NO_UPDATE_CHECK && !FROM_SOURCE, source: FROM_SOURCE,
+      return json(res, 200, { version: VERSION, latest, newer: Boolean(latest && olderThanThis(VERSION, latest)), checkedAt, checking: false, source: FROM_SOURCE,
         ...(updating ? { update: updating } : {}) });
     }
     /* the top bar's Update (Studio run with npm, not the app's nor a checkout): the newest openfilm run in the
        background as `openfilm update` (client.mjs updateOpenfilm), which starts Studio again on it; the pages come back
        on the new version and reload. Not while an export runs or media is made. `/api/version` says how it goes */
     if (parts[0] === 'update' && parts.length === 1 && req.method === 'POST') {
-      if (stays || FROM_SOURCE) return json(res, 409, { error: 'this Studio does not update itself', code: stays ? 'app' : 'source' });
-      if (exports.busy()) return json(res, 409, { error: 'an export is running', code: 'exporting' });
-      if (making) return json(res, 409, { error: 'media is being made', code: 'making' });
-      if (updating?.status === 'updating') return json(res, 202, { update: updating });
-      const { latest } = await npmOpenfilm({ waitMs: 4000 });
-      if (!latest || !olderThanThis(VERSION, latest)) return json(res, 409, { error: 'this is the newest openfilm', code: 'newest' });
-      updating = runUpdate(latest, (next) => { updating = next; });
-      return json(res, 202, { update: updating });
+      return json(res, 409, { error: MANAGED_UPDATE_MESSAGE, code: 'managed' });
     }
     /* the fonts installed here (what a web page can draw with, in the preview and the export alike) */
     if (parts[0] === 'fonts' && parts.length === 1 && req.method === 'GET') return json(res, 200, { fonts: await installedFonts() });
@@ -260,10 +268,7 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     /* the top bar's Desktop button: the installer for this computer ({ os, arch }) opened in the person's browser,
        else the website, where the download is */
     if (parts[0] === 'desktop' && parts.length === 1 && req.method === 'POST') {
-      const { os, arch } = /** @type {{ os?: unknown, arch?: unknown }} */ (await readJson(req).catch(() => ({})) ?? {});
-      const to = desktopInstaller(os, arch) ?? HOMEPAGE;
-      if (to) openBrowser(to);
-      return json(res, 200, {});
+      return json(res, 409, { error: '视频创作 runs inside DesireCore; no separate upstream desktop installer is offered.', code: 'managed' });
     }
     /* ── own keys and who makes each kind of media (Settings → Providers): never a key back; see providers/index.mjs ── */
     if (parts[0] === 'providers') return providersRoute(req, res, parts.slice(1), { openBrowser });
@@ -744,24 +749,35 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
        how many subtitle cues the film has (the subtitle choices need some), and how big the project and its parts are */
     if (rest === 'exports') {
       if (req.method === 'GET') {
+        if (url.searchParams.get('statusOnly') === '1') return json(res, 200, { exports: exports.list(project.id) });
         return json(res, 200, { exports: exports.list(project.id), folder: exportsRoot(), can: await exportCapabilities(), drafts: draftApps(), subtitles: await exports.subtitles(project.path), project: await projectSizes(project.path) });
       }
       if (req.method === 'POST') {
         exportRoots.set(project.id, project.path);
         const body = /** @type {any} */ (await readJson(req));
         /* several at once: `{ jobs: [ask…], folder? }` → `{ exports }`; one: the ask itself → `{ export }` */
-        if (body && typeof body === 'object' && 'jobs' in body) return json(res, 200, { exports: exports.startAll(project, body) });
-        return json(res, 200, { export: exports.start(project, body) });
+        if (body && typeof body === 'object' && 'jobs' in body) {
+          const queued = exports.startAll(project, body);
+          return json(res, 200, { exports: await Promise.all(queued.map((job) => exports.prepare(job.id))) });
+        }
+        const job = exports.start(project, body);
+        return json(res, 200, { export: await exports.prepare(job.id) });
       }
     }
     if (parts[2] === 'exports' && parts[3] && req.method === 'DELETE') {
       if (exports.list(project.id).some((j) => j.id === parts[3])) exports.cancel(parts[3]);
       return json(res, 200, {});
     }
+    if (parts[2] === 'exports' && parts[3] && parts[4] === 'retry' && req.method === 'POST') {
+      if (!exports.list(project.id).some((j) => j.id === parts[3])) throw new HttpError(404, '找不到此项目的导出记录。');
+      exportRoots.set(project.id, project.path);
+      const job = exports.retry(parts[3]);
+      return json(res, 200, { export: await exports.prepare(job.id) });
+    }
     /* a finished export, shown where it is on the person's computer, or opened in its app */
     if (parts[2] === 'exports' && parts[3] && (parts[4] === 'reveal' || parts[4] === 'open') && req.method === 'POST') {
       const job = exports.list(project.id).find((j) => j.id === parts[3]);
-      const file = job?.outputs[0];
+      const file = job?.status === 'done' ? job.outputs[0] : undefined;
       if (!file || !existsSync(file)) throw new HttpError(404, 'that export is not there any more');
       if (parts[4] === 'reveal') reveal(file);
       else openFile(file);
@@ -893,35 +909,6 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
 /** Run from a checkout of the repository (the editor's source is beside its build), not from an installed package. */
 const FROM_SOURCE = existsSync(new URL('../ui/src', import.meta.url));
 
-/**
- * `npx -y openfilm@<version> update` in the background (its words in logs/update.log), as the person would run it: the
- * newest stops this Studio and starts itself in its place. `then` hears it failed later, with its last words, if this
- * Studio is still here to hear it; one that cannot start is said at once.
- * @param {string} version @param {(state: { status: 'failed', version: string, error: string }) => void} then
- * @returns {{ status: 'updating' | 'failed', version: string, error?: string }}
- */
-function runUpdate(version, then) {
-  const logs = join(studioHome(), 'logs');
-  mkdirSync(logs, { recursive: true });
-  const file = join(logs, 'update.log');
-  writeFileSync(file, '');
-  const failed = (/** @type {string} */ error) => then({ status: 'failed', version, error });
-  try {
-    const out = openSync(file, 'a');
-    const child = spawn('npx', ['-y', `openfilm@${version}`, 'update'], {
-      detached: true, stdio: ['ignore', out, out], windowsHide: true, shell: process.platform === 'win32', env: { ...process.env, OPENFILM_NO_BROWSER: '1' },
-    });
-    child.once('error', (e) => failed(`npx did not start (it comes with Node.js): ${e.message}`));
-    child.once('exit', (code) => {
-      if (code === 0) return;
-      const said = readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).pop() ?? '';
-      failed(said || `npx stopped (${code})`);
-    });
-    child.unref();
-  } catch (e) { return { status: 'failed', version, error: e instanceof Error ? e.message : String(e) }; }
-  return { status: 'updating', version };
-}
-
 /** This package's version: the CLI replaces a Studio older than itself. */
 export const VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 
@@ -958,7 +945,7 @@ function sendEditor(/** @type {Res} */ res, /** @type {string} */ dir, /** @type
   const page = join(root, 'index.html');
   /* no referrer: the page's address holds the key, and a link it opens must not carry it to another site */
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', ...headers });
-  res.end(existsSync(page) ? readFileSync(page) : '<!doctype html><meta charset="utf-8"><title>OpenFilm Studio</title><p>The editor is not built: run <code>npm run build:ui</code>.</p>');
+  res.end(existsSync(page) ? readFileSync(page) : '<!doctype html><meta charset="utf-8"><title>视频创作</title><p>The editor is not built: run <code>npm run build:ui</code>.</p>');
 }
 
 /** A file in the system's file manager, selected. */

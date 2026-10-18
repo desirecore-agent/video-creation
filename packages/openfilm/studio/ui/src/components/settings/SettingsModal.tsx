@@ -6,6 +6,7 @@
  * nav, quietly, where OpenFilm lives: its code, the examples and the website.
  */
 import React from 'react';
+import { PRODUCT } from '@/lib/product';
 import { createPortal } from 'react-dom';
 import { X, Settings2, Keyboard, Sun, Moon, Monitor, Plug, Boxes, Bot, Search, SquareTerminal, Loader2 } from 'lucide-react';
 import { LANGUAGES, phrasesUnder, useLanguage, useLanguageChoice, useT, type LanguageChoice } from '@/i18n';
@@ -14,7 +15,6 @@ import { SHORTCUTS, type ShortcutKey } from '@/lib/timeline-keys';
 import { studioHost, type HostDeveloper, type HostUpdateState } from '@/lib/host';
 import { showWhatsNew } from '@/lib/whats-new';
 import { hasNotes, newestVersion } from '../WhatsNew';
-import { useWebUpdate } from '../UpdateButton';
 import { api, type StudioPrefs, type StudioVersion } from '@/api';
 import { AgentsSection } from './AgentsSection';
 import { ModelsSection } from './ModelsSection';
@@ -35,9 +35,9 @@ const NAV: Array<{ group: 'settings' | 'help'; sections: SettingsSection[] }> = 
 
 /** where OpenFilm lives, linked at the foot of the nav */
 const LINKS = [
-  { label: 'settings.links.github', href: 'https://github.com/openfilm/openfilm' },
-  { label: 'settings.links.examples', href: 'https://github.com/openfilm/examples' },
-  { label: 'settings.links.site', href: 'https://openfilm.dev' },
+  { label: 'settings.links.github', href: PRODUCT.sourceUrl },
+  { label: 'settings.links.examples', href: PRODUCT.examplesUrl },
+  { label: 'settings.links.site', href: PRODUCT.homepage },
 ];
 
 const SECTION_ICON: Record<SettingsSection, React.ReactNode> = {
@@ -291,55 +291,13 @@ function PlaybackGroup() {
 function AboutGroup() {
   const t = useT();
   const [info, setInfo] = React.useState<StudioVersion | null>(null);
-  const [state, setState] = React.useState<'idle' | 'checking' | 'failed'>('idle');
   React.useEffect(() => { void api.version().then(setInfo).catch(() => {}); }, []);
-  const inApp = Boolean(studioHost);
-  /* Update here as in the top bar: Studio runs the newest and starts again on it */
-  const web = useWebUpdate();
-  const check = () => {
-    setState('checking');
-    const before = info?.checkedAt ?? null;
-    void api.version(true)
-      .then((v) => { setInfo(v); setState(v.checkedAt != null && v.checkedAt !== before ? 'idle' : 'failed'); })
-      .catch(() => setState('failed'));
-  };
-  const status = inApp ? t('settings.about.inApp')
-    : info?.source ? t('settings.about.source')
-    : info && !info.checking ? t('settings.about.off')
-    : state === 'checking' ? t('settings.about.checking')
-    : state === 'failed' ? t('settings.about.failed')
-    : info?.newer ? t('settings.about.newer').replace('{version}', info.latest ?? '')
-    : info?.latest ? t('settings.about.upToDate')
-    : t('settings.about.never');
   return (
     <SettingsGroup title={t('settings.about.group')}>
-      <SettingsItem
-        title={info ? `OpenFilm ${info.version}` : 'OpenFilm'}
-        description={status}
-        control={inApp || !info?.checking ? null : (
-          <SettingsButton disabled={state === 'checking'} onClick={check}>{t('settings.about.check')}</SettingsButton>
-        )}
-      >
+      <SettingsItem title={info ? `${PRODUCT.displayName} ${info.version}` : PRODUCT.displayName}
+        description={t('settings.about.managed')}>
         {hasNotes(info?.version) ? <WhatsNewLink version={info!.version} /> : null}
       </SettingsItem>
-      {!inApp && !info?.source && info?.newer ? (
-        <SettingsItem
-          title={t('settings.about.howTitle')}
-          description={web.update?.status === 'updating' ? t('update.webUpdating')
-            : web.update?.status === 'waiting' ? t(web.update.reason === 'exporting' ? 'update.webExporting' : 'update.webMaking')
-            : web.update?.status === 'failed' ? t('update.webFailed').replace('{error}', web.update.error)
-            : t('settings.about.how')}
-          control={(
-            <>
-              <code className="select-all rounded-md bg-[var(--surface-2)] px-2 py-1 font-mono text-[12px] text-[var(--text)]">npx -y openfilm@latest update</code>
-              <SettingsButton variant="primary" disabled={!web.update || web.update.status === 'updating'} onClick={web.start}>
-                {web.update?.status === 'updating' ? <Loader2 size={14} className="animate-spin" aria-hidden /> : null}
-                {t('update.webUpdate')}
-              </SettingsButton>
-            </>
-          )}
-        />
-      ) : null}
     </SettingsGroup>
   );
 }
@@ -412,7 +370,7 @@ function AppAboutGroup() {
   return (
     <SettingsGroup title={t('settings.about.group')}>
       <SettingsItem
-        title={`OpenFilm ${s?.version ?? ''}`.trim()}
+        title={`${PRODUCT.displayName} ${s?.version ?? ''}`.trim()}
         badge={s?.channel === 'beta' ? <span className="rounded-full bg-[var(--fill-tsp)] px-2 py-0.5 text-[11.5px] text-[var(--text-muted)]">beta</span> : null}
         description={description}
         control={control}

@@ -1,3 +1,3 @@
+# The upstream desktop shell is retained for provenance; DesireCore hosts the product.
 packages:
-  - 'packages/*'
-  - 'apps/*'
+  - 'packages/openfilm'

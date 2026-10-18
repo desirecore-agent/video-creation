@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+    body { background: #101727; color: #eff6ff; font-family: system-ui, sans-serif; }
+    main { height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 140px; }
+    #eyebrow { font-size: 32px; color: #7dd3fc; letter-spacing: 8px; }
+    #title { font-size: 150px; line-height: 1.2; margin: 40px 0; }
+    #subtitle { font-size: 42px; color: #cbd5e1; }
+    #line { height: 8px; width: 100%; margin-top: 70px; background: #38bdf8; transform-origin: left; }
+  </style>
+</head>
+<body>
+  <main><div id="eyebrow">想法 · 镜头 · 作品</div><h1 id="title">视频创作</h1><div id="subtitle">与视频导演共同完成每一个镜头</div><div id="line"></div></main>
+  <script>
+    const title = document.querySelector('#title');
+    const line = document.querySelector('#line');
+    window.film = {
+      duration: 30,
+      frame(t) {
+        const progress = Math.max(0, Math.min(1, t / 30));
+        title.style.transform = `translateY(${(1 - Math.min(1, t / 2)) * 45}px)`;
+        title.style.opacity = String(Math.min(1, t / 2));
+        line.style.transform = `scaleX(${progress})`;
+      }
+    };
+  </script>
+</body>
+</html>

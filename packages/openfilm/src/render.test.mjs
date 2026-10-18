@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defaultWorkers, render } from './render.mjs';
+import { defaultWorkers, renderWorkers, render } from './render.mjs';
 
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 
@@ -23,10 +23,14 @@ test('an encoder that fails to start fails the render with ffmpeg\'s error, inst
   }
 });
 
-test('a browser for every two threads, with 3 GB of memory each, at least one and at most eight', () => {
+test('render defaults to one browser, while explicit parallelism stays within CPU, memory and hard ceilings', () => {
   const GB = 2 ** 30;
-  assert.equal(defaultWorkers(10, 16 * GB), 5);
-  assert.equal(defaultWorkers(8, 8 * GB), 2, 'memory first');
-  assert.equal(defaultWorkers(32, 128 * GB), 8);
-  assert.equal(defaultWorkers(2, 4 * GB), 1);
+  assert.equal(defaultWorkers(), 1);
+  assert.equal(renderWorkers(undefined, 100, 32, 128 * GB), 1);
+  assert.equal(renderWorkers(2, 100, 10, 16 * GB), 2);
+  assert.equal(renderWorkers(8, 100, 8, 8 * GB), 2, 'memory first');
+  assert.equal(renderWorkers(8, 100, 32, 128 * GB), 4, 'hard ceiling');
+  assert.equal(renderWorkers(2, 100, 2, 4 * GB), 1);
+  assert.equal(renderWorkers(4, 1, 32, 128 * GB), 1, 'no idle browsers');
+  for (const n of [0, -1, 1.5, NaN, Infinity, 'many', 9]) assert.throws(() => renderWorkers(n, 100), /workers must/);
 });

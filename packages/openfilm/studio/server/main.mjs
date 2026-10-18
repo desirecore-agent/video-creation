@@ -75,7 +75,7 @@ try {
   console.error(e);
   process.exit(1);
 }
-console.log(`OpenFilm Studio · ${studio.origin}`);
+console.log(`视频创作 · ${studio.origin}`);
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
 

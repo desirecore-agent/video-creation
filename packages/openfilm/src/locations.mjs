@@ -9,32 +9,57 @@
  *
  * Reads no Studio module, so the command can use it.
  */
-import { accessSync, constants, existsSync, mkdirSync, readFileSync, statfsSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, statfsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { PRODUCT } from './product.mjs';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
-/** Studio's own home (its settings and keys, not the person's work): OPENFILM_HOME, else ~/.openfilm. */
-export const studioHomeDir = () => process.env.OPENFILM_HOME || join(homedir(), '.openfilm');
+/** 独立实例的数据根：兼容 OPENFILM_HOME，默认 ~/.video-creation。 */
+export const studioHomeDir = () => process.env.OPENFILM_HOME || join(homedir(), PRODUCT.dataDirectory);
 
-/** Where new projects go unless the person chose: OPENFILM_LIBRARY, else ~/Movies/OpenFilm/Projects on macOS, ~/Videos/OpenFilm/Projects elsewhere. */
+/** 每个实例有自己的作品库；显式设置的环境或用户偏好仍可选择外部目录。 */
 export const libraryDefault = () => process.env.OPENFILM_LIBRARY
-  || join(homedir(), process.platform === 'darwin' ? 'Movies' : 'Videos', 'OpenFilm', 'Projects');
+  || join(studioHomeDir(), 'projects');
 
 /**
- * Where exports go unless a folder is picked when exporting: OPENFILM_EXPORTS, else `exports` in OPENFILM_HOME when
- * that is set (a Studio kept apart, for work on OpenFilm itself, leaves nothing in the person's own folder), else the
- * Desktop.
+ * 导出默认归本实例的数据根；显式环境或导出对话框可选其他位置。
  */
 export const exportsDefault = () => process.env.OPENFILM_EXPORTS
-  || (process.env.OPENFILM_HOME ? join(process.env.OPENFILM_HOME, 'exports') : '')
-  || join(homedir(), 'Desktop');
+  || join(studioHomeDir(), 'exports');
 
 /**
- * Where what the person saved goes (clips and files kept to use again in any project, studio/server/saved.mjs): beside
- * the projects' default folder, `Saved` (~/Movies/OpenFilm/Saved on macOS), else OPENFILM_SAVED. Not moved with the
- * projects folder: what was saved stays where it was found.
+ * 收藏属于实例，不随作品库设置移动；显式 OPENFILM_SAVED 仍可选择外部收藏库。
  */
-export const savedRoot = () => process.env.OPENFILM_SAVED || join(dirname(libraryDefault()), 'Saved');
+export const savedRoot = () => process.env.OPENFILM_SAVED || join(studioHomeDir(), 'saved');
+
+/**
+ * 未创建的路径也按最近存在的祖先解析真实位置，统一 /tmp 等别名并识别符号链接。
+ * 检查本身不创建目录，防止拒绝内部状态路径前已经在该处写入内容。
+ * @param {string} path @returns {string}
+ */
+export function canonicalLocation(path) {
+  let at = resolve(path);
+  const missing = [];
+  while (!existsSync(at) && dirname(at) !== at) {
+    missing.unshift(basename(at));
+    at = dirname(at);
+  }
+  return join(realpathSync(at), ...missing);
+}
+
+/**
+ * 数据根中的项目只进入明确的 projects 业务子树，其余目录留给密钥、偏好、运行时和任务状态。
+ * 以数据根的真实位置拼接 projects，不能把指向 runtime 的 projects 符号链接当成允许的业务目录。
+ * 根目录可作为作品库，但不能把整个作品库打开成单部影片。
+ * @param {string} path @param {{ project?: boolean }} [options]
+ */
+export function protectedStudioLocation(path, { project = false } = {}) {
+  const own = canonicalLocation(studioHomeDir());
+  const at = canonicalLocation(path);
+  if (at !== own && !at.startsWith(own + sep)) return false;
+  const projects = join(own, 'projects');
+  return !(at.startsWith(projects + sep) || (!project && at === projects));
+}
 
 /** The folders the person can choose, by their key in prefs.json. */
 export const LOCATION_KEYS = /** @type {const} */ ({ projects: 'projectsFolder' });
@@ -79,18 +104,17 @@ export function locations() {
 }
 
 /**
- * A folder offered for new projects, as it will be kept: absolute, not a disk's root, not inside Studio's own
- * home; made if it is not there yet. Throws a sentence the person can read.
+ * 可选项目库：绝对路径、非磁盘根；实例内仅允许 projects 子树，外部目录仍可显式选择。
  * @param {unknown} value @returns {string}
  */
 export function usableFolder(value) {
   if (typeof value !== 'string' || !isAbsolute(value)) throw new Error('Choose a folder by its full path.');
   const path = resolve(value);
   if (dirname(path) === path) throw new Error('Choose a folder on that disk, not the disk itself.');
-  const home = resolve(studioHomeDir());
-  if (path === home || path.startsWith(home + sep)) throw new Error('OpenFilm keeps its own settings there: choose another folder.');
+  if (protectedStudioLocation(path)) throw new Error(`${PRODUCT.displayName} keeps its own settings there: choose its projects folder or another folder.`);
   try {
     mkdirSync(path, { recursive: true });
+    if (protectedStudioLocation(path)) throw new Error('Studio state is not a project library.');
     accessSync(path, constants.W_OK);
   } catch {
     throw new Error('That folder cannot be written to: choose another one.');

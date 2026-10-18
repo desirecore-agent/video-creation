@@ -1,166 +1,50 @@
-<p align="center">
-  <br>
-  <img src="docs/logo-light.svg#gh-light-mode-only" alt="OpenFilm" height="72">
-  <img src="docs/logo-dark.svg#gh-dark-mode-only" alt="OpenFilm" height="72">
-</p>
+<p align="center"><img src="docs/video-creation.svg" alt="视频创作" height="72"></p>
 
-<h3 align="center">The open source AI video agent.</h3>
+# 视频创作 · Video Creation
 
-<p align="center">One HTML file, one function, one real editor.</p>
+视频创作 is a DesireCore video editing application associated with the independent 视频导演 (Video Director) agent. People edit shots, subtitles and assets on a timeline while the agent works on the same project through files and tools.
 
-<p align="center"><b>English</b> · <a href="README.zh-CN.md">简体中文</a></p>
+This repository is a direct clone of [OpenFilm](https://github.com/openfilm/openfilm), with its Git history retained. It reuses the film format, Studio editor, local preview, media handling, inspection and rendering core. This is an independent derivative and does not represent the OpenFilm project. See [UPSTREAM.md](UPSTREAM.md) for provenance, reuse boundaries and licensing.
 
-## About
+- Application: [desirecore-agent/video-creation](https://github.com/desirecore-agent/video-creation)
+- Agent: [desirecore-agent/video-director](https://github.com/desirecore-agent/video-director)
+- Application install descriptor: [desirecore/app-release.json](desirecore/app-release.json)
+- 中文说明：[README.zh-CN.md](README.zh-CN.md)
 
-OpenFilm lets your coding agent make videos, and lets you edit them.
+## Development and runtime
 
-Ask Codex, Claude Code or any coding agent to make a film. It writes the film as web pages, and Studio, a local
-editor that runs in your browser, shows it taking shape. Then change anything you like, by hand or by asking.
-
-- **One HTML file.** `film.html` cuts animated web pages, footage, pictures and sound together on tracks, styled
-  with CSS. Nothing new to learn: your agent already knows the web.
-- **One function.** Each shot is a web page that draws any moment with `frame(t)`, using anything a browser can
-  draw: three.js, WebGL, canvas, SVG, CSS, GSAP, video and more. No framework (like Remotion or HyperFrames): one
-  function is enough.
-- **One real editor.** Move, scale and rotate any element inside a page, change its text, color and style; place,
-  crop and restyle every clip, trim and cut them on the timeline.
-
-<p align="center"><img src="docs/openfilm.webp" alt="An agent makes a film with OpenFilm; it is then changed by hand in Studio" width="900"></p>
-
-## Install
-
-Requires Node 22.2+ and ffmpeg, on macOS, Windows or Linux (git too, for Studio's saved versions); the first run
-downloads a headless Chromium (about 100 MB).
+Requires Node.js 22.18+, pnpm 9, Git, and FFmpeg/FFprobe on PATH. Inspection, preview and export also need Playwright Chromium; install it explicitly before offline use.
 
 ```sh
-npx skills add openfilm/openfilm
+git clone git@github.com:desirecore-agent/video-creation.git
+cd video-creation
+pnpm install --frozen-lockfile
+pnpm build
+node desirecore/cli.mjs setup-runtime --home .dev/video-creation
+node desirecore/cli.mjs start --home .dev/video-creation --project examples/first-film
 ```
 
-Then ask your agent for a film:
-
-> Make a 20-second launch video for my CLI, with music.
-
-It opens the film in Studio and you watch it take shape. If your agent has no skills, tell it: "Run
-`npx -y openfilm@latest` and follow the manual it prints."
-
-Or download the desktop app for macOS or Windows from [openfilm.dev](https://openfilm.dev) or
-[Releases](https://github.com/openfilm/openfilm/releases): Studio with a chat beside it for the agents you have. It
-comes with ffmpeg and the headless browser, so there is nothing else to install.
-
-Making, editing and rendering films needs no account. For generated voice, music, images and video, connect the
-services you use (ElevenLabs, OpenAI, Google, fal and others) with your own keys in Studio's Settings → Providers.
-
-To start from a finished film, open one of the [examples](https://github.com/openfilm/examples):
+The application entry point is `node desirecore/cli.mjs`. `start` opens the editor; `inspect` reads the project and revision; `patch` submits a revision-checked edit; `check` inspects frames; `render` creates a render job; `jobs`, `retry` and `cancel` manage renders; `mcp --project <folder>` exposes tools for Video Director. Use `--help` for the actual options. `render --output` names a directory; use `--wait` to wait for completion. The source sample and fixed validation scope are recorded in [VERIFICATION.md](VERIFICATION.md). Media generation requires the person's configured services and authorization for paid operations.
 
 ```sh
-npx -y openfilm@latest open https://github.com/openfilm/examples/tree/main/one-prompt
+pnpm dev        # build and launch the sample with isolated .dev/video-creation data
+pnpm build      # editor only
+pnpm typecheck  # application core server and editor only
+pnpm test       # focused adapter, service, release, brand, format and editing checks
 ```
 
-## Commands
+The upstream source path `packages/openfilm` is retained. Its package is `@desirecore-agent/video-creation` and its compatibility command is `video-creation`. `bin/openfilm.mjs`, `window.openfilmHost`, `film.html`, `.film/` and `OPENFILM_*` variables remain source/format compatibility interfaces. The data root defaults to `~/.video-creation`, or to a separate formal/preview root supplied by DesireCore. New projects, saved media and exports default to `projects/`, `saved/` and `exports/` inside that root. Explicit external directory choices remain supported. Project folders may live under `projects/`; keys, settings, job state and runtime directories cannot become projects.
 
-Your agent runs them; so can you, with `npx -y openfilm@latest <command>` or `npm i -g openfilm`.
+DesireCore owns installation and updates. Update a source checkout from this repository and rebuild it. Neither the CLI nor the service polls or executes upstream npm updates, and the UI does not offer the upstream desktop installer. `apps/desktop` and `packages/shared` remain as reference sources, outside the default workspace, build and tests.
 
-```sh
-openfilm                          # the manual: all an agent needs to know
-openfilm open   [folder | url]    # show a film in Studio: a new one, an existing one, one from GitHub, else this one or the last
-openfilm look   [what] [t | a-b]  # check the film, a page or a media file: a contact sheet, one frame, or a range
-openfilm render [a-b]             # the MP4; --4k, --blur (motion blur), --alpha (.webm / .mov)
-openfilm get    [what]            # voice-over, music, sound effects, transcripts, images, video, from your services
-openfilm capture <url> <file.png> # a picture of a live web page (a product, a site), sharp enough to fill the stage
-```
+## Project files
 
-`openfilm <command> --help` lists a command's options; `openfilm get` alone lists what can be made and how to
-connect a service in Studio with your own key.
+A film is a folder: `film.html` describes tracks and clips, shot pages implement `window.film.frame(t)`, `assets/` holds media, and `.film/` holds history and derived state. Compatible OpenFilm projects can be opened directly. Read the current revision before editing, preserve the person's overrides and locked tracks, and resolve conflicts explicitly.
 
-## Studio
+The [format specification](packages/openfilm/SPEC.md) and [authoring manual](packages/openfilm/MANUAL.md) retain upstream contracts. When reading the original manual directly, replace `npx openfilm` with this checkout's compatibility CLI, or prefer `desirecore/cli.mjs`. The compatibility CLI prints the manual with this application's command name.
 
-Studio runs on your machine, in your browser: use one built on Chromium (Chrome, Edge), the engine films are drawn
-and exported with, so the preview is what you export. Everything in the film can be changed: text and layers in the
-picture, clips on the timeline, their place, look, volume and speed, and the subtitles. Your edits are saved to the
-film's files, so the agent sees and keeps them, and you can save named versions to go back to. Export a video, a GIF,
-the sound or its stems, subtitles, stills, slides, a transparent video, or the timeline itself for Premiere Pro and
-DaVinci Resolve.
+## License and limits
 
-The desktop app ([apps/desktop](apps/desktop)) is Studio with a chat beside it, for Claude Code, Codex and the other
-agents, or its own agent with your own key.
+The [MIT license](LICENSE), original [trademark policy](TRADEMARK.md) and [third-party notices](packages/openfilm/THIRD_PARTY_NOTICES.md) are retained. This derivative has its own name and original icon. FFmpeg, Chromium, fonts and other runtime dependencies retain their respective licensing requirements according to what is actually distributed. This repository does not build or publish the upstream desktop installers.
 
-## How it works
-
-A film is a folder with a `film.html`: tracks of clips cut together.
-
-```html
-<meta name="viewport" content="width=1920, height=1080">
-<style>
-  .card { object-fit: cover; border-radius: 24px; }
-</style>
-<section>
-  <iframe src="title.html#t=0,4"></iframe>
-</section>
-<section>
-  <video src="assets/footage.mp4#t=12,18" at="4" speed="0.5" class="card" style="left: 160px; top: 90px; width: 1600px; height: 700px"></video>
-</section>
-<section>
-  <audio src="assets/music.mp3" volume="0.6"></audio>
-</section>
-```
-
-Each `<section>` is a track, in the order the timeline shows them: the first on top. A clip is an element: a page,
-a video, a still picture or a sound. Which part of its file plays is a media fragment (`#t=12,18`), where it starts
-is `at`, where it sits is its style's `left`, `top`, `width` and `height`, and how it looks is CSS. Every sound is a
-clip of its own. `overrides` hold your changes to elements of a page, and agents keep them when they edit.
-
-A page is a web page that draws any moment of itself, and that is the whole contract:
-
-```html
-<script type="module">
-window.film = {
-  frame(t) { /* draw the complete picture at t seconds, with anything */ },
-  duration: 4,               // optional: its own length, in seconds
-  ready: loadFonts(),        // optional: a Promise for fonts, images, models, data
-  width: 480, height: 320,   // optional: a page that is only a part of the picture
-};
-</script>
-```
-
-**The one rule:** the same `t` always draws the same picture, whatever was drawn before. Frames are asked for out of
-order, in parallel and between frames (for motion blur), so a page that keeps the rule renders the same at any size,
-on any machine. Anything else that makes pictures (Python, Blender, a video model) comes in as video or images.
-
-OpenFilm spends its effort where models fail: checking the film. `look` draws every frame of its sheet twice, in two
-shuffled orders, and names any that changed, along with page errors, fonts that failed to load, missing sound files,
-and text cut off by the frame.
-
-[MANUAL.md](packages/openfilm/MANUAL.md) is what `openfilm` tells your agent; [SPEC.md](packages/openfilm/SPEC.md)
-is for anyone building a player, renderer or editor.
-
-## From source
-
-You need Node 22.18 or later, pnpm 9 (`corepack enable` gives you the version this repository names), ffmpeg on the
-PATH, and git.
-
-```sh
-git clone https://github.com/openfilm/openfilm && cd openfilm
-pnpm install
-pnpm dev            # Studio from this checkout, with a sample film, apart from an installed OpenFilm
-pnpm test
-```
-
-Open your coding agent in `packages/openfilm/.dev/projects` and it makes films with your checkout, in that Studio.
-
-`pnpm dev:desktop` runs the desktop app from source, and `pnpm typecheck`, `pnpm build` and `pnpm audit:public` do
-what they say.
-[CONTRIBUTING.md](CONTRIBUTING.md) has the details of each package.
-
-## Community
-
-Questions, ideas and films you made go to [Discussions](https://github.com/openfilm/openfilm/discussions): ask in
-Q&A, share your film in Show and tell. Bugs go to [Issues](https://github.com/openfilm/openfilm/issues).
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). To report a security issue, see [SECURITY.md](SECURITY.md).
-
-## License
-
-The format, the CLI, Studio and the desktop app are [MIT](LICENSE). The OpenFilm name and logo are trademarks: see
-[TRADEMARK.md](TRADEMARK.md).
+The complete film format and editor originate upstream. Integration verification is recorded in commits and pull requests. Paid media providers, the installed DesireCore host and final platform-specific packages require their own runtime verification.

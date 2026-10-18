@@ -18,11 +18,11 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { EMPTY_FILM } from './film.mjs';
 import { FILM_FILE, filmHtml } from '../../src/film-doc.mjs';
 import { writeAtomic } from './atomic.mjs';
-import { libraryRoot } from '../../src/locations.mjs';
+import { canonicalLocation, libraryRoot, protectedStudioLocation, studioHomeDir } from '../../src/locations.mjs';
 
 export const TOOL_DIR = '.film';
 
@@ -38,8 +38,8 @@ export class ProjectError extends Error {
   }
 }
 
-/** Where Studio keeps its own state (not projects): ~/.openfilm, or OPENFILM_HOME. */
-export const studioHome = () => process.env.OPENFILM_HOME || join(homedir(), '.openfilm');
+/** 本实例的数据根；作品库、收藏与导出各有独立业务子目录。 */
+export const studioHome = studioHomeDir;
 
 /**
  * The key this machine's Studio opens with (~/.openfilm/key, readable by this user only), the same at every launch: an
@@ -57,7 +57,7 @@ export function studioKey() {
   return key;
 }
 
-/** Where new projects go: the folder chosen in Settings, else ~/Movies/OpenFilm/Projects on macOS, ~/Videos/OpenFilm/Projects elsewhere (src/locations.mjs). */
+/** 新项目进入用户显式选择的位置，否则进入本实例的 home/projects。 */
 export { libraryRoot };
 
 /**
@@ -87,13 +87,12 @@ async function writeState(/** @type {StudioState} */ state) {
   await writeAtomic(path, `${JSON.stringify({ ...(kept && typeof kept === 'object' && !Array.isArray(kept) ? kept : {}), ...state }, null, 2)}\n`);
 }
 
-/** Folders that are never a project: the disk's root, the home folder, and Studio's own. */
+/** 磁盘根、用户主目录和实例内部状态不是影片；home/projects 内的业务项目可以正常编辑。 */
 function refuse(/** @type {string} */ folder) {
-  const home = homedir();
-  if (folder === dirname(folder)) throw new ProjectError('the root of a disk cannot be a project; make a folder for it');
-  if (folder === home) throw new ProjectError('your home folder cannot be a project; make a folder for it');
-  const own = resolve(studioHome());
-  if (folder === own || folder.startsWith(own + sep)) throw new ProjectError('Studio keeps its own files there');
+  const real = canonicalLocation(folder);
+  if (real === dirname(real)) throw new ProjectError('the root of a disk cannot be a project; make a folder for it');
+  if (real === canonicalLocation(homedir())) throw new ProjectError('your home folder cannot be a project; make a folder for it');
+  if (protectedStudioLocation(folder, { project: true })) throw new ProjectError('Studio keeps its own files there; choose a project under its projects folder');
 }
 
 const newId = () => randomBytes(9).toString('base64url');
@@ -156,6 +155,8 @@ export async function openProject(path, { create = true } = {}) {
 export async function createProject(name = 'Untitled') {
   const clean = folderName(name);
   const root = libraryRoot();
+  // 偏好文件或环境可显式选库，但不能先创建内部状态目录再由 openProject 拒绝。
+  if (protectedStudioLocation(root)) throw new ProjectError('Studio keeps its own files there; choose its projects folder or an external library');
   await mkdir(root, { recursive: true });
   let candidate = join(root, clean);
   for (let n = 2; existsSync(candidate); n++) candidate = join(root, `${clean} ${n}`);

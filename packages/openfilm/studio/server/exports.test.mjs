@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createExports, exportCapabilities, exportsRoot, ExportError, frameBox, dimsForShortEdge, hardwareEncoder, hardwareOptions, projectFiles, projectSizes } from './exports.mjs';
+import { createExports as createExportQueue, exportCapabilities, exportsRoot, ExportError, frameBox, dimsForShortEdge, hardwareEncoder, hardwareOptions, projectFiles, projectSizes } from './exports.mjs';
 import { allocateLanes, containMotion, fadeKeyframes, frameSpan, nleRate, planNleTimeline, xmemlDocument } from './nle.mjs';
 import { pptxParts } from './slides.mjs';
 import { filmSubtitleSrt, parseFilmSubtitleStyle } from './film-subtitle.mjs';
@@ -16,6 +16,8 @@ import { filmHtml } from '../../src/film-doc.mjs';
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 const ffmpeg = { skip: !hasFfmpeg && 'no ffmpeg', timeout: 120_000 };
 let root, scratch;
+/* Every queue has an isolated durable application state, including tests that formerly used an in-memory queue. */
+const createExports = (options = {}) => createExportQueue({ stateDir: mkdtempSync(join(scratch, 'jobs-')), ...options });
 
 before(() => {
   scratch = mkdtempSync(join(tmpdir(), 'of-exports-'));

@@ -8,6 +8,7 @@
  * app's to open), `/` is the projects (the window with no tab open), and `openfilm open` is the app's to settle (every
  * tab hears it).
  */
+import { PRODUCT } from '@/lib/product';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { api, listen, studioConnection } from './api';
 import { useT } from './i18n';
@@ -95,7 +96,7 @@ export function App() {
 function LockedNotice() {
   const t = useT();
   const [copied, setCopied] = useState(false);
-  const COMMAND = 'openfilm open';
+  const COMMAND = `${PRODUCT.command} open`;
   return (
     <div role="alert" className="fixed inset-0 z-[10050] flex items-center justify-center bg-[var(--dock-shell)] p-6">
       <div className="w-full max-w-[460px] rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-lg)]">
@@ -132,7 +133,7 @@ function ConnectionNotice() {
   if (state === 'up') return null;
   if (state === 'locked') return <LockedNotice />;
   const gone = state === 'gone';
-  const COMMAND = 'openfilm open';
+  const COMMAND = `${PRODUCT.command} open`;
   return (
     <>
       {gone ? <div aria-hidden className="fixed inset-0 z-[10049] bg-black/40 backdrop-blur-[1.5px]" /> : null}

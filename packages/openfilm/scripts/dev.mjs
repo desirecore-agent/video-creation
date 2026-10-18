@@ -6,8 +6,8 @@
  * studio/ui changes (reload the page); Studio restarts when studio/server or src change. It opens a sample project in
  * your browser (OPENFILM_NO_BROWSER=1: it only prints the address). Ctrl+C stops it all.
  *
- * It also writes .dev/bin/openfilm (and openfilm.cmd on Windows): this checkout's command on this Studio, for your own
- * agent to try your changes with; and in .dev/projects (this Studio's library) an AGENTS.md and a CLAUDE.md saying so,
+ * It also writes .dev/bin/video-creation (and video-creation.cmd on Windows): this checkout's command on this Studio, for your own
+ * agent to try your changes with; and in .dev/projects (this Studio's library) an AGENTS.md saying so,
  * so an agent opened in that folder uses it without being told.
  */
 import { spawn } from 'node:child_process';
@@ -53,20 +53,19 @@ const BIN = join(DEV, 'bin');
 mkdirSync(BIN, { recursive: true });
 const CLI = join(ROOT, 'bin', 'openfilm.mjs');
 const SHARED = ['OPENFILM_HOME', 'OPENFILM_LIBRARY', 'OPENFILM_EXPORTS', 'OPENFILM_STUDIO_PORT', 'OPENFILM_NO_UPDATE_CHECK', 'OPENFILM_OFFICIAL_SKILLS'].filter((k) => env[k]);
-const sh = join(BIN, 'openfilm');
+const sh = join(BIN, 'video-creation');
 writeFileSync(sh, `#!/bin/sh\n${SHARED.map((k) => `export ${k}='${env[k]}'`).join('\n')}\nOPENFILM_RUN="${sh}" exec '${process.execPath}' '${CLI}' "$@"\n`);
 chmodSync(sh, 0o755);
 if (process.platform === 'win32') {
-  writeFileSync(join(BIN, 'openfilm.cmd'), `@echo off\r\n${SHARED.map((k) => `set "${k}=${env[k]}"`).join('\r\n')}\r\nset "OPENFILM_RUN=%~f0"\r\n"${process.execPath}" "${CLI}" %*\r\n`);
+  writeFileSync(join(BIN, 'video-creation.cmd'), `@echo off\r\n${SHARED.map((k) => `set "${k}=${env[k]}"`).join('\r\n')}\r\nset "OPENFILM_RUN=%~f0"\r\n"${process.execPath}" "${CLI}" %*\r\n`);
 }
 
-/* an agent opened in this Studio's library (Codex reads AGENTS.md, Claude Code CLAUDE.md) makes its films with this
+/* an agent opened in this Studio's library (coding agents read AGENTS.md) makes its films with this
    checkout, on this Studio: the skill's `npx openfilm@latest` is the release, on the Studio of an installed OpenFilm */
-const command = process.platform === 'win32' ? join(BIN, 'openfilm.cmd') : sh;
-const AGENT_NOTE = `# Films made with an OpenFilm checkout
+const command = process.platform === 'win32' ? join(BIN, 'video-creation.cmd') : sh;
+const AGENT_NOTE = `# 视频创作 development projects
 
-This folder is the library of the Studio that \`pnpm dev\` runs from an OpenFilm checkout. Here OpenFilm is that
-checkout: wherever a skill or the manual says \`openfilm\` or \`npx openfilm\`, run
+This folder is the library of 视频创作 Studio running from this source checkout: wherever a skill or the manual says \`openfilm\` or \`npx openfilm\`, run
 
     ${command}
 
@@ -75,7 +74,6 @@ each film in a folder of its own here; it shows in that Studio.
 `;
 mkdirSync(env.OPENFILM_LIBRARY, { recursive: true });
 writeFileSync(join(env.OPENFILM_LIBRARY, 'AGENTS.md'), AGENT_NOTE);
-writeFileSync(join(env.OPENFILM_LIBRARY, 'CLAUDE.md'), AGENT_NOTE);
 
 /* a small film to open: one page, drawn by frame(t) */
 const SAMPLE = join(DEV, 'projects', 'Sample');
@@ -91,7 +89,7 @@ if (!existsSync(join(SAMPLE, 'film.html'))) {
   body { margin: 0; width: 1920px; height: 1080px; background: #0b0d12; display: grid; place-items: center; }
   h1 { font: 700 120px system-ui, sans-serif; color: #fff; }
 </style>
-<h1 id="title">Hello, OpenFilm</h1>
+<h1 id="title">视频创作</h1>
 <script type="module">
 const title = document.getElementById('title');
 window.film = {
@@ -147,7 +145,7 @@ for (const end = Date.now() + 30_000; Date.now() < end; await new Promise((r) =>
     body: JSON.stringify({ path: SAMPLE, now: !quiet, fallback: 0 }),
   }).catch((e) => ({ ok: false, json: async () => ({ error: e.message }) }));
   const said = await res.json();
-  console.log(res.ok ? `\nStudio (dev)  ${said.url}\nhome          ${env.OPENFILM_HOME}\nyour agent    open it in ${env.OPENFILM_LIBRARY} (its AGENTS.md and CLAUDE.md say to run ${command}): this checkout, on this Studio\n` : `\ncould not open the sample: ${said.error}\n`);
+  console.log(res.ok ? `\nStudio (dev)  ${said.url}\nhome          ${env.OPENFILM_HOME}\nyour agent    open it in ${env.OPENFILM_LIBRARY} (its AGENTS.md says to run ${command}): this checkout, on this Studio\n` : `\ncould not open the sample: ${said.error}\n`);
   break;
 }
 

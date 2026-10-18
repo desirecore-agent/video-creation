@@ -20,3 +20,10 @@ dist/
 # OS and editors
 .DS_Store
 *.log
+
+# 影片工作缓存与不可变本地发布材料
+**/.film/
+desirecore/.release*/
+
+# 本机验收媒体不作为源码分发
+.verification/

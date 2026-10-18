@@ -1,11 +1,11 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { exportsRoot, libraryDefault, libraryRoot, locations, usableFolder } from './locations.mjs';
+import { exportsRoot, libraryDefault, libraryRoot, locations, savedRoot, usableFolder } from './locations.mjs';
 
-const KEYS = ['OPENFILM_HOME', 'OPENFILM_LIBRARY', 'OPENFILM_EXPORTS'];
+const KEYS = ['OPENFILM_HOME', 'OPENFILM_LIBRARY', 'OPENFILM_EXPORTS', 'OPENFILM_SAVED'];
 let saved;
 let home;
 beforeEach(() => {
@@ -14,6 +14,7 @@ beforeEach(() => {
   process.env.OPENFILM_HOME = home;
   delete process.env.OPENFILM_LIBRARY;
   delete process.env.OPENFILM_EXPORTS;
+  delete process.env.OPENFILM_SAVED;
 });
 afterEach(() => {
   for (const k of KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
@@ -38,9 +39,12 @@ test('exports go to the default: no folder kept in prefs.json moves them (the ex
   assert.equal(exportsRoot(), join(home, 'out'));
 });
 
-test('without a choice or a build\'s own: a Studio kept apart exports into its home; the person\'s own to the Desktop', () => {
+test('without an explicit choice projects, exports and saved media belong to this instance home', () => {
   assert.equal(exportsRoot(), join(home, 'exports'));
-  assert.match(libraryRoot(), /OpenFilm[\\/]Projects$/);
+  assert.equal(libraryRoot(), join(home, 'projects'));
+  assert.equal(savedRoot(), join(home, 'saved'));
+  process.env.OPENFILM_SAVED = join(home, '..', 'explicit-saved');
+  assert.equal(savedRoot(), process.env.OPENFILM_SAVED, 'an explicit saved library remains supported');
 });
 
 test('each folder for Settings: where it is, its default, whether chosen, and free space on its disk', () => {
@@ -61,4 +65,20 @@ test('a folder offered is made and kept by its full path; a disk, Studio\'s own 
   assert.throws(() => usableFolder('Projects'), /full path/);
   assert.throws(() => usableFolder(process.platform === 'win32' ? 'C:\\' : '/'), /not the disk itself/);
   assert.throws(() => usableFolder(join(home, 'inside')), /own settings/);
+  assert.equal(usableFolder(join(home, 'projects')), join(home, 'projects'));
+  assert.equal(usableFolder(join(home, 'projects', 'series')), join(home, 'projects', 'series'));
+  for (const internal of ['key', 'prefs.json', 'settings', 'runtime', 'export-jobs', 'saved', 'exports']) {
+    assert.throws(() => usableFolder(join(home, internal, 'as-library')), /own settings/, internal);
+    assert.ok(!existsSync(join(home, internal)), 'a refused path must not be created');
+  }
+});
+
+test('library validation follows aliases before allowing a path in the home projects tree', { skip: process.platform === 'win32' }, () => {
+  mkdirSync(join(home, 'runtime'));
+  symlinkSync(join(home, 'runtime'), join(home, 'projects'));
+  assert.throws(() => usableFolder(join(home, 'projects', 'escaped')), /own settings/);
+  assert.ok(!existsSync(join(home, 'runtime', 'escaped')));
+  const alias = join(home, '..', `home-alias-${process.pid}-${Date.now()}`);
+  symlinkSync(home, alias);
+  assert.throws(() => usableFolder(join(alias, 'runtime', 'escaped')), /own settings/);
 });

@@ -60,7 +60,9 @@ export async function render(args, opts = {}) {
   /* a host may encode the container its own way (Studio's export: another codec, a quality, a frame around the film) */
   const format = { ...container, ...opts.format };
   if (alpha && extname(out).toLowerCase() === '.mp4') { await probe.close(); throw new UsageError('mp4 has no transparency: write .webm or .mov with --alpha'); }
-  const workers = Math.max(1, Math.min(Number(opts.workers ?? defaultWorkers()), total));
+  let workers;
+  try { workers = renderWorkers(opts.workers, total); }
+  catch (error) { await probe.close(); throw error; }
   /* a render of more than a moment: its videos seek fast (a film's video clips load only when their time comes, so
      they are read from film.html; a page's own videos are the ones it asked for) */
   if (total >= fps * 2 && opts.seekable !== false) {
@@ -145,13 +147,26 @@ export async function render(args, opts = {}) {
   };
 }
 
-/**
- * One browser per three cores, at most four, and memory to spare (a page with its media takes 1.5 GB or more, and the
- * encoder and the person's own apps need theirs): a render leaves the computer usable while it runs.
- */
-/** A browser for every two cores (a core's two threads), with 3 GB of memory each, up to 8. */
-export function defaultWorkers(threads = availableParallelism(), memory = totalmem()) {
-  return Math.max(1, Math.min(8, Math.floor(threads / 2), Math.floor(memory / (3 * 2 ** 30))));
+/** Draft-07 contract for the configurable render resource choice; runtime validation is in renderWorkers. */
+export const renderResourceSchema = {
+  $schema: 'http://json-schema.org/draft-07/schema#',
+  type: 'object',
+  properties: {
+    workers: { type: 'integer', minimum: 1, maximum: 8, default: 1,
+      description: 'Requested render browsers. Defaults to one; an explicit value is further capped by CPU, 3 GiB memory per browser, frame count and a hard ceiling of four.' },
+  },
+};
+
+/** A single browser by default. More browsers are an explicit choice bounded by CPU, memory and a hard cap. */
+export function defaultWorkers() { return 1; }
+
+/** Respect a smaller explicit choice; never let it bypass the per-process resource ceiling. */
+export function renderWorkers(requested, frames, threads = availableParallelism(), memory = totalmem()) {
+  if (requested == null) return defaultWorkers();
+  const count = Number(requested);
+  if (!Number.isInteger(count) || count < 1 || count > 8) throw new UsageError('workers must be an integer from 1 to 8');
+  const budget = Math.max(1, Math.min(4, Math.floor(threads / 2), Math.floor(memory / (3 * 2 ** 30))));
+  return Math.min(count, budget, Math.max(1, frames));
 }
 
 /** Frames [a, b) of one page into one file; sub-frames are averaged by ffmpeg (tmix) and every n-th kept. */

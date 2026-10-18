@@ -1,29 +1,28 @@
 {
-  "name": "openfilm",
+  "name": "@desirecore-agent/video-creation",
   "version": "0.2.0",
-  "description": "The open source AI video agent: films as web pages, the manual that teaches your coding agent to make them, the `openfilm` command, and Studio, the editor to change anything in them.",
+  "description": "视频创作：与视频导演协作的时间线编辑器、文件化影片格式和本地渲染内核。",
   "license": "MIT",
-  "homepage": "https://openfilm.dev",
+  "homepage": "https://github.com/desirecore-agent/video-creation",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/openfilm/openfilm.git",
+    "url": "git+https://github.com/desirecore-agent/video-creation.git",
     "directory": "packages/openfilm"
   },
   "bugs": {
-    "url": "https://github.com/openfilm/openfilm/issues"
+    "url": "https://github.com/desirecore-agent/video-creation/issues"
   },
   "keywords": [
     "video",
     "motion-graphics",
     "agents",
-    "claude-code",
-    "codex",
+    "desirecore",
     "animation",
     "render"
   ],
   "type": "module",
   "bin": {
-    "openfilm": "bin/openfilm.mjs"
+    "video-creation": "bin/openfilm.mjs"
   },
   "exports": {
     "./film-doc": "./src/film-doc.mjs",
@@ -53,7 +52,8 @@
     "studio/client.mjs",
     "studio/ui/dist",
     "THIRD_PARTY_NOTICES.md",
-    "product.json"
+    "product.json",
+    "product.schema.json"
   ],
   "engines": {
     "node": ">=22.2"
@@ -63,12 +63,12 @@
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "test": "node --test --test-concurrency=1 --test-timeout=300000 src/*.test.mjs studio/*.test.mjs studio/server/*.test.mjs studio/server/providers/*.test.mjs studio/ui/src/editor/*.test.ts studio/ui/src/lib/*.test.ts studio/ui/src/components/*.test.ts",
+    "test": "node --test --test-concurrency=1 src/product.test.mjs src/film-doc.test.mjs studio/server/film.test.mjs studio/server/data-isolation.test.mjs",
     "typecheck": "tsc -p studio/server && tsc -p studio/ui",
     "build:ui": "vite build --config studio/ui/vite.config.ts",
     "prepare": "npm run build:ui",
-    "prepack": "node scripts/product.mjs official",
-    "postpack": "node scripts/product.mjs restore"
+    "test:upstream": "node --test --test-concurrency=1 --test-timeout=300000 src/*.test.mjs studio/*.test.mjs studio/server/*.test.mjs studio/server/providers/*.test.mjs studio/ui/src/editor/*.test.ts studio/ui/src/lib/*.test.ts studio/ui/src/components/*.test.ts",
+    "test:smoke": "node --test --test-concurrency=1 src/product.test.mjs src/film-doc.test.mjs studio/server/film.test.mjs studio/server/data-isolation.test.mjs"
   },
   "devDependencies": {
     "@fontsource-variable/inter": "^5.3.0",
@@ -83,5 +83,6 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
     "vite": "^7.3.6"
-  }
+  },
+  "private": true
 }

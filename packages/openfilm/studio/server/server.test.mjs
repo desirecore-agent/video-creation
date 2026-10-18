@@ -381,13 +381,13 @@ test('an export is shown in the file manager only while it is there', async () =
   assert.equal(res.status, 404);
 });
 
-test('the Desktop button opens the installer for this computer, or the project\'s website, in the person\'s browser', async () => {
-  /* a build from source names no place for installers: the website */
-  assert.equal((await api('/api/desktop', { method: 'POST', body: { os: 'mac', arch: 'arm64' } })).status, 200);
-  assert.equal(opened.at(-1), JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).homepage);
+test('the inherited desktop route cannot offer an upstream installer', async () => {
+  const before = opened.length;
+  assert.equal((await api('/api/desktop', { method: 'POST', body: { os: 'mac', arch: 'arm64' } })).status, 409);
+  assert.equal(opened.length, before, 'no installer or website was opened');
   const base = 'https://example.com/download/desktop';
-  assert.equal(desktopInstaller('mac', 'arm64', base), `${base}/mac/arm64/OpenFilm-arm64.dmg`);
-  assert.equal(desktopInstaller('win', 'x64', base), `${base}/win/x64/OpenFilm-Setup-x64.exe`);
+  assert.equal(desktopInstaller('mac', 'arm64', base), `${base}/mac/arm64/VideoCreation-arm64.dmg`);
+  assert.equal(desktopInstaller('win', 'x64', base), `${base}/win/x64/VideoCreation-Setup-x64.exe`);
   assert.equal(desktopInstaller('linux', 'x64', base), null);
   assert.equal(desktopInstaller('mac', 'ppc', base), null);
   assert.equal(desktopInstaller('mac', 'arm64', ''), null);
@@ -459,7 +459,7 @@ test('an advertised Studio writes run.json, quits when asked by a key holder, an
     assert.equal(other.key, readFileSync(join(process.env.OPENFILM_HOME, 'key'), 'utf8'), 'the machine\'s key, the same every launch');
     const health = await (await fetch(`${other.origin}/api/health`)).json();
     /* its home only as a digest, and no process id: anyone may ask */
-    assert.deepEqual(health, { product: 'openfilm-studio', version: JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version,
+    assert.deepEqual(health, { product: 'video-creation-studio', version: JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version,
       home: createHash('sha256').update(process.env.OPENFILM_HOME).digest('hex'), filmOrigin: other.filmOrigin });
     assert.equal((await fetch(`${other.origin}/api/quit`, { method: 'POST' })).status, 401);
     assert.equal((await fetch(`${other.origin}/api/quit`, { method: 'POST', headers: { 'x-studio-key': other.key } })).status, 200);
@@ -502,7 +502,7 @@ test('an app\'s Studio (`stays`) is not stopped by `openfilm open`, and says why
     /* it says it is the app's, so `openfilm update` says the app updates it */
     assert.equal((await (await fetch(`${kept.origin}/api/health`)).json()).app, true);
     const update = await fetch(`${kept.origin}/api/update`, { method: 'POST', headers: { 'x-studio-key': kept.key, 'content-type': 'application/json' }, body: '{}' });
-    assert.deepEqual([update.status, (await update.json()).code], [409, 'app'], 'it does not update itself');
+    assert.deepEqual([update.status, (await update.json()).code], [409, 'managed'], 'it does not update itself');
   } finally {
     await kept.close();
   }
@@ -511,7 +511,7 @@ test('an app\'s Studio (`stays`) is not stopped by `openfilm open`, and says why
 test('Update is not run from a source checkout (git pull updates it), nor without the key', async () => {
   assert.equal((await api('/api/update', { method: 'POST', body: {}, key: null })).status, 401);
   const res = await api('/api/update', { method: 'POST', body: {} });
-  assert.deepEqual([res.status, (await res.json()).code], [409, 'source']);
+  assert.deepEqual([res.status, (await res.json()).code], [409, 'managed']);
   assert.equal((await (await api('/api/health')).json()).app, undefined, 'not an app\'s');
   assert.equal((await (await api('/api/version')).json()).update, undefined, 'no update running');
 });
@@ -580,8 +580,8 @@ test('a page\'s stream is a WebSocket: only with the key, and from the editor\'s
   const outcome = (socket) => new Promise((done) => { socket.onopen = () => done('open'); socket.onerror = () => done('refused'); });
   assert.equal(await outcome(ws({})), 'refused', 'no key');
   /* the cookie is named for the port, so another Studio's cookie on the same host is not this one's */
-  const named = `openfilm_studio_${new URL(studio.origin).port}`;
-  assert.equal(await outcome(ws({ cookie: `openfilm_studio_1=${studio.key}`, origin: studio.origin })), 'refused', 'another port\'s cookie');
+  const named = `video_creation_studio_${new URL(studio.origin).port}`;
+  assert.equal(await outcome(ws({ cookie: `video_creation_studio_1=${studio.key}`, origin: studio.origin })), 'refused', 'another port\'s cookie');
   assert.equal(await outcome(ws({ cookie: `${named}=${studio.key}`, origin: 'http://evil.test' })), 'refused', 'another site\'s page');
   const page = ws({ cookie: `${named}=${studio.key}`, origin: studio.origin });
   assert.equal(await outcome(page), 'open');

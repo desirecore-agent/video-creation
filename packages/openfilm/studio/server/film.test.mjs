@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EditError, editProjectFilm, readProjectFilm, revOf } from './film.mjs';
+import { EditError, editProjectFilm, readProjectFilm, revOf, writeProjectFilm } from './film.mjs';
 import { filmHtml, readFilmFile } from '../../src/film-doc.mjs';
 
 const folder = (film) => {
@@ -96,4 +96,52 @@ test('the revision follows the text, and Studio writes over the file, the rest o
   const { text, rev } = await editProjectFilm(root, null, [{ op: 'set', clip: 'a', field: 'at', value: 2 }]);
   assert.equal(rev, revOf(readFileSync(join(root, 'film.html'), 'utf8')));
   assert.ok(text.includes('<!-- mine -->') && text.includes('<iframe id="a" src="a.html" at="2"></iframe>') && text.includes('<iframe id="b" src="b.html" at="4"></iframe>'));
+});
+
+test('simultaneous edits to one field do not silently overwrite the first writer', async () => {
+  const root = folder(film([{ src: 'a.mp4', id: 'intro', volume: 1 }]));
+  const { rev } = await readProjectFilm(root);
+  const results = await Promise.allSettled([
+    editProjectFilm(root, rev, [{ op: 'set', clip: 'intro', field: 'volume', value: 0.25 }]),
+    editProjectFilm(root, rev, [{ op: 'set', clip: 'intro', field: 'volume', value: 0.75 }]),
+  ]);
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+  const conflict = results.find((r) => r.status === 'rejected');
+  assert.equal(conflict.reason.kind, 'conflict');
+  assert.match(conflict.reason.message, /volume/);
+  const accepted = results.find((r) => r.status === 'fulfilled');
+  assert.equal(onDisk(root).tracks[0].clips[0].volume, accepted.value.value.tracks[0].clips[0].volume);
+});
+
+test('simultaneous edits to separate fields keep both writes and both revisions', async () => {
+  const root = folder(film([{ src: 'a.mp4', id: 'intro' }]));
+  const { rev } = await readProjectFilm(root);
+  const [a, b] = await Promise.all([
+    editProjectFilm(root, rev, [{ op: 'set', clip: 'intro', field: 'volume', value: 0.25 }]),
+    editProjectFilm(root, rev, [{ op: 'set', clip: 'intro', field: 'at', value: 2 }]),
+  ]);
+  assert.notEqual(a.rev, b.rev);
+  assert.equal([a, b].filter((v) => v.rebased).length, 1);
+  assert.equal(onDisk(root).tracks[0].clips[0].volume, 0.25);
+  assert.equal(onDisk(root).tracks[0].clips[0].at, 2);
+});
+
+test('an old revision cannot overwrite a direct human edit to the same field', async () => {
+  const root = folder(film([{ src: 'a.mp4', id: 'intro', volume: 1 }]));
+  const { rev } = await readProjectFilm(root);
+  writeFileSync(join(root, 'film.html'), filmHtml(film([{ src: 'a.mp4', id: 'intro', volume: 0.4 }])));
+  await assert.rejects(editProjectFilm(root, rev, [{ op: 'props', edits: [{ clip: 'intro', prop: 'gainDb', value: -10 }] }]),
+    (error) => error.kind === 'conflict' && /volume/.test(error.message));
+  assert.equal(onDisk(root).tracks[0].clips[0].volume, 0.4);
+});
+
+
+test('a whole-film relocation write cannot overwrite a clip edit made since it read the film', async () => {
+  const root = folder(film([{ src: 'a.mp4', id: 'intro' }]));
+  const before = await readProjectFilm(root);
+  await editProjectFilm(root, before.rev, [{ op: 'set', clip: 'intro', field: 'volume', value: 0.6 }]);
+  before.value.tracks[0].clips[0].src = 'moved/a.mp4';
+  await assert.rejects(writeProjectFilm(root, before.value, before.text), (e) => e.kind === 'conflict');
+  assert.equal(onDisk(root).tracks[0].clips[0].volume, 0.6);
+  assert.equal(onDisk(root).tracks[0].clips[0].src, 'a.mp4');
 });
