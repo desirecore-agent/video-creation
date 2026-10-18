@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /** 视频创作正式入口。复用上游 Studio 与影片内核，CLI 和 MCP 都走同一服务提交编辑。 */
 import { parseArgs } from 'node:util';
-import { readFileSync, writeFileSync, readFileSync as read, unlinkSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { runtimeConfig, applyRuntimeEnvironment, runtimeIdentity, managedDocumentNavigation } from './config.mjs';
 import { projectClient } from './client.mjs';
+import { acquireApplicationLock } from './application-lock.mjs';
 
 export const HELP = `视频创作 — 本地影片编辑与视频导演协作
 
@@ -49,20 +50,8 @@ export async function waitForJob(client, id, { timeoutMs = 30 * 60_000, interval
 
 export async function start(config, options = {}) {
   applyRuntimeEnvironment(config);
-  const lock = join(config.home, 'application.lock');
-  const nonce = randomBytes(16).toString('hex');
-  if (existsSync(lock)) {
-    let old;
-    try { old = JSON.parse(read(lock, 'utf8')); } catch { throw new Error('应用锁记录损坏，请检查数据目录，不会自动覆盖。'); }
-    try { process.kill(old.pid, 0); throw new Error('此数据目录的视频创作已在运行，请使用已有实例或另选 --home。'); }
-    catch (error) { if (error.code !== 'ESRCH') throw error; }
-    unlinkSync(lock);
-  }
-  writeFileSync(lock, JSON.stringify({ pid: process.pid, nonce }), { flag: 'wx', mode: 0o600 });
+  const releaseLock = await acquireApplicationLock(config.home);
   let studio;
-  const releaseLock = () => {
-    try { if (JSON.parse(read(lock, 'utf8')).nonce === nonce) unlinkSync(lock); } catch { /* 不能删除后来实例的锁 */ }
-  };
   try {
     const { startStudio, opener } = await import('../packages/openfilm/studio/server/server.mjs');
     const { studioHome } = await import('../packages/openfilm/studio/server/projects.mjs');
@@ -82,16 +71,14 @@ export async function start(config, options = {}) {
     const close = async () => {
       if (ending) return;
       ending = true;
-      await studio.close();
-      releaseLock();
+      try { await studio.close(); } finally { releaseLock(); }
     };
     process.once('SIGINT', () => void close());
     process.once('SIGTERM', () => void close());
     process.once('exit', releaseLock);
     return { ...studio, close };
   } catch (error) {
-    await studio?.close();
-    releaseLock();
+    try { await studio?.close(); } finally { releaseLock(); }
     throw error;
   }
 }

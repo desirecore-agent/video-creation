@@ -61,3 +61,51 @@ test('真实受管服务隔离数据、签入、导演上下文与HTTP编辑共�
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('真实服务拒绝同一存活实例，强制结束残留锁后可自动重新启动', { timeout: 20_000 }, async () => {
+  const home = mkdtempSync(join(tmpdir(), 'video-service-restart-'));
+  const project = join(home, 'projects', 'demo');
+  mkdirSync(project, { recursive: true });
+  writeFileSync(join(project, 'film.html'), '<meta name="viewport" content="width=640, height=360"><section><iframe id="intro" src="scene.html#t=0,1"></iframe></section>');
+  writeFileSync(join(project, 'scene.html'), '<script>window.film={duration:1,frame(t){}}</script>');
+  const children = [];
+  const launch = () => {
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./cli.mjs', import.meta.url)), 'start', '--home', home, '--project', project, '--port', '0', '--no-browser'], {
+      env: { ...process.env, APP_DATA_DIR: home, PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const exited = once(child, 'exit');
+    let errors = '';
+    child.stderr.on('data', (chunk) => { errors += chunk; });
+    const lines = createInterface({ input: child.stdout });
+    const started = Promise.race([
+      once(lines, 'line').then(([line]) => JSON.parse(line)),
+      exited.then(([code]) => { throw new Error(`服务启动失败 ${code}: ${errors}`); }),
+    ]).finally(() => lines.close());
+    const entry = { child, exited, started };
+    children.push(entry);
+    return entry;
+  };
+  try {
+    const first = launch();
+    const descriptor = await first.started;
+    const firstLock = JSON.parse(readFileSync(join(home, 'application.lock'), 'utf8'));
+    assert.equal(firstLock.pid, descriptor.pid);
+    assert.match(firstLock.birth, /^(darwin|win32|linux):/);
+    const duplicate = launch();
+    await assert.rejects(duplicate.started, /已在运行/);
+    assert.equal(readFileSync(join(home, 'application.lock'), 'utf8'), JSON.stringify(firstLock));
+    first.child.kill('SIGKILL');
+    await first.exited;
+    assert.equal(readFileSync(join(home, 'application.lock'), 'utf8'), JSON.stringify(firstLock));
+    const restarted = launch();
+    const nextDescriptor = await restarted.started;
+    const nextLock = JSON.parse(readFileSync(join(home, 'application.lock'), 'utf8'));
+    assert.equal(nextLock.pid, nextDescriptor.pid);
+    assert.notEqual(nextLock.nonce, firstLock.nonce);
+    assert.equal((await fetch(`${nextDescriptor.origin}/api/health`)).ok, true);
+  } finally {
+    for (const { child } of children) if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    await Promise.all(children.map(({ exited }) => exited));
+    rmSync(home, { recursive: true, force: true });
+  }
+});

@@ -56,9 +56,15 @@
       "role": "documentation"
     },
     {
+      "path": "desirecore/application-lock.mjs",
+      "sha256": "8205711b22bf87faa13edcbb29da3b6b5b4afa30aab286717aee454b5ce80856",
+      "size": 10157,
+      "role": "runtime"
+    },
+    {
       "path": "desirecore/cli.mjs",
-      "sha256": "1a4e0d12d4fcfe724e2f99b515640531b9a3facf8b3d84cca96c207ff87bcb30",
-      "size": 8245,
+      "sha256": "3d38acc3b80766fe1676a6c76acc581decf156dbeeaaac0d669832e4c9481779",
+      "size": 7573,
       "role": "runtime"
     },
     {
@@ -195,8 +201,8 @@
     },
     {
       "path": "package.json",
-      "sha256": "1f9dc9e435c6019fb0e091955dc677fdbd45597f2d417d6ce8e3f904785978fa",
-      "size": 1454,
+      "sha256": "72eefb55433e4c044289c02059a60e40b50cc1e2c803200bd9a56f1b3fab0079",
+      "size": 1491,
       "role": "dependency"
     },
     {
@@ -1054,7 +1060,7 @@
   ],
   "source": {
     "kind": "worktree",
-    "sha256": "7597e561773a5d9d541fc88b9a019edf899b2330850fb9b479cd02a6d093ff9d"
+    "sha256": "771ec97a25e31c6e5955db4a63fb95864e8b3ed98a07bbe79c065cd2940fad4b"
   },
   "supportedPlatforms": [
     "darwin",
@@ -1087,5 +1093,5 @@
     "restoreInstructionsPath": "desirecore/RUNTIME.md"
   },
   "instructionsPath": "desirecore/RUNTIME.md",
-  "releaseDigest": "3f4c907a9cfc7f7b4ad74f26892e0100aca84b6cfa1ad3e6946706e5947e9217"
+  "releaseDigest": "489a34e3b8128cac660c9a4ec46e63a8eb27f03d3cdd5a21e9666d74e15abd93"
 }

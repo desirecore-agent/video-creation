@@ -20,7 +20,7 @@ const REQUIRED_FILES = [
   `${PACKAGE}/package.json`, `${PACKAGE}/product.json`, `${PACKAGE}/product.schema.json`,
   `${PACKAGE}/LICENSE`, `${PACKAGE}/THIRD_PARTY_NOTICES.md`, `${PACKAGE}/SPEC.md`, `${PACKAGE}/MANUAL.md`,
   `${PACKAGE}/studio/client.mjs`, 'desirecore/RUNTIME.md',
-  'desirecore/cli.mjs', 'desirecore/client.mjs', 'desirecore/config.mjs', 'desirecore/config.schema.json',
+  'desirecore/cli.mjs', 'desirecore/application-lock.mjs', 'desirecore/client.mjs', 'desirecore/config.mjs', 'desirecore/config.schema.json',
   'desirecore/mcp.mjs', 'desirecore/setup-runtime.mjs', 'desirecore/ffmpeg-runtime.mjs',
 ];
 const RUNTIME_TREES = [

@@ -23,7 +23,7 @@ function fixture() {
     'packages/openfilm/studio/server/server.mjs', 'packages/openfilm/studio/server/bridge.js',
     'packages/openfilm/studio/ui/dist/index.html', 'packages/openfilm/studio/ui/dist/assets/main.js',
     'packages/openfilm/skills/video/SKILL.md', 'packages/openfilm/examples-index/examples.json',
-    'desirecore/cli.mjs', 'desirecore/client.mjs', 'desirecore/config.mjs', 'desirecore/config.schema.json',
+    'desirecore/cli.mjs', 'desirecore/application-lock.mjs', 'desirecore/client.mjs', 'desirecore/config.mjs', 'desirecore/config.schema.json',
     'desirecore/mcp.mjs', 'desirecore/setup-runtime.mjs', 'desirecore/ffmpeg-runtime.mjs',
     'desirecore/licenses/example/LICENSE', 'desirecore/licenses/manifest.json',
   ];
@@ -44,6 +44,7 @@ test('freezes the actual runtime and built UI with explicit license and dependen
   assert.ok(paths.includes('packages/openfilm/studio/ui/dist/assets/main.js'));
   assert.ok(paths.includes('packages/openfilm/studio/server/bridge.js'));
   assert.ok(paths.includes('desirecore/cli.mjs'));
+  assert.ok(paths.includes('desirecore/application-lock.mjs'));
   assert.ok(paths.includes('pnpm-lock.yaml'));
   assert.ok(paths.includes('packages/openfilm/LICENSE'));
   assert.ok(!paths.some((path) => path.includes('desktop') || path.includes('node_modules') || path.includes('.test.') || path.endsWith('.map')));
