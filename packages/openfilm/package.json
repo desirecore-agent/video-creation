@@ -1,0 +1,88 @@
+{
+  "name": "@desirecore-agent/video-creation",
+  "version": "0.2.0",
+  "description": "视频创作：与视频导演协作的时间线编辑器、文件化影片格式和本地渲染内核。",
+  "license": "MIT",
+  "homepage": "https://github.com/desirecore-agent/video-creation",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/desirecore-agent/video-creation.git",
+    "directory": "packages/openfilm"
+  },
+  "bugs": {
+    "url": "https://github.com/desirecore-agent/video-creation/issues"
+  },
+  "keywords": [
+    "video",
+    "motion-graphics",
+    "agents",
+    "desirecore",
+    "animation",
+    "render"
+  ],
+  "type": "module",
+  "bin": {
+    "video-creation": "bin/openfilm.mjs"
+  },
+  "exports": {
+    "./film-doc": "./src/film-doc.mjs",
+    "./host": "./src/host.mjs",
+    "./shared": "./src/shared.mjs",
+    "./look": "./src/look.mjs",
+    "./render": "./src/render.mjs",
+    "./skills": "./src/skills.mjs",
+    "./skills-cli": "./src/skills-cli.mjs",
+    "./studio": "./studio/server/server.mjs",
+    "./studio-ui/*": "./studio/ui/src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "README.md",
+    "SPEC.md",
+    "TRADEMARK.md",
+    "bin",
+    "skills",
+    "examples-index",
+    "src",
+    "!src/*.test.mjs",
+    "MANUAL.md",
+    "studio/server/**/*.mjs",
+    "studio/server/**/*.js",
+    "!studio/server/**/*.test.mjs",
+    "studio/client.mjs",
+    "studio/ui/dist",
+    "THIRD_PARTY_NOTICES.md",
+    "product.json",
+    "product.schema.json"
+  ],
+  "engines": {
+    "node": ">=22.2"
+  },
+  "dependencies": {
+    "playwright-core": "1.61.1"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "test": "node --test --test-concurrency=1 src/product.test.mjs src/film-doc.test.mjs studio/server/film.test.mjs studio/server/data-isolation.test.mjs",
+    "typecheck": "tsc -p studio/server && tsc -p studio/ui",
+    "build:ui": "vite build --config studio/ui/vite.config.ts",
+    "prepare": "npm run build:ui",
+    "test:upstream": "node --test --test-concurrency=1 --test-timeout=300000 src/*.test.mjs studio/*.test.mjs studio/server/*.test.mjs studio/server/providers/*.test.mjs studio/ui/src/editor/*.test.ts studio/ui/src/lib/*.test.ts studio/ui/src/components/*.test.ts",
+    "test:smoke": "node --test --test-concurrency=1 src/product.test.mjs src/film-doc.test.mjs studio/server/film.test.mjs studio/server/data-isolation.test.mjs"
+  },
+  "devDependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "lucide-react": "^0.469.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6"
+  },
+  "private": true
+}

@@ -1,0 +1,110 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "视频创作产品配置",
+  "description": "品牌、独立运行标识及宿主发行策略。修改时同时更新产品配置和品牌回归测试。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "id",
+    "displayName",
+    "command",
+    "packageName",
+    "homepage",
+    "sourceUrl",
+    "releasesUrl",
+    "upstreamUrl",
+    "examplesUrl",
+    "dataDirectory",
+    "libraryDirectory",
+    "healthProduct",
+    "managedUpdates",
+    "desktopPromotion",
+    "desktop",
+    "directorName"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "独立产品技术标识。"
+    },
+    "displayName": {
+      "type": "string",
+      "description": "应用面向用户的名称。"
+    },
+    "command": {
+      "type": "string",
+      "description": "本地安装提供的 CLI 命令；不通过上游 npm 包更新。"
+    },
+    "packageName": {
+      "type": "string",
+      "description": "独立 npm 包名；本仓库不自动发布。"
+    },
+    "homepage": {
+      "type": "string",
+      "description": "本应用的主页。"
+    },
+    "sourceUrl": {
+      "type": "string",
+      "description": "本应用的源代码地址。"
+    },
+    "releasesUrl": {
+      "type": "string",
+      "description": "本应用的发行记录地址。"
+    },
+    "upstreamUrl": {
+      "type": "string",
+      "description": "必须保留的上游来源链接。"
+    },
+    "examplesUrl": {
+      "type": "string",
+      "description": "复用的上游示例集合；属于上游内容。"
+    },
+    "dataDirectory": {
+      "type": "string",
+      "description": "用户主目录下的独立状态目录。"
+    },
+    "libraryDirectory": {
+      "type": "string",
+      "description": "影片库所在的独立目录名。"
+    },
+    "healthProduct": {
+      "type": "string",
+      "description": "本地健康检查的独立产品标识，避免接管上游服务。"
+    },
+    "managedUpdates": {
+      "type": "boolean",
+      "description": "应用由 DesireCore 安装或源仓库更新，禁用 npm 自更新。",
+      "const": true
+    },
+    "desktopPromotion": {
+      "type": "boolean",
+      "description": "是否展示独立桌面客户端推广入口。",
+      "const": false
+    },
+    "$schema": {
+      "type": "string",
+      "description": "本产品配置对应的 Draft-07 Schema。"
+    },
+    "desktop": {
+      "type": "object",
+      "description": "为兼容上游保留的桌面配置；视频创作由 DesireCore 承载。",
+      "additionalProperties": false,
+      "required": [
+        "updates"
+      ],
+      "properties": {
+        "updates": {
+          "type": "string",
+          "const": "",
+          "description": "必须为空，禁止引导安装上游独立桌面客户端。"
+        }
+      }
+    },
+    "directorName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "应用关联智能体的显示名称；只用于展示，关联ID与权限由DesireCore安装契约决定。"
+    }
+  }
+}

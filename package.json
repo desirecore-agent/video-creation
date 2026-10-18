@@ -1,0 +1,30 @@
+{
+  "name": "video-creation-workspace",
+  "private": true,
+  "description": "视频创作：DesireCore 视频创作应用，复用 OpenFilm 的文件格式、Studio 编辑器和渲染内核。",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "pnpm build && node desirecore/cli.mjs start --home .dev/video-creation --project examples/first-film",
+    "build": "pnpm --filter @desirecore-agent/video-creation build:ui",
+    "test": "node --test --test-concurrency=1 desirecore/application-lock.test.mjs desirecore/runtime.test.mjs desirecore/service.integration.test.mjs desirecore/release.test.mjs && pnpm --filter @desirecore-agent/video-creation test:smoke",
+    "typecheck": "pnpm --filter @desirecore-agent/video-creation typecheck",
+    "audit:public": "node scripts/audit-public.mjs",
+    "skills:sync": "node scripts/sync-skills.mjs",
+    "examples:sync": "node scripts/sync-examples.mjs",
+    "dev:core": "pnpm --filter @desirecore-agent/video-creation dev",
+    "test:reliability": "node --test --test-concurrency=1 packages/openfilm/studio/server/film.test.mjs packages/openfilm/studio/server/export-snapshot.test.mjs packages/openfilm/studio/server/exports-reliability.test.mjs",
+    "app:release": "node desirecore/release.mjs"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "0.5.2",
+    "@changesets/cli": "2.31.1"
+  },
+  "dependencies": {
+    "ajv": "8.17.1"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.1.4/schema.json",
+  "changelog": [
+    "@changesets/changelog-github",
+    {
+      "repo": "desirecore-agent/video-creation"
+    }
+  ],
+  "commit": false,
+  "fixed": [],
+  "linked": [],
+  "access": "restricted",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": [
+    "@openfilm/desktop",
+    "@openfilm/shared"
+  ],
+  "privatePackages": {
+    "version": true,
+    "tag": false
+  }
+}
