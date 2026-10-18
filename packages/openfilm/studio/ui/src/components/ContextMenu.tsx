@@ -268,8 +268,8 @@ export function ContextMenu({
     ? 'min-w-[136px] rounded-lg py-[3px]'
     : 'min-w-[184px] rounded-xl py-1';
   const row = dense
-    ? 'gap-2 px-2.5 py-[5px] text-[12px]'
-    : 'gap-2.5 px-3 py-[7px] text-[13px]';
+    ? 'min-h-6 gap-2 px-2.5 py-0.5 text-[12px]'
+    : 'min-h-7 gap-2.5 px-3 py-1 text-[13px]';
 
   return createPortal(
     <>
@@ -281,7 +281,7 @@ export function ContextMenu({
         {...(activeId ? { 'aria-activedescendant': activeId } : {})}
         onKeyDown={onKeyDown}
         /* above every dialog it can be opened in (the Projects window is z-10050); taller than the window, it scrolls */
-        className={`fixed z-[10060] overflow-y-auto overflow-x-hidden border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-lg)] outline-none ${panel}`}
+        className={`studio-popover fixed z-[10060] overflow-y-auto overflow-x-hidden outline-none ${panel}`}
         style={{
           left: pos?.left ?? x,
           top: pos?.top ?? y,
@@ -332,11 +332,11 @@ export function ContextMenu({
                   : entry.danger
                     ? 'text-[var(--err)]'
                     : 'text-[var(--text)]'
-              } ${idx >= 0 && idx === active && !entry.disabled ? 'bg-[var(--bg-hover)]' : ''}`}
+              } ${idx >= 0 && idx === active && !entry.disabled ? 'bg-[var(--accent-soft)]' : ''}`}
             >
               {hasCheck ? (
                 <span
-                  className={`flex shrink-0 justify-center text-[var(--brand-wind-mid)] ${
+                  className={`flex shrink-0 justify-center text-[var(--accent)] ${
                     dense ? 'w-[11px] text-[11px]' : 'w-[14px] text-[12px]'
                   }`}
                   aria-hidden
@@ -374,7 +374,7 @@ export function ContextMenu({
           aria-orientation="vertical"
           {...(subActiveId ? { 'aria-activedescendant': subActiveId } : {})}
           onKeyDown={onSubKeyDown}
-          className="fixed z-[10061] min-w-[168px] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[var(--shadow-lg)] outline-none"
+          className="studio-popover fixed z-[10061] min-w-[168px] overflow-hidden py-1 outline-none"
           style={{
             left: subPos?.left ?? 0,
             top: subPos?.top ?? 0,
@@ -400,11 +400,11 @@ export function ContextMenu({
                   entry.disabled
                     ? 'cursor-default text-[var(--text-faint)]'
                     : 'text-[var(--text)] hover:bg-[var(--bg-hover)]'
-                } ${inSub && idx >= 0 && idx === subActive ? 'bg-[var(--bg-hover)]' : ''}`}
+                } ${inSub && idx >= 0 && idx === subActive ? 'bg-[var(--accent-soft)]' : ''}`}
               >
                 {entry.checked !== undefined ? (
                   <span
-                    className="flex w-[14px] shrink-0 justify-center text-[12px] text-[var(--brand-wind-mid)]"
+                    className="flex w-[14px] shrink-0 justify-center text-[12px] text-[var(--accent)]"
                     aria-hidden
                   >
                     {entry.checked ? '✓' : ''}

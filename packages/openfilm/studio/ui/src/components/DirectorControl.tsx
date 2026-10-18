@@ -54,17 +54,17 @@ export function DirectorControl({ context, className }: { context: () => Directo
     {draft.open ? createPortal(
       <div data-studio-host-panel className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/35 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) directorHost.close(); }}>
         <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="director-dialog-title" data-studio-host-panel
-          className="flex max-h-[85vh] w-full max-w-[600px] flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] shadow-[var(--shadow-lg)]">
-          <header className="flex shrink-0 items-center gap-3 border-b border-[var(--border-soft)] px-5 py-4">
-            <Clapperboard size={18} /><h2 id="director-dialog-title" className="flex-1 text-[15px] font-semibold">{name('director.open')}</h2>
-            <button type="button" aria-label={t('director.close')} onClick={directorHost.close} className="rounded-md p-1 hover:bg-[var(--bg-hover)]"><X size={16} /></button>
+          className="studio-modal flex max-h-[85vh] w-full max-w-[600px] flex-col overflow-hidden text-[var(--text)]">
+          <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-[var(--border-soft)] px-5">
+            <Clapperboard size={17} /><h2 id="director-dialog-title" className="flex-1 text-[14px] font-semibold">{name('director.open')}</h2>
+            <button type="button" aria-label={t('director.close')} onClick={directorHost.close} className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-[var(--bg-hover)]"><X size={15} /></button>
           </header>
           <div className="min-h-0 space-y-4 overflow-y-auto px-5 py-4 text-[13px]">
             <p className="text-[var(--text-muted)]">{t('director.explanation')}</p>
             <label className="block space-y-2"><span>{t('director.instruction')}</span>
               <textarea rows={4} maxLength={16000} value={instruction} disabled={state !== 'idle'}
                 onChange={(event) => setInstruction(event.target.value)} placeholder={t('director.placeholder')}
-                className="w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3 outline-none focus:border-[var(--text-muted)] disabled:opacity-60" />
+                className="studio-field w-full resize-y border border-[var(--border)] p-3 outline-none" />
             </label>
             <details className="rounded-lg border border-[var(--border-soft)] p-3">
               <summary className="cursor-pointer text-[var(--text-muted)]">{t('director.selection').replace('{n}', String(draft.context?.refs.length ?? 0))}</summary>
@@ -82,9 +82,9 @@ export function DirectorControl({ context, className }: { context: () => Directo
             {state === 'prepared' ? <p role="status" className="text-[var(--ok)]">{t('director.prepared')}</p> : null}
           </div>
           <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-[var(--border-soft)] px-5 py-3">
-            <button type="button" onClick={directorHost.close} className="rounded-lg px-3 py-2 text-[13px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)]">{t('director.close')}</button>
+            <button type="button" onClick={directorHost.close} className="studio-button px-3 text-[var(--text-muted)] hover:bg-[var(--bg-hover)]">{t('director.close')}</button>
             <button type="button" disabled={!instruction.trim() || state !== 'idle'} onClick={() => void prepare()}
-              className="flex items-center gap-2 rounded-lg bg-[var(--text)] px-4 py-2 text-[13px] text-[var(--surface)] disabled:opacity-50">
+              className="studio-button studio-action flex items-center gap-2 px-4">
               {state === 'preparing' ? <Loader2 size={14} className="animate-spin" /> : null}{t(state === 'preparing' ? 'director.preparing' : 'director.prepare')}
             </button>
           </footer>

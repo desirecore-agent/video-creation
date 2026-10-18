@@ -25,11 +25,11 @@ import { MenuSelect } from './MenuSelect';
 /* ───────────────────────────── skin ───────────────────────────── */
 
 /** A field: light fill, no border; a thin edge on hover, the accent ring on focus. Figma's properties panel look. */
-export const FIELD = 'group/field relative flex h-[26px] min-w-0 w-full items-center overflow-hidden rounded-[5px] bg-[var(--fill-tsp)] ring-1 ring-inset ring-transparent transition-[box-shadow,background-color] hover:ring-[var(--border)] focus-within:bg-[var(--bg)] focus-within:ring-[1.5px] focus-within:ring-[var(--accent)]';
-export const INPUT = 'h-[26px] min-w-0 flex-1 border-0 bg-transparent pr-2 text-[11px] text-[var(--text)] outline-none tabular-nums placeholder:text-[var(--text-faint)]';
-const PREFIX = 'flex h-[26px] w-[22px] shrink-0 select-none items-center justify-center text-[10.5px] text-[var(--text-faint)]';
+export const FIELD = 'group/field relative flex h-6 min-w-0 w-full items-center overflow-hidden rounded-[7px] bg-[var(--fill-tsp)] ring-1 ring-inset ring-transparent transition-[box-shadow,background-color] hover:ring-[var(--border)] focus-within:bg-[var(--bg)] focus-within:ring-[1.5px] focus-within:ring-[var(--accent)]';
+export const INPUT = 'h-6 min-w-0 flex-1 border-0 bg-transparent pr-2 text-[12px] text-[var(--text)] outline-none tabular-nums placeholder:text-[var(--text-faint)]';
+const PREFIX = 'flex h-6 w-[22px] shrink-0 select-none items-center justify-center text-[10.5px] text-[var(--text-faint)]';
 /** A one-icon button in a header or beside a section title. */
-export const HEAD_BTN = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] text-[var(--text-muted)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text)] disabled:pointer-events-none disabled:opacity-40';
+export const HEAD_BTN = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] text-[var(--text-muted)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text)] disabled:pointer-events-none disabled:opacity-40';
 export const ICON = 13;
 
 /** Several things selected that differ in a value. */

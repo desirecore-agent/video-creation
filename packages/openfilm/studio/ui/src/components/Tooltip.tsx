@@ -137,7 +137,7 @@ export function Tooltip({
           <div
             ref={bubble}
             role="tooltip"
-            className={`pointer-events-none fixed z-[10200] -translate-x-1/2 whitespace-nowrap rounded-[8px] px-2.5 py-[5px] text-[12px] font-medium shadow-md ${
+            className={`pointer-events-none fixed z-[10200] -translate-x-1/2 whitespace-nowrap rounded-[7px] px-2 py-1 text-[11px] font-medium ${
               side === 'bottom' ? '' : '-translate-y-full'
             }`}
             style={{
@@ -148,7 +148,9 @@ export function Tooltip({
               visibility: fit ? 'visible' : 'hidden',
               background: 'var(--tooltip-bg)',
               color: 'var(--tooltip-text)',
-              border: '1px solid var(--tooltip-border)',
+              border: '0.5px solid var(--tooltip-border)',
+              boxShadow: 'var(--shadow-popover)',
+              backdropFilter: 'blur(24px) saturate(1.3)',
             }}
           >
             {label}

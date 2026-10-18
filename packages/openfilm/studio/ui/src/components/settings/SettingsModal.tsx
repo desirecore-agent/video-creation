@@ -21,7 +21,7 @@ import { ModelsSection } from './ModelsSection';
 import { ProvidersSection } from './ProvidersSection';
 import { SettingsSelect } from './SettingsSelect';
 import { SettingsButton, SettingsGroup, SettingsItem, SettingsPage, SettingsSegmented, SettingsSwitch } from './ui';
-import { useThemeMode, type ThemeMode } from './theme';
+import { useHostTheme, useThemeMode, type ThemeMode } from './theme';
 import { StorageGroup } from './StorageGroup';
 
 export type SettingsSection = 'general' | 'agents' | 'providers' | 'models' | 'developer' | 'shortcuts';
@@ -124,7 +124,7 @@ export function SettingsModal({ open, onClose, section: opening }: SettingsModal
   return createPortal(
     <div
       className="fixed inset-0 z-[10050] grid place-items-center p-6"
-      style={{ background: 'rgba(0,0,0,0.5)', opacity: shown ? 1 : 0, transition: 'opacity 160ms ease' }}
+      style={{ background: 'rgba(0,0,0,0.5)', opacity: shown ? 1 : 0, transition: 'opacity 180ms ease' }}
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
@@ -132,11 +132,11 @@ export function SettingsModal({ open, onClose, section: opening }: SettingsModal
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-title"
-        className="relative flex h-[min(800px,90vh)] w-full max-w-[1120px] overflow-hidden rounded-[14px] border border-[var(--border)] bg-[var(--dock-pane)] shadow-[0_24px_64px_-12px_rgba(0,0,0,0.5),0_4px_16px_rgba(0,0,0,0.14)]"
-        style={{ opacity: shown ? 1 : 0, transform: shown ? 'scale(1)' : 'scale(0.98)', transition: 'opacity 160ms ease, transform 200ms ease' }}
+        className="studio-modal studio-settings relative flex h-[min(760px,90vh)] w-full max-w-[1000px] overflow-hidden"
+        style={{ opacity: shown ? 1 : 0, transform: shown ? 'scale(1)' : 'scale(0.98)', transition: 'opacity 180ms ease, transform 180ms ease' }}
       >
-        <nav aria-label={t('settings.title')} className="flex w-[264px] shrink-0 flex-col overflow-y-auto border-r border-[var(--border)] px-3 pb-4 pt-3">
-          <label className="mb-3 flex h-10 shrink-0 items-center gap-2.5 rounded-[9px] border border-[var(--border)] px-3 text-[var(--text-muted)] transition focus-within:border-[var(--text-muted)]">
+        <nav aria-label={t('settings.title')} className="flex w-[220px] shrink-0 flex-col overflow-y-auto border-r border-[var(--border)] px-3 pb-4 pt-3">
+          <label className="studio-search-field mb-3 flex h-8 shrink-0 items-center gap-2.5 rounded-[9px] border border-[var(--border)] px-3 text-[var(--text-muted)]">
             <Search size={17} strokeWidth={1.75} className="shrink-0" aria-hidden />
             <input
               ref={search}
@@ -144,7 +144,7 @@ export function SettingsModal({ open, onClose, section: opening }: SettingsModal
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t('settings.search')}
               aria-label={t('settings.search')}
-              className="min-w-0 flex-1 bg-transparent text-[15px] text-[var(--text)] outline-none placeholder:text-[var(--text-faint)]"
+              className="min-w-0 flex-1 bg-transparent text-[13px] text-[var(--text)] outline-none placeholder:text-[var(--text-faint)]"
             />
           </label>
           {nav.map((group) => (
@@ -158,7 +158,7 @@ export function SettingsModal({ open, onClose, section: opening }: SettingsModal
                     type="button"
                     aria-current={active ? 'page' : undefined}
                     onClick={() => setSection(id)}
-                    className={`flex h-10 min-w-0 items-center gap-3 rounded-[8px] px-2.5 text-left text-[15px] transition ${
+                    className={`flex h-8 min-w-0 items-center gap-2 rounded-[8px] px-2.5 text-left text-[13px] transition ${
                       active ? 'bg-[var(--bg-active)] text-[var(--text)]' : 'text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]'
                     }`}
                   >
@@ -179,11 +179,11 @@ export function SettingsModal({ open, onClose, section: opening }: SettingsModal
 
         <div className="relative flex min-w-0 flex-1 flex-col">
           <button type="button" onClick={onClose} aria-label={t('settings.done')}
-            className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-[8px] text-[var(--text-muted)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text)]">
+            className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-[8px] text-[var(--text-muted)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text)]">
             <X size={19} strokeWidth={1.75} />
           </button>
-          <div key={showing ?? 'none'} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-10 pb-12 pt-9">
-            {showing ? <h2 id="settings-title" className="mb-7 text-[22px] font-semibold tracking-[-0.015em] text-[var(--text)]">{t(`settings.sections.${showing}`)}</h2> : null}
+          <div key={showing ?? 'none'} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-7 pb-8 pt-7">
+            {showing ? <h2 id="settings-title" className="mb-5 text-[18px] font-semibold tracking-[-0.015em] text-[var(--text)]">{t(`settings.sections.${showing}`)}</h2> : null}
             {showing === 'general' && <GeneralSection />}
             {showing === 'agents' && <AgentsSection />}
             {showing === 'providers' && <ProvidersSection />}
@@ -201,6 +201,7 @@ export function SettingsModal({ open, onClose, section: opening }: SettingsModal
 function GeneralSection() {
   const t = useT();
   const [mode, setMode] = useThemeMode();
+  const hostTheme = useHostTheme();
   const [language, setLanguage] = useLanguageChoice();
 
   return (
@@ -208,8 +209,13 @@ function GeneralSection() {
       <SettingsGroup title={t('settings.appearance.group')}>
         <SettingsItem
           title={t('settings.appearance.theme')}
-          description={t('settings.appearance.themeHint')}
-          control={(
+          description={t(hostTheme ? 'settings.appearance.hostThemeHint' : 'settings.appearance.themeHint')}
+          control={hostTheme ? (
+            <span className="inline-flex h-8 items-center gap-1.5 text-[12px] text-[var(--text-muted)]">
+              {hostTheme === 'dark' ? <Moon size={14} /> : <Sun size={14} />}
+              {t('settings.appearance.hostTheme')}
+            </span>
+          ) : (
             <SettingsSegmented<ThemeMode>
               label={t('settings.appearance.theme')}
               value={mode}

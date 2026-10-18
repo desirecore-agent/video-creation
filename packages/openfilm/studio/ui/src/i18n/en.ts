@@ -1467,6 +1467,8 @@ export const en = {
       system: 'System',
       language: 'Language',
       languageSystem: 'Same as the system',
+      hostTheme: 'Follow DesireCore',
+      hostThemeHint: 'The interface follows DesireCore. Your browser preference is kept.',
       themeHint: 'Light, dark, or the same as your system.',
       languageHint: 'The language {productName} shows itself in.',
     },

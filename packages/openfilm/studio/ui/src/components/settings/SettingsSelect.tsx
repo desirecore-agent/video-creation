@@ -56,7 +56,7 @@ export function SettingsSelect<T extends string>({ label, value, options, onChan
       trigger={(
         <button type="button" aria-label={`${label}: ${selected.label}`} aria-haspopup="listbox" aria-expanded={open}
           style={width ? { width } : undefined}
-          className={`flex h-10 max-w-full items-center gap-2 ${width ? '' : 'w-auto'} rounded-[8px] border px-3 text-left text-[14.5px] text-[var(--text)] transition ${open ? 'border-[var(--text-muted)]' : 'border-[var(--border)] hover:border-[var(--border-strong)]'}`}>
+          className={`studio-field flex h-8 max-w-full items-center gap-2 ${width ? '' : 'w-auto'} border px-2.5 text-left text-[13px] text-[var(--text)] transition ${open ? 'border-[var(--text-muted)]' : 'border-[var(--border)] hover:border-[var(--border-strong)]'}`}>
           {selected.icon ? <span className="flex shrink-0 text-[var(--text-muted)]">{selected.icon}</span> : null}
           {/* without a width it is as wide as what it shows */}
           <span className={width ? 'min-w-0 flex-1 truncate' : 'whitespace-nowrap'}>{selected.label}</span>
@@ -66,15 +66,15 @@ export function SettingsSelect<T extends string>({ label, value, options, onChan
     >
       <div ref={list} role="listbox" aria-label={label} onKeyDown={onKeyDown}
         style={{ minWidth: width ?? 160 }}
-        className="max-h-[min(320px,var(--popover-max-h))] overflow-y-auto rounded-[10px] border border-[var(--border)] bg-[var(--surface)] p-1 shadow-[var(--shadow-lg)]">
+        className="studio-popover max-h-[min(320px,var(--popover-max-h))] overflow-y-auto p-1">
         {options.map((option) => {
           const on = option.value === value;
           return (
             <button key={option.value} type="button" role="option" aria-selected={on} onClick={() => choose(option)}
-              className="flex h-9 w-full items-center gap-2 rounded-[6px] px-2 text-left text-[14.5px] text-[var(--text)] outline-none hover:bg-[var(--bg-hover)] focus-visible:bg-[var(--bg-hover)]">
+              className="flex h-7 w-full items-center gap-2 rounded-[6px] px-2 text-left text-[13px] text-[var(--text)] outline-none hover:bg-[var(--bg-hover)] focus-visible:bg-[var(--bg-hover)]">
               {option.icon ? <span className="flex shrink-0 text-[var(--text-muted)]">{option.icon}</span> : null}
               <span className="min-w-0 flex-1 truncate">{option.label}</span>
-              <Check size={16} className={on ? 'shrink-0 text-[var(--text)]' : 'invisible shrink-0'} />
+              <Check size={16} className={on ? 'shrink-0 text-[var(--accent)]' : 'invisible shrink-0'} />
             </button>
           );
         })}

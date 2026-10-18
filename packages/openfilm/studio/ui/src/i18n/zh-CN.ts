@@ -1467,6 +1467,8 @@ export const zhCN: Words = {
       system: '跟随系统',
       language: '语言',
       languageSystem: '跟随系统',
+      hostTheme: '跟随 DesireCore',
+      hostThemeHint: '界面随 DesireCore 切换明暗，独立浏览器中的主题偏好仍会保留。',
       themeHint: '浅色、深色，或跟随系统。',
       languageHint: '{productName} 界面使用的语言。',
     },

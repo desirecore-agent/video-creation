@@ -1,9 +1,6 @@
-/**
- * The theme: light, dark or the system's, dark until the person chooses. The choice is kept in localStorage `openfilm.theme` and shown as
- * `<html data-theme>`; index.html applies it before the first paint, this keeps it current afterwards, in every page
- * of Studio that is open.
- */
+/** 独立浏览器保留本地偏好；嵌入时仅临时采用宿主已解析的明暗主题。 */
 import React from 'react';
+import { getHostAppearance, subscribeHostAppearance } from '../../lib/host-appearance.ts';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -18,8 +15,11 @@ function saved(): ThemeMode {
 }
 
 function apply(mode: ThemeMode) {
+  if (getHostAppearance()) return;
   document.documentElement.dataset.theme = mode === 'system' ? (dark().matches ? 'dark' : 'light') : mode;
 }
+
+export function applySavedTheme(): void { apply(saved()); }
 
 const listeners = new Set<() => void>();
 
@@ -44,4 +44,10 @@ export function setThemeMode(mode: ThemeMode) {
 export function useThemeMode(): [ThemeMode, (mode: ThemeMode) => void] {
   const mode = React.useSyncExternalStore((on) => { listeners.add(on); return () => listeners.delete(on); }, saved, () => 'dark' as ThemeMode);
   return [mode, setThemeMode];
+}
+
+/** 设置面板只呈现实际宿主主题，避免提供当前不会生效的本地开关。 */
+export function useHostTheme(): 'light' | 'dark' | null {
+  const appearance = React.useSyncExternalStore(subscribeHostAppearance, getHostAppearance, () => null);
+  return appearance?.colorScheme ?? null;
 }

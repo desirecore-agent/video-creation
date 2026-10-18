@@ -1,76 +1,74 @@
 @import 'tailwindcss';
-@import '@fontsource-variable/inter';
 
 /* `dark:` follows the app's theme (`<html data-theme>`, set at startup from the saved choice), not the system's
    directly: when the two differ, a system-driven `dark:` would paint the wrong side. */
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
-/* ── Design system: restrained, light by default ─────────────────────────────────────────────────────────────── */
+/* ── Studio 语义外观 ── */
 
 :root {
-  --font-cjk-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Source Han Sans SC',
-    'Heiti SC', sans-serif;
-  --font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
-    Arial, var(--font-cjk-sans);
-  --font-mono: ui-monospace, 'SFMono-Regular', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
-
-  --radius-lg: 16px;
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.1), 0 4px 8px rgba(0, 0, 0, 0.05);
-
-  /* a host window's controls (lib/host.ts); nothing to make room for in a browser */
+  --font-cjk-sans: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --font-sans: var(--host-font-sans, -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', 'Noto Sans SC', system-ui, sans-serif);
+  --font-mono: ui-monospace, 'SFMono-Regular', 'SF Mono', Menlo, Consolas, monospace;
+  --radius-lg: var(--host-radius-lg, 12px);
+  --radius-xl: var(--host-radius-xl, 14px);
+  --radius-2xl: var(--host-radius-2xl, 16px);
+  --control-radius: var(--host-radius-md, 7px);
+  --card-radius: var(--host-radius-xl, 14px);
+  --ui-duration: 180ms;
   --titlebar-logo-x: 6px;
   --titlebar-right-x: 0px;
 }
 
-/* ── Light (default): paper is 252, the board panes sit on is 242, every other gray lies between ── */
+/* 独立浏览器的有限后备值；嵌入时以宿主实时快照为准，不维护另一套平台主题。 */
+/* ── 浅色后备 ── */
 :root,
 [data-theme='light'] {
   color-scheme: light;
 
-  --bg: #fcfcfc;
-  --canvas: #f2f2f2;
-  --panel: #fcfcfc;
-  --surface: #fcfcfc;
-  --surface-2: #f2f2f2;
-  --surface-3: #e8e8e8;
+  --bg: var(--host-glass-solid, #fdfdfc);
+  --canvas: var(--bg);
+  --panel: var(--host-glass-solid, #fdfdfc);
+  --surface: var(--host-glass-solid, #fdfdfc);
+  --surface-2: color-mix(in srgb, var(--bg) 96%, var(--text));
+  --surface-3: var(--host-sys-fill, rgba(120, 120, 128, 0.08));
   --bg-surface: var(--surface);
 
-  --border: rgba(0, 0, 0, 0.08);
-  --border-soft: rgba(0, 0, 0, 0.05);
-  --border-strong: rgba(0, 0, 0, 0.16);
+  --border: var(--host-sys-separator, rgba(60, 60, 67, 0.08));
+  --border-soft: var(--host-sys-separator, rgba(60, 60, 67, 0.08));
+  --border-strong: var(--host-glass-border, rgba(60, 60, 67, 0.09));
 
-  --text: #1f1f1f;
-  --text-dim: #4b4b4b;
-  --text-muted: #666666;
-  --text-faint: #a9a9a9;
+  --text: var(--host-sys-label, #1d1d1f);
+  --text-dim: var(--host-sys-secondary, #6e6e73);
+  --text-muted: var(--host-sys-secondary, #6e6e73);
+  --text-faint: var(--host-sys-tertiary, #aeaeb2);
 
-  --card-bg: #fcfcfc;
-  --card-border: rgba(0, 0, 0, 0.08);
-  --fill-tsp: rgba(0, 0, 0, 0.05);
+  --card-bg: var(--host-glass-card, rgba(255, 255, 255, 0.58));
+  --card-border: var(--host-glass-border, rgba(60, 60, 67, 0.09));
+  --fill-tsp: var(--host-sys-fill, rgba(120, 120, 128, 0.08));
 
-  --tooltip-bg: #ffffff;
-  --tooltip-text: #1f1f1f;
-  --tooltip-border: rgba(0, 0, 0, 0.14);
+  --tooltip-bg: var(--host-glass-modal, rgba(253, 253, 252, 0.96));
+  --tooltip-text: var(--text);
+  --tooltip-border: var(--border-strong);
 
-  /* the main action is ink, not a color; selected and hover are neutral grays */
-  --accent: #1a1a1a;
-  --accent-soft: rgba(26, 26, 26, 0.06);
-  --on-accent: #ffffff;
+  /* 动作色与成功色分离，均可由宿主实时快照覆盖。 */
+  --accent: var(--host-action-primary, #397455);
+  --accent-soft: var(--host-action-soft, rgba(57, 116, 85, 0.1));
+  --on-accent: var(--host-action-foreground, #fff);
 
-  --ok: #16a34a;
-  --warn: #d97706;
-  --err: #dc2626;
+  --ok: var(--host-accent-green, #34c759);
+  --warn: var(--host-accent-orange, #ff9500);
+  --err: var(--host-accent-red, #ff3b30);
 
-  --bg-hover: rgba(0, 0, 0, 0.045);
-  --bg-active: rgba(0, 0, 0, 0.08);
+  /* 实色面板用中性填充做交互叠层，避免白玻璃在浅色浮层上不可辨。 */
+  --bg-hover: var(--host-sys-fill, rgba(120, 120, 128, 0.08));
+  --bg-active: color-mix(in srgb, var(--text) 10%, transparent);
 
-  --app-content-bg: #fcfcfc;
+  --app-content-bg: var(--bg);
 
-  /* the docked layout: panes float on a board one step darker; the seams are that board showing through */
-  --dock-shell: #f2f2f2;
-  --dock-pane: #fcfcfc;
+  /* 面板在宿主实色基底上叠加玻璃表面。 */
+  --dock-shell: var(--bg);
+  --dock-pane: var(--host-glass-card, rgba(255, 255, 255, 0.58));
 
   --folder-back: #cbcbcb;
   --folder-front: #e0e0e0;
@@ -83,17 +81,17 @@
   /* The timeline. The track area is light like the rest of the screen, but blocks are dark enough to carry white
      text and waveforms. Toolbar, track heads and ruler are the pane's own color (its rounded corners show through
      that); only the lanes step half a shade darker. */
-  --tl-lane: #efefef;
-  --tl-lane-on: #f5f5f5;
-  --tl-head: #fcfcfc;
-  --tl-ruler: #fcfcfc;
-  --tl-line: #e2e2e2;
-  --tl-text: #4a4a4a;
-  --tl-faint: #8a8a8a;
-  /* playhead, selection and the zoom slider's traveled part: the brand teal, "the thing you are moving" */
-  --tl-playhead: #1f8a86;
-  --tl-accent: #1f8a86;
-  --tl-select: var(--tl-accent);
+  --tl-lane: var(--surface-2);
+  --tl-lane-on: var(--bg-active);
+  --tl-head: var(--panel);
+  --tl-ruler: var(--panel);
+  --tl-line: var(--border);
+  --tl-text: var(--text-dim);
+  --tl-faint: var(--text-faint);
+  /* 浅色时间线的编辑定位沿宿主动作色。 */
+  --tl-playhead: var(--accent);
+  --tl-accent: var(--accent);
+  --tl-select: var(--accent);
   --tl-tick: rgba(0, 0, 0, 0.16);
   /* waveforms on blocks (canvas reads these back from the element) */
   --tl-wave: rgba(0, 110, 108, 0.82);
@@ -104,52 +102,60 @@
   --tl-sfx: #5192c4;
   --tl-music: #3f9a90;
   --tl-caption: #7c8797;
+  --action-solid: var(--host-action-solid, #397455);
+  --action-solid-hover: var(--host-action-solid-hover, #2d6246);
+  --modal-bg: var(--host-glass-modal, rgba(253, 253, 252, 0.96));
+  --shadow-sm: var(--host-shadow-contained-card, 0 1px 2px rgba(0, 0, 0, 0.05));
+  --shadow-lg: var(--host-shadow-float, 0 8px 24px rgba(30, 30, 32, 0.09), 0 2px 6px rgba(30, 30, 32, 0.04));
+  --shadow-popover: var(--host-shadow-contained-popover, 0 3px 8px -3px rgba(0, 0, 0, 0.1), 0 10px 24px -12px rgba(0, 0, 0, 0.18));
+  --scroll-thumb: var(--host-scroll-thumb, rgba(0, 0, 0, 0.1));
+  --scroll-thumb-hover: var(--host-scroll-thumb-hover, rgba(0, 0, 0, 0.18));
 }
 
 /* ── Dark ── */
 [data-theme='dark'] {
   color-scheme: dark;
 
-  --bg: #1a1a1a;
-  --canvas: #1f1f1f;
-  --panel: #181818;
-  --surface: #202020;
-  --surface-2: #2a2a2a;
-  --surface-3: #313131;
+  --bg: var(--host-glass-solid, #2c2c2f);
+  --canvas: var(--bg);
+  --panel: var(--host-glass-solid, #2c2c2f);
+  --surface: var(--host-glass-solid, #2c2c2f);
+  --surface-2: color-mix(in srgb, var(--bg) 94%, var(--text));
+  --surface-3: var(--host-sys-fill, rgba(255, 255, 255, 0.06));
 
-  --border: rgba(255, 255, 255, 0.06);
-  --border-soft: rgba(255, 255, 255, 0.04);
-  --border-strong: rgba(255, 255, 255, 0.12);
+  --border: var(--host-sys-separator, rgba(255, 255, 255, 0.08));
+  --border-soft: var(--host-sys-separator, rgba(255, 255, 255, 0.08));
+  --border-strong: var(--host-glass-border, rgba(255, 255, 255, 0.11));
 
-  --text: #dadada;
-  --text-dim: #b0b0b0;
-  --text-muted: #959595;
-  --text-faint: #646464;
+  --text: var(--host-sys-label, #f8f8fc);
+  --text-dim: var(--host-sys-secondary, #c8c8ce);
+  --text-muted: var(--host-sys-secondary, #c8c8ce);
+  --text-faint: var(--host-sys-tertiary, #a5a5ac);
 
-  --card-bg: #202020;
-  --card-border: rgba(255, 255, 255, 0.06);
-  --fill-tsp: rgba(255, 255, 255, 0.06);
+  --card-bg: var(--host-glass-card, rgba(36, 36, 38, 0.76));
+  --card-border: var(--border-strong);
+  --fill-tsp: var(--host-sys-fill, rgba(255, 255, 255, 0.06));
 
-  --tooltip-bg: rgb(20, 20, 20);
-  --tooltip-text: rgb(240, 240, 240);
-  --tooltip-border: rgba(255, 255, 255, 0.16);
+  --tooltip-bg: var(--host-glass-modal, rgba(44, 44, 47, 0.96));
+  --tooltip-text: var(--text);
+  --tooltip-border: var(--border-strong);
 
-  --accent: #1a93fe;
-  --accent-soft: rgba(26, 147, 254, 0.12);
-  --on-accent: #ffffff;
+  --accent: var(--host-action-primary, #93c6a5);
+  --accent-soft: var(--host-action-soft, rgba(147, 198, 165, 0.12));
+  --on-accent: var(--host-action-foreground, #10251b);
 
-  --ok: #5eb92d;
-  --warn: #ffbf36;
-  --err: #eb4d4d;
+  --ok: var(--host-accent-green, #34c759);
+  --warn: var(--host-accent-orange, #ff9500);
+  --err: var(--host-accent-red, #ff3b30);
 
-  --bg-hover: rgba(255, 255, 255, 0.06);
-  --bg-active: rgba(255, 255, 255, 0.1);
+  --bg-hover: var(--host-sys-fill, rgba(255, 255, 255, 0.06));
+  --bg-active: color-mix(in srgb, var(--text) 10%, transparent);
 
-  --app-content-bg: rgb(17, 17, 17);
+  --app-content-bg: var(--bg);
 
-  /* panes one step lighter than the near-black board, so they read as boards laid on it */
-  --dock-shell: #111111;
-  --dock-pane: #181818;
+  /* 暗色面板同样沿宿主玻璃表面分层。 */
+  --dock-shell: var(--bg);
+  --dock-pane: var(--host-glass-card, rgba(36, 36, 38, 0.76));
 
   --folder-back: #3a3a3a;
   --folder-front: #4d4d4d;
@@ -159,17 +165,17 @@
   --brand-wind-mid: #66d8b8;
   --brand-wind-to: #7fd3e4;
 
-  --tl-lane: #1e1e1e;
-  --tl-lane-on: #272727;
-  --tl-head: #181818;
-  --tl-ruler: #181818;
-  --tl-line: #252525;
-  --tl-text: rgba(255, 255, 255, 0.7);
-  --tl-faint: rgba(255, 255, 255, 0.4);
-  /* white playhead on near black; selection white too (teal disappears on the darkened blocks) */
-  --tl-playhead: #ffffff;
-  --tl-accent: #45c2b4;
-  --tl-select: #ffffff;
+  --tl-lane: var(--surface-2);
+  --tl-lane-on: var(--bg-active);
+  --tl-head: var(--panel);
+  --tl-ruler: var(--panel);
+  --tl-line: var(--border);
+  --tl-text: var(--text-dim);
+  --tl-faint: var(--text-faint);
+  /* 暗色播放头与选择框保持明亮，避免在媒体片段上消失。 */
+  --tl-playhead: var(--text);
+  --tl-accent: var(--accent);
+  --tl-select: var(--text);
   --tl-wave: rgba(12, 168, 164, 0.9);
   --tl-wave-band: rgba(0, 119, 125, 0.85);
   --tl-tick: rgba(255, 255, 255, 0.12);
@@ -179,6 +185,14 @@
   --tl-sfx: #084254;
   --tl-music: #00323f;
   --tl-caption: #434a55;
+  --action-solid: var(--host-action-solid, #75ad8c);
+  --action-solid-hover: var(--host-action-solid-hover, #8abf9f);
+  --modal-bg: var(--host-glass-modal, rgba(44, 44, 47, 0.96));
+  --shadow-sm: var(--host-shadow-contained-card, 0 1px 2px rgba(0, 0, 0, 0.05));
+  --shadow-lg: var(--host-shadow-float, 0 8px 24px rgba(30, 30, 32, 0.09), 0 2px 6px rgba(30, 30, 32, 0.04));
+  --shadow-popover: var(--host-shadow-contained-popover, 0 3px 8px -3px rgba(0, 0, 0, 0.1), 0 10px 24px -12px rgba(0, 0, 0, 0.18));
+  --scroll-thumb: var(--host-scroll-thumb, rgba(255, 255, 255, 0.12));
+  --scroll-thumb-hover: var(--host-scroll-thumb-hover, rgba(255, 255, 255, 0.2));
 }
 
 * {
@@ -191,20 +205,90 @@ body {
 }
 
 html {
-  background: #f2f2f2;
+  background: var(--bg);
 }
-html[data-theme='dark'] {
-  background: #141414;
+html[data-appearance-pending='true'] #root {
+  visibility: hidden;
 }
 
 body {
   color: var(--text);
   background: var(--canvas);
   font-family: var(--font-sans);
-  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
-  letter-spacing: -0.006em;
+  font-size: 13px;
+  line-height: 1.5;
+  letter-spacing: normal;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* 仅属于 Studio 文档的控件密度与状态；作品 iframe 有自己的样式边界。 */
+:where(button, input, textarea, select, a[role='button']) {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--ui-duration);
+  transition-timing-function: ease;
+}
+:where(button, input, textarea, select):disabled {
+  opacity: 0.4;
+}
+[data-titlebar] { min-height: 40px; }
+.studio-button {
+  min-height: 32px;
+  border-radius: var(--control-radius);
+  font-size: 13px;
+  font-weight: 500;
+}
+.studio-action {
+  background: var(--action-solid);
+  color: var(--on-accent);
+}
+.studio-action:hover:not(:disabled) { background: var(--action-solid-hover); }
+.studio-action:active:not(:disabled) { filter: brightness(0.96); }
+.studio-card {
+  border-width: 0.5px;
+  border-radius: var(--card-radius);
+  box-shadow: none;
+}
+.studio-popover {
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--host-radius-base, 10px);
+  background: var(--modal-bg);
+  box-shadow: var(--shadow-popover);
+  backdrop-filter: blur(24px) saturate(1.3);
+}
+.studio-modal {
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--host-radius-2xl, 16px);
+  background: var(--modal-bg);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(24px) saturate(1.3);
+}
+.studio-field {
+  border-radius: var(--control-radius);
+  background: var(--fill-tsp);
+}
+.studio-field:hover:not(:disabled) { border-color: var(--border-strong); }
+[class~='group/field']:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.studio-field:focus-visible,
+textarea:focus-visible,
+:where(input:not([type='range']):not([type='color']):not([type='checkbox']):not([type='radio'])):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+[class~='group/field'] input:focus-visible { outline: none; box-shadow: none; }
+.studio-search-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.studio-search-field input:focus-visible { outline: none; box-shadow: none; }
+@media (max-width: 720px) {
+  .studio-settings > nav { width: 168px; padding-inline: 8px; }
+  .studio-settings > div > div { padding-inline: 20px; }
 }
 
 /* The editor is the whole screen: fixed, so the document itself never scrolls (100vw overflow, rubber banding). */
@@ -226,13 +310,13 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
+  background: var(--scroll-thumb);
   border-radius: 99px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-faint);
+  background: var(--scroll-thumb-hover);
   background-clip: padding-box;
 }
 
@@ -301,6 +385,7 @@ html[data-focus-nav='tab'] :where(a, button, [role='button'], select, summary):f
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 7px;
+  box-shadow: 0 0 0 2px var(--surface);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -108,7 +108,7 @@ export function MenuSelect({
         /* the popover keeps focus where it was on a press: the keys need it here */
         onClick={(e) => e.currentTarget.focus()}
         onKeyDown={onKeyDown}
-        className={`flex min-w-0 flex-1 items-center gap-1.5 border border-[var(--border)] bg-[var(--fill-tsp)] text-left text-[var(--text)] ${size === 'md' ? 'h-9 rounded-lg pl-3 pr-2 text-[13px]' : 'h-7 rounded-md pl-2 pr-1.5 text-[11px]'} outline-none transition hover:border-[var(--text-faint)] focus-visible:border-[var(--accent)] disabled:opacity-50 ${open ? 'border-[var(--accent)]' : ''} ${className}`}
+        className={`flex min-w-0 flex-1 items-center gap-1.5 border border-[var(--border)] bg-[var(--fill-tsp)] text-left text-[var(--text)] ${size === 'md' ? 'h-8 rounded-[7px] pl-2.5 pr-2 text-[13px]' : 'h-6 rounded-[7px] pl-2 pr-1.5 text-[12px]'} outline-none transition hover:border-[var(--text-faint)] focus-visible:border-[var(--accent)] disabled:opacity-40 ${open ? 'border-[var(--accent)]' : ''} ${className}`}
       >
         {prefix ? <span className="shrink-0 whitespace-nowrap text-[10.5px] text-[var(--text-faint)]">{prefix}</span> : null}
         <span className="min-w-0 flex-1 truncate">{current?.label ?? value}</span>
@@ -122,7 +122,7 @@ export function MenuSelect({
         aria-label={label}
         onKeyDown={onKeyDown}
         onMouseLeave={() => show(undefined)}
-        className="relative overflow-y-auto rounded-[8px] border border-[var(--border)] bg-[var(--panel)] p-1 shadow-[var(--shadow-lg)]"
+        className="studio-popover relative overflow-y-auto p-1"
         style={{ width: Math.max(width, 160), maxHeight: 'min(320px, var(--popover-max-h, 320px))' }}
       >
         {groups.map((group, g) => (
@@ -146,7 +146,7 @@ export function MenuSelect({
                   onMouseEnter={() => { setActive(i); show(choice); }}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => pick(choice)}
-                  className={`flex w-full items-center gap-2 rounded-[5px] px-2 text-left text-[var(--text)] ${size === 'md' ? 'h-8 text-[13px]' : 'h-7 text-[11.5px]'} ${i === active ? 'bg-[var(--bg-hover)]' : ''}`}
+                  className={`flex w-full items-center gap-2 rounded-[5px] px-2 text-left text-[var(--text)] ${size === 'md' ? 'h-7 text-[13px]' : 'h-6 text-[12px]'} ${i === active ? 'bg-[var(--accent-soft)]' : ''}`}
                 >
                   <span className="min-w-0 flex-1 truncate">{choice.label}</span>
                   {chosen ? <Check size={12} aria-hidden className="shrink-0 text-[var(--accent)]" /> : null}

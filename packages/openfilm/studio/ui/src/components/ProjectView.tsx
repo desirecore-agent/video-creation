@@ -138,7 +138,7 @@ const TIMELINE_SPARE = 48;
 const VIEWER_BESIDE_ASSETS = 440;
 const TITLE_MAX_CHARS = 56;
 const TOP_BTN =
-  'flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md text-[var(--text-dim)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text)]';
+  'flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] text-[var(--text-dim)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text)]';
 
 const fitBox = (w: number, h: number): React.CSSProperties => ({
   width: `min(100cqw, 100cqh * ${w} / ${h})`,
@@ -2515,7 +2515,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" style={{ paddingLeft: DOCK_GAP, paddingRight: DOCK_GAP, paddingBottom: DOCK_GAP }}>
         <div className="relative z-10 grid min-h-0 min-w-0 flex-1" style={{ gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'auto minmax(0, 1fr)', gridTemplateAreas: '"bar" "main"' }}>
           {/* ── top bar: the title centered, whatever is on either side ── */}
-          <div data-titlebar className="relative flex h-8 min-w-0 items-center gap-1" style={{ gridArea: 'bar' }}>
+          <div data-titlebar className="relative flex h-10 min-w-0 items-center gap-1" style={{ gridArea: 'bar' }}>
             {inTabs ? null : <div className="pointer-events-none absolute inset-0 flex min-w-0 items-center justify-center">
               <div className="pointer-events-auto flex min-w-0 max-w-full items-center">
                 {renaming ? (
