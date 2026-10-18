@@ -980,63 +980,21 @@
       "role": "runtime"
     },
     {
-      "path": "packages/openfilm/studio/ui/dist/assets/index-CLGDjeAJ.js",
-      "sha256": "25fff27352a39c308cacabfbc9447cc49d2c752b228fdcc9ff7ff9e3029e2228",
-      "size": 1647506,
+      "path": "packages/openfilm/studio/ui/dist/assets/index-CndIdOui.js",
+      "sha256": "6091d917308acd4bf6af4c266823d7d1a0952bd54ff17d1642d045e0d4b5eaa6",
+      "size": 1650475,
       "role": "ui"
     },
     {
-      "path": "packages/openfilm/studio/ui/dist/assets/index-CjcLYuWK.css",
-      "sha256": "f0f1e168aa50075ccf3a72b30e7989cc6274569206fc5c00abde55670748c0f4",
-      "size": 98392,
-      "role": "ui"
-    },
-    {
-      "path": "packages/openfilm/studio/ui/dist/assets/inter-cyrillic-ext-wght-normal-BOeWTOD4.woff2",
-      "sha256": "ca157063339ac4ad418f214f3abfed119b0798ab4d377386ce5c9e5a7a435ebd",
-      "size": 25960,
-      "role": "ui"
-    },
-    {
-      "path": "packages/openfilm/studio/ui/dist/assets/inter-cyrillic-wght-normal-DqGufNeO.woff2",
-      "sha256": "71d5ee93cc1e9f1d520a3a8b66456de18c7879d8df09d57fcd2eaff75fef0075",
-      "size": 18748,
-      "role": "ui"
-    },
-    {
-      "path": "packages/openfilm/studio/ui/dist/assets/inter-greek-ext-wght-normal-DlzME5K_.woff2",
-      "sha256": "6e9e020a25f9b56d418f2c085b1d3c09725a4da23fe693a5b463064606732190",
-      "size": 11232,
-      "role": "ui"
-    },
-    {
-      "path": "packages/openfilm/studio/ui/dist/assets/inter-greek-wght-normal-CkhJZR-_.woff2",
-      "sha256": "1be3448e292fbf05ffe176fe1e43f135013d50b1e7d324ad1a558f623d3bb6f6",
-      "size": 18996,
-      "role": "ui"
-    },
-    {
-      "path": "packages/openfilm/studio/ui/dist/assets/inter-latin-ext-wght-normal-DO1Apj_S.woff2",
-      "sha256": "34b9c504cab7a73e37b746343a449132e56cf7b5481af2cb81dc74dcff25c956",
-      "size": 85068,
-      "role": "ui"
-    },
-    {
-      "path": "packages/openfilm/studio/ui/dist/assets/inter-latin-wght-normal-Dx4kXJAl.woff2",
-      "sha256": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62",
-      "size": 48256,
-      "role": "ui"
-    },
-    {
-      "path": "packages/openfilm/studio/ui/dist/assets/inter-vietnamese-wght-normal-CBcvBZtf.woff2",
-      "sha256": "5c66f9e07e90c6d4ac4922cc68d60de26c17b1858e677fb5e603fce3952b3ff2",
-      "size": 10252,
+      "path": "packages/openfilm/studio/ui/dist/assets/index-DXkjMiR-.css",
+      "sha256": "b234a60128c81eae984c1186c884ed583ceb6952a91875a3505e7547fb790d35",
+      "size": 99916,
       "role": "ui"
     },
     {
       "path": "packages/openfilm/studio/ui/dist/index.html",
-      "sha256": "910fb283d3e8c7224bcfc0149db3d432d4a8ebf6d140e90ee3540ffe3848b2d6",
-      "size": 860,
+      "sha256": "921a00b69b424d952b8dd69408e4dca25cb9c29196ae96569fed1da4b020baef",
+      "size": 1176,
       "role": "ui"
     },
     {
@@ -1060,7 +1018,7 @@
   ],
   "source": {
     "kind": "worktree",
-    "sha256": "771ec97a25e31c6e5955db4a63fb95864e8b3ed98a07bbe79c065cd2940fad4b"
+    "sha256": "74501a535f9201d6a82ba2a21f797112ea89f0fe7abf4a26222025a99ba2c3f6"
   },
   "supportedPlatforms": [
     "darwin",
@@ -1093,5 +1051,5 @@
     "restoreInstructionsPath": "desirecore/RUNTIME.md"
   },
   "instructionsPath": "desirecore/RUNTIME.md",
-  "releaseDigest": "489a34e3b8128cac660c9a4ec46e63a8eb27f03d3cdd5a21e9666d74e15abd93"
+  "releaseDigest": "063b91371538f5233855b339c37dd8ee7884c37ca7cc6c47185936bcc66c4443"
 }
