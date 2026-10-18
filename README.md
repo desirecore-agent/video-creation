@@ -67,6 +67,6 @@ The [format specification](packages/openfilm/SPEC.md) and [authoring manual](pac
 
 The [MIT license](LICENSE), original [trademark policy](TRADEMARK.md) and [third-party notices](packages/openfilm/THIRD_PARTY_NOTICES.md) are retained. This derivative has its own name and original icon. FFmpeg, Chromium, fonts and other runtime dependencies retain their respective licensing requirements according to what is actually distributed. This repository does not build or publish the upstream desktop installers.
 
-The general-motion layer and those samples are independently implemented on the existing MIT core. Overlay Studio was a design reference; none of its code, templates, skills or assets are included. Schema validation uses bundled Ajv and ajv-formats, with complete dependency licenses under `desirecore/licenses/`.
+The general-motion layer and those samples are independently implemented on the existing MIT core. Overlay Studio was a design reference; none of its code, templates, skills or assets are included. Schema validation uses bundled Ajv and ajv-formats, with complete dependency licenses under `desirecore/licenses/`. The offline SDK also embeds the root license and complete MIT/BSD notices for its five actual dependencies, retaining them when a project or the single module is saved or copied.
 
 The complete film format and editor originate upstream. Integration verification is recorded in commits and pull requests. Paid media providers, the installed DesireCore host and final platform-specific packages require their own runtime verification.

@@ -138,10 +138,13 @@ test('本地SDK来自固定MIT构建，幂等安装且保留不同文件，闭�
   const sdk = readFileSync(join(root, installed.path));
   assert.equal(installed.bytes, sdk.length);
   assert.match(sdk.toString(), /MIT/);
+  assert.ok(sdk.toString().includes('Permission is hereby granted, free of charge'));
+  assert.ok(sdk.toString().includes('Redistribution and use in source and binary forms'));
   assert.equal((await installProjectMotionSdk(root, base)).installed, false);
   const output = join(root, '.film', 'snapshot');
   const frozen = await snapshotFilm(root, output);
   assert.ok(frozen.files.some((file) => file.path === installed.path));
+  assert.deepEqual(readFileSync(join(output, installed.path)), sdk, '独立输入闭包须保留完整许可字节');
   writeFileSync(join(root, installed.path), '人工SDK版本');
   await assert.rejects(installProjectMotionSdk(root, base), (error) => error.status === 409);
   assert.equal(readFileSync(join(root, installed.path), 'utf8'), '人工SDK版本');

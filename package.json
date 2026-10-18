@@ -21,7 +21,7 @@
     "app:release": "node desirecore/release.mjs",
     "build:motion": "node scripts/build-motion-sdk.mjs",
     "samples:motion": "node examples/general-motion/prepare-samples.mjs",
-    "test:motion": "node --test --test-concurrency=1 packages/openfilm/src/motion.test.mjs packages/openfilm/studio/server/motion-project.test.mjs packages/openfilm/studio/server/saved.test.mjs packages/openfilm/studio/server/closure.test.mjs desirecore/export-options.test.mjs desirecore/general-motion-smoke.test.mjs packages/openfilm/studio/ui/src/lib/motion-editor.test.ts packages/openfilm/studio/ui/src/editor/undo.test.ts",
+    "test:motion": "node --test --test-concurrency=1 packages/openfilm/src/motion.test.mjs packages/openfilm/studio/server/motion-project.test.mjs packages/openfilm/studio/server/saved.test.mjs packages/openfilm/studio/server/closure.test.mjs desirecore/export-options.test.mjs desirecore/general-motion-smoke.test.mjs packages/openfilm/studio/ui/src/lib/motion-editor.test.ts packages/openfilm/studio/ui/src/editor/undo.test.ts scripts/build-motion-sdk.test.mjs",
     "test:motion:runtime": "node --test --test-concurrency=1 packages/openfilm/src/motion-host.test.mjs packages/openfilm/studio/server/motion-pageframes.test.mjs desirecore/motion.integration.test.mjs packages/openfilm/src/render-alpha.test.mjs packages/openfilm/studio/server/motion-stage.test.mjs"
   },
   "devDependencies": {

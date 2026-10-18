@@ -33,8 +33,8 @@
     },
     {
       "path": "THIRD_PARTY_NOTICES.md",
-      "sha256": "145d46c8806db39dec078e59b5339e7d7ac0cafdbb793d7940122dd5b8bce372",
-      "size": 1057,
+      "sha256": "a53541edf789f35c08b556c08c2855c72e0980d1c0020a2f5b73094c93471e2a",
+      "size": 1355,
       "role": "license"
     },
     {
@@ -51,8 +51,8 @@
     },
     {
       "path": "desirecore/RUNTIME.md",
-      "sha256": "fbcd6460ca026d1ff7ca7cd08eee1668eb6d7fb3b40bba29b5fdf2321c226c91",
-      "size": 13982,
+      "sha256": "efc76716635b685b0548caf2cfb5eba9f0d4a770f7698baf80e26c12198ef823",
+      "size": 14080,
       "role": "documentation"
     },
     {
@@ -219,8 +219,8 @@
     },
     {
       "path": "examples/general-motion/alpha-title/motion.mjs",
-      "sha256": "35d97c111ff86e8fa4c7d90afeb18a6cafb7a463264661ccb14f66540536f67d",
-      "size": 316216,
+      "sha256": "880d3640c30d689833623166b2659a2d6f5ed31c5a2b5b1128d1b349da0c3f8d",
+      "size": 323726,
       "role": "runtime"
     },
     {
@@ -237,8 +237,8 @@
     },
     {
       "path": "examples/general-motion/data-story/motion.mjs",
-      "sha256": "35d97c111ff86e8fa4c7d90afeb18a6cafb7a463264661ccb14f66540536f67d",
-      "size": 316216,
+      "sha256": "880d3640c30d689833623166b2659a2d6f5ed31c5a2b5b1128d1b349da0c3f8d",
+      "size": 323726,
       "role": "runtime"
     },
     {
@@ -267,8 +267,8 @@
     },
     {
       "path": "examples/general-motion/optional-caption/motion.mjs",
-      "sha256": "35d97c111ff86e8fa4c7d90afeb18a6cafb7a463264661ccb14f66540536f67d",
-      "size": 316216,
+      "sha256": "880d3640c30d689833623166b2659a2d6f5ed31c5a2b5b1128d1b349da0c3f8d",
+      "size": 323726,
       "role": "runtime"
     },
     {
@@ -303,8 +303,8 @@
     },
     {
       "path": "examples/general-motion/product-demo/motion.mjs",
-      "sha256": "35d97c111ff86e8fa4c7d90afeb18a6cafb7a463264661ccb14f66540536f67d",
-      "size": 316216,
+      "sha256": "880d3640c30d689833623166b2659a2d6f5ed31c5a2b5b1128d1b349da0c3f8d",
+      "size": 323726,
       "role": "runtime"
     },
     {
@@ -315,8 +315,8 @@
     },
     {
       "path": "package.json",
-      "sha256": "b990a538e71f92eb1f09862e864d8a172b722e66f9b0767407ab18908ef4404a",
-      "size": 2380,
+      "sha256": "c9aac7061ffaf93995790beaad477bdb330a88152be68aed963a0d5892b945c4",
+      "size": 2414,
       "role": "dependency"
     },
     {
@@ -1155,8 +1155,8 @@
     },
     {
       "path": "packages/openfilm/studio/ui/dist/motion.mjs",
-      "sha256": "35d97c111ff86e8fa4c7d90afeb18a6cafb7a463264661ccb14f66540536f67d",
-      "size": 316216,
+      "sha256": "880d3640c30d689833623166b2659a2d6f5ed31c5a2b5b1128d1b349da0c3f8d",
+      "size": 323726,
       "role": "ui"
     },
     {
@@ -1180,7 +1180,7 @@
   ],
   "source": {
     "kind": "worktree",
-    "sha256": "a50bf4df6de4d36b8ef7a5a21baca36793cf636ae9a69ef5ab41655867eb2acf"
+    "sha256": "e2b4f2711c99e7c69f66b989cb89ec231f43a4caa9bf16e48936f5ac062ec36f"
   },
   "supportedPlatforms": [
     "darwin",
@@ -1213,5 +1213,5 @@
     "restoreInstructionsPath": "desirecore/RUNTIME.md"
   },
   "instructionsPath": "desirecore/RUNTIME.md",
-  "releaseDigest": "f8923fd8d597186bdd4f94b4628e792e4e5c92d8d301901a9b9d56de2cded45b"
+  "releaseDigest": "8368f4421466e44475c0e92c43f0fc6a05c4b809ed5e72e5742ab8801ea007d5"
 }

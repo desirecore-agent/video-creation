@@ -15,6 +15,11 @@ their runtime dependencies. Full license texts for the actual installed runtime
 and bundled dependencies are retained under `desirecore/licenses/`; its
 `manifest.json` lists versions, sources and notice hashes.
 
+The standalone SDK also embeds the complete root license and actual bundled
+dependency notices in its own file: Ajv, ajv-formats, fast-deep-equal and
+json-schema-traverse (MIT), and fast-uri (BSD-3-Clause). This preserves the
+notices when only the SDK is copied with a project or Saved component.
+
 The general-motion SDK and `examples/general-motion/` are original additions
 under this repository's MIT license. Overlay Studio was a design reference;
 none of its restricted code, templates, skills or assets are distributed here.

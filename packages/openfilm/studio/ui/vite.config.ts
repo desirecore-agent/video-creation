@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import tailwind from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
 import { basename } from 'node:path';
-import { buildMotionSdk, motionSourceFiles, prepareMotionSamples } from '../../../../scripts/build-motion-sdk.mjs';
+import { buildMotionSdk, motionBuildInputs, prepareMotionSamples } from '../../../../scripts/build-motion-sdk.mjs';
 
 /* Studio's editor: built once into dist/ and served by Studio's own server (studio/server/server.mjs) */
 export default defineConfig({
@@ -12,7 +12,7 @@ export default defineConfig({
     name: 'video-creation-motion-runtime',
     apply: 'build',
     buildStart() {
-      for (const file of motionSourceFiles) this.addWatchFile(file);
+      for (const file of motionBuildInputs()) this.addWatchFile(file);
     },
     async generateBundle() {
       for (const file of await buildMotionSdk({ write: false }))

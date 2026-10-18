@@ -77,7 +77,7 @@ CLI 与 MCP 均绑定一个真实项目，使用启动服务已有鉴权、编�
 | --- | --- | --- |
 | `motion-catalog <项目>` | `video_motion_catalog {}` | 读取项目与应用自带样片中真实 manifest；返回参数 Schema 和内置构件 `ref`，不下载模板。项目页面沿编辑器已有非隐藏目录、最多三级的发现范围。 |
 | `motion-inspect <项目> [片段ID]` | `video_motion_inspect {clip?}` | 返回 `{rev, clips:[{clip,src,motion,manifest,sourceDigest,problems}]}`，实际错误留在 problems，不以空对象掩盖坏声明。 |
-| `motion-install <项目> --base <rev>` | `video_motion_install {base}` | 将本应用固定 MIT 自包含 SDK 复制到 `video-creation-motion/motion.mjs`；返回真实 SHA-256。无联网和任意 npm 安装，已存在不同字节则冲突并保留。页面通过相对 ES module import 引用。 |
+| `motion-install <项目> --base <rev>` | `video_motion_install {base}` | 将本应用固定自包含 SDK 复制到 `video-creation-motion/motion.mjs`；返回真实 SHA-256。模块内保留根 MIT 及实际依赖的完整 MIT／BSD 许可原文，单文件复制时也携带。无联网和任意 npm 安装，已存在不同字节则冲突并保留。页面通过相对 ES module import 引用。 |
 | `motion-take <项目> <ref> --base <rev>` | `video_motion_take {base,component}` | 从当前 catalog 的 builtin ref 沿既有 Saved 依赖闭包复制资源，返回 `{rev,clip,component,saved}`。只导入资源，影片没改则 revision 保持；随后以返回 revision 调用 `video_patch` 的 `insert` 自主选择位置与轨道。 |
 | `motion-patch <项目> <片段ID> --base <rev> --ops <文件>` | `video_motion_patch {base,clip,changes}` | 文件内容为 changes 数组；按参数路径、属性轨路径、事件 ID 定位，保留其他值和同期人工编辑。 |
 

@@ -67,7 +67,7 @@ CLI 提供 `motion-catalog`、`motion-inspect`、`motion-install`、`motion-take
 
 保留 [MIT 许可证](LICENSE)、[商标政策原文](TRADEMARK.md)和[第三方声明](packages/openfilm/THIRD_PARTY_NOTICES.md)。本改版使用原创图标与独立名称。运行时依赖的 FFmpeg、Chromium、字体及其他第三方组件，按实际分发内容处理各自许可证；本仓库不打包或发布原上游独立桌面安装器。
 
-通用动效层与上述样片在现有 MIT 内核上独立实现；Overlay Studio 仅为设计参考，其代码、模板、技能与素材未纳入本仓库。Schema 校验使用随应用打包的 Ajv 与 ajv-formats，完整依赖许可保存在 `desirecore/licenses/`。
+通用动效层与上述样片在现有 MIT 内核上独立实现；Overlay Studio 仅为设计参考，其代码、模板、技能与素材未纳入本仓库。Schema 校验使用随应用打包的 Ajv 与 ajv-formats，完整依赖许可保存在 `desirecore/licenses/`。离线 SDK 本身也嵌入根许可与实际五项依赖的完整 MIT／BSD 原文，单独保存或复制工程时一并携带。
 
 完整影片格式和编辑能力来自上游；DesireCore 集成的实际验证范围见提交与 PR 中的验证记录。付费媒体服务、安装版宿主兼容性及每个平台的最终发行包需要各自的运行验证。
 
