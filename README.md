@@ -37,6 +37,12 @@ The upstream source path `packages/openfilm` is retained. Its package is `@desir
 
 DesireCore owns installation and updates. Update a source checkout from this repository and rebuild it. Neither the CLI nor the service polls or executes upstream npm updates, and the UI does not offer the upstream desktop installer. `apps/desktop` and `packages/shared` remain as reference sources, outside the default workspace, build and tests.
 
+## Interface and theme
+
+In a DesireCore native window that supports appearance synchronization, the editor follows the host's light or dark theme, including fonts, surfaces and controls. Settings shows “Follow DesireCore”. The standalone browser editor keeps its own light, dark or system preference; the host's temporary override does not replace that saved choice. Older hosts without appearance synchronization continue using the local preference.
+
+Theme changes affect the editor interface only. They do not rewrite the film or scene HTML/CSS, change the work's colors, or alter the exported picture. The fixed runtime validation scope is recorded in [VERIFICATION.md](VERIFICATION.md).
+
 ## Project files
 
 A film is a folder: `film.html` describes tracks and clips, shot pages implement `window.film.frame(t)`, `assets/` holds media, and `.film/` holds history and derived state. Compatible OpenFilm projects can be opened directly. Read the current revision before editing, preserve the person's overrides and locked tracks, and resolve conflicts explicitly.

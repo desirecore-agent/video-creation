@@ -18,7 +18,25 @@
 
 ## 当前固定发布材料
 
-应用提交 `7e5b9a4cb475d0489cbde55d6da650c78c1bcad7` 的 `desirecore/app-release.json` 固定 172 个文件、5,183,847 字节，release digest 为 `489a34e3b8128cac660c9a4ec46e63a8eb27f03d3cdd5a21e9666d74e15abd93`。相较三平台首轮运行材料，新材料增加进程出生身份锁，并更新 CLI；下表历史运行结果没有冒称这些新增字节已在三平台全部复跑。该准确提交的 [core CI](https://github.com/desirecore-agent/video-creation/actions/runs/39100223154) 与 [Linux x64 runtime CI](https://github.com/desirecore-agent/video-creation/actions/runs/39100223128) 均已通过。视频导演 `32b483c7c575e2eb533e9aa6099442348c31685c` 的 [content CI](https://github.com/desirecore-agent/video-director/actions/runs/39093396008) 也已通过。
+本轮外观候选的应用 UI 源码为 `b5bcf776bbda1bc3519af5d7f250e09457fd90a7`，发布清单提交为 `c0d83af1b6443f8aad13ade6adf510f8d6536e1d`。`desirecore/app-release.json` 固定 165 个文件、4,970,144 字节，release digest 为 `063b91371538f5233855b339c37dd8ee7884c37ca7cc6c47185936bcc66c4443`。该候选的外观行为与已验证范围单列于下节，不把旧材料的原生结果转记为当前候选通过。
+
+本轮外观调整前的固定材料为：应用提交 `7e5b9a4cb475d0489cbde55d6da650c78c1bcad7`，172 个文件、5,183,847 字节，release digest `489a34e3b8128cac660c9a4ec46e63a8eb27f03d3cdd5a21e9666d74e15abd93`。相较三平台首轮运行材料，该版增加进程出生身份锁，并更新 CLI；下表历史运行结果没有冒称这些新增字节已在三平台全部复跑。该准确提交的 [core CI](https://github.com/desirecore-agent/video-creation/actions/runs/39100223154) 与 [Linux x64 runtime CI](https://github.com/desirecore-agent/video-creation/actions/runs/39100223128) 均已通过。视频导演 `32b483c7c575e2eb533e9aa6099442348c31685c` 的 [content CI](https://github.com/desirecore-agent/video-director/actions/runs/39093396008) 也已通过。
+
+## 界面外观与本轮候选
+
+支持外观同步的 DesireCore 原生窗口通过既有有限应用桥提供解析后的明暗主题及 43 项闭合语义 Token；应用只在可信顶层 Studio 文档中临时采用这些值，设置显示“跟随 DesireCore”。独立浏览器和未提供外观同步的旧版宿主仍使用本地浅色／深色／系统偏好；宿主同步不写入该偏好。字体、动作色、玻璃表面、控件密度、焦点、禁用状态和菜单交互统一沿宿主语义呈现。影片与场景 iframe 不安装该适配器，作品 HTML/CSS、配色和导出画面不随编辑器主题改写。
+
+应用 UI 候选的 14 项定向外观／既有桥回归、包级类型检查与构建已通过，覆盖完整 Token 与 CSS 值验证、初始及动态主题、较早 connect 返回不能覆盖新事件、同步订阅回放、销毁后的迟到返回、旧宿主／失败／超时回退、子 iframe 隔离，以及本地偏好保留。独立浏览器的真实明暗截图检查发现并修正了浅色菜单当前项对比与设置搜索焦点框；这些检查不代替原生宿主同步验收。
+
+平台候选 `70dd4f1d41bd79083ca3d104137b2b5a41a94ec3` 的 Windows 原生复验曾出现窄窗返回重开后外观事件丢失，不能记为该候选通过。平台修复了保活窗口重建连接后的只读外观事件投递；以下新证据使用准确平台源码 `9ed499af5780fb9341f5e60eba4d2ed0e1837125` 与当前 `063b` 应用材料，不覆盖旧候选失败记录。
+
+macOS 26.6.2 arm64 的隔离 Electron 原生验收通过正常正式安装冷启，未额外调用 SDK connect 修复被测连接。宽窗 light／dark、隐藏后切换再重开、重开后连续切换、系统原生平铺产生的 Main 652 CSS px／Studio 596 CSS px 窄窗及 auto 实际解析为 light，共 9 份状态快照中 43 项 Token 均与宿主逐值相同。Main timeOrigin `1792312478708.6`、Studio timeOrigin `1792312553580.6` 保持不变；源会话草稿、影片与场景文件 SHA、本地 `openfilm.theme = null` 均保留。实际截图检查并独立复核搜索完整焦点环、菜单键盘当前项、禁用状态及窄窗主要操作，没有发现阻断。
+
+播放头按真实输入区分：宽窗主题切换与隐藏重开保持 33 ms；随后菜单检查时焦点尚未进入菜单的一次 Down 将播放头移动，真实播放后暂停到 5,801 ms。后续窄窗 dark／light 与恢复 auto 后重开均保持 5,801 ms，不把有播放或键盘输入的两个时点之间写成“播放头全程不变”。实际默认世界复验仅顶层 Studio 有限 SDK，影片及场景无 SDK、Conveyor 或 Node 对象。运行健康查询返回 200／408 ms、available／healthy；正常 runtime.stop 返回 200，TaskHost `e993b752-9c7f-459a-b678-5aba653e61b1` 记录 user_stopped／task_host／SIGTERM／exit -1，开发启动器 SIGINT 退出 130。自有进程与端口归零、调试令牌移除、主题 auto 与原窗口尺寸恢复。结果位于 `.verification/ui-theme-20261018/macos-9ed499/MACOS-ACCEPTANCE.md`，26 个文件的 `manifest.json` SHA-256 为 `0c698de780e10ca4495681c994e4a1560b147dfdb559f293cea57f70c253b4e2`。本轮没有导演创作或付费媒体请求。
+
+Windows 11 Pro 10.0.26300 x64、Node 24.18.0／Electron 44.5.1 的原生外观复验也通过。使用同一 `9ed499` 平台源码归档及 `063b` 正式应用材料，在 Main 1,400／800 CSS px、Studio 960／744 CSS px 下检查明暗、auto、隐藏重开与重开后连续切换；43 项 Token 逐值一致，实际收到 12 个外观事件，没有诊断 connect、刷新 Studio 或手动补 CSS。原矩阵的 Main timeOrigin `1792312522606.6`、Studio timeOrigin `1792312584573.4` 不变，播放头保持 33 ms，源会话和导演草稿、本地主题偏好、影片与场景 SHA 均保留；默认世界中的影片／场景仍无宿主 SDK、Conveyor 或 Node。宽窄窗明暗原生截图、菜单当前项、导演对话框及主要操作已实际检查。
+
+Windows 后续独立冷启动只补设置动画结束后的稳定帧：该轮 Studio timeOrigin 为 `1792313365447.1`，明暗主题中对话框及遮罩 opacity 均为 1，43 项 Token 相同、影片与场景未改。它不属于前述同文档矩阵。最后一次正式 TaskHost `4076af74-9e20-4f7c-8e6f-4d859a6872d1` 通过正常停止渠道记录 user_stopped／task_host／exit 1；2026-10-18T08:52:56Z 清理审计确认零自有进程、零自有计划任务、端口关闭且调试令牌不存在，主题恢复 auto、审批覆盖恢复 null。结果为 `.verification/windows-20261018/ui-appearance-9ed499/candidate-result.json` 的 `passed`，74 个文件的 `evidence-manifest.json` SHA-256 为 `b030c17a207b9e1b07b33781e045d99545d3e0b8f2298bd20b9db127c2f0fc7a`。本轮没有新的导演创作、付费媒体或其他 Windows 架构／签名安装器验收。
 
 ## 本轮三平台应用运行验收
 
@@ -51,7 +69,7 @@ macOS、Windows 与 Linux arm64 的三个 JSON 证据均以 `1a35d6616b0a5db725d
 
 隔离 Electron 通过正常文件夹导入安装 `video-director`，使用真实模型 seed、TaskHost accepted command、只读运行身份握手、TerminalControl 关闭与正式安装提交纳管应用。页面不获得全权 token。实际默认执行环境检查确认：顶层编辑器能读取有限 SDK；影片及场景 iframe 中没有宿主 SDK、Conveyor、Node require 或 process。记录为 `.verification/native-frame-isolation-20261018.json`。
 
-最终 macOS 26.6.2 arm64 隔离 Electron 开发 GUI 验收准确平台源码为 `a07347f222da6d45c7ca1c4bc8f37ddd06be31ae`，使用上述应用材料与 Agent 提交。正常入口选择镜头、准备提案并真实单次确认后，同一 Run `8a636838-7faf-420f-9593-ebd6f3c244e1` 中本轮 turn `f63bf1d3-b65b-4e1a-b78a-1c16de25234d` 绑定 receipt `receipt_575a6f64-3339-4018-91ba-763a879a9ca7`；Bash invocation `a5cc733d-3892-4edd-8080-521dce5bee64` 与本轮回执均成功。CLI inspect→patch→inspect 将 revision `8eeb5c7cea9f8235` 改为 `324604f031083210`，影片与编辑器实际标题为“视频导演 · 联调验收完成”。精确 client request、真实 user message 与工具摘要身份记录于 `.verification/native-macos-a073-tool-receipt.json`。
+最终 macOS 26.6.2 arm64 隔离 Electron 开发 GUI 验收准确平台源码为 `a07347f222da6d45c7ca1c4bc8f37ddd06be31ae`，使用旧版 `489a34e3b8128cac660c9a4ec46e63a8eb27f03d3cdd5a21e9666d74e15abd93` 应用材料与上述 Agent 提交。正常入口选择镜头、准备提案并真实单次确认后，同一 Run `8a636838-7faf-420f-9593-ebd6f3c244e1` 中本轮 turn `f63bf1d3-b65b-4e1a-b78a-1c16de25234d` 绑定 receipt `receipt_575a6f64-3339-4018-91ba-763a879a9ca7`；Bash invocation `a5cc733d-3892-4edd-8080-521dce5bee64` 与本轮回执均成功。CLI inspect→patch→inspect 将 revision `8eeb5c7cea9f8235` 改为 `324604f031083210`，影片与编辑器实际标题为“视频导演 · 联调验收完成”。精确 client request、真实 user message 与工具摘要身份记录于 `.verification/native-macos-a073-tool-receipt.json`。
 
 本轮 641 个实际 Query 事件没有断线或捕获丢弃。提案用户行在 Store／DOM 各一条，审批终态、Read／Skill／Bash 和最终回复无需刷新可见。持久用户行、212 字无工具前缀、451 字含三个已完成工具的最终回复，在 conversation、merged view 和磁盘历史中持久 ID、全文 SHA-256、工具及顺序一致；审批请求／响应在视图合成一张终态卡。运行中 801 CSS px 窄窗返回原对话、保留草稿并重开同一 Studio document，GET `/runs` 为 591 ms；结束后 runtime available／healthy。实际默认执行环境复验仍只有顶层编辑器具有有限 SDK，影片与场景 iframe 没有 SDK、Conveyor 或 Node。正常 runtime.stop 返回 200，TaskHost `c59b2345-a64f-4e51-b1ce-5e68c9cb9031` 记录 user_stopped／exit 0。证据为 `.verification/native-macos-a073-{query-event-audit,message-consistency,ui-runtime,studio-origin,frame-isolation,stop}.json`。一致性记录 13 项检查全部通过，摘要为 `05b12583becf4d9b58c6b29fb185d4735dc5f4a499340aaa2ba3db719d95df68`。随后自有开发启动器正常退出 130，零自有进程，调试 token 已移除，见 `native-macos-a073-cleanup.json`。
 
