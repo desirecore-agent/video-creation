@@ -47,7 +47,7 @@ Theme changes affect the editor interface only. They do not rewrite the film or 
 
 ## General motion graphics
 
-Create product demos, data stories, graphic animations and transparent titles without narration or an SRT file. [Four original samples](examples/general-motion/README.md) include landscape, portrait and square layouts, structured data, paths, camera transforms and original synthesized music. The build copies the same offline SDK to each project's `video-creation-motion/motion.mjs`; no CDN is needed.
+Create product demos, data stories, graphic animations and transparent titles without narration or an SRT file. [Four original samples](examples/general-motion/README.md) include landscape, portrait and square layouts, structured data, paths, camera transforms and original synthesized music. The build copies the same offline SDK to `motion.mjs` in each sample's root; `motion-install` installs it into `video-creation-motion/motion.mjs` for a new project. No CDN is needed.
 
 The media pool's motion library discovers built-in components and project scenes, saves them and inserts them into the existing timeline. Select a scene with a `film-motion` manifest to edit Schema-defined parameters and data, property keyframes, easing curves, track-local looping and time mapping, markers and field locks. Locks and manual overrides stay in the project. Agent edits carry the actual revision and report conflicts explicitly.
 

@@ -47,7 +47,7 @@ pnpm test:motion:runtime  # 实际 Chromium 求帧与本地 SDK 集成
 
 ## 通用动效
 
-无需口播或 SRT 即可制作产品演示、数据解释、图文动画和透明标题。[四个原创样片](examples/general-motion/README.md)包含横屏、竖屏和方形布局、结构化数据、路径、镜头变换与原创合成音乐。构建会把同一份离线 SDK 放入工程的 `video-creation-motion/motion.mjs`，无需 CDN。
+无需口播或 SRT 即可制作产品演示、数据解释、图文动画和透明标题。[四个原创样片](examples/general-motion/README.md)包含横屏、竖屏和方形布局、结构化数据、路径、镜头变换与原创合成音乐。构建会把同一份离线 SDK 放入各样片根目录的 `motion.mjs`；新工程通过 `motion-install` 安装到 `video-creation-motion/motion.mjs`，无需 CDN。
 
 素材区的动效库可发现内置构件及当前工程场景，收藏并插入现有时间线。选中带 `film-motion` 描述的场景后，可调整 Schema 定义的参数与数据，编辑属性关键帧、缓动曲线、轨道局部循环与时间映射、标记以及字段锁定。锁定和人工 overrides 随原工程保存；智能体修改必须携带真实版本，冲突会明确返回。
 

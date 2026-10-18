@@ -97,7 +97,7 @@ Linux 仅能按实际运行环境记录，容器无桌面或独立 GPU 时不得
 
 新 SDK 为 323,726 字节，SHA-256 `880d3640c30d689833623166b2659a2d6f5ed31c5a2b5b1128d1b349da0c3f8d`。两人独立用 esbuild 解析新旧模块并移除注释，可执行代码完全相同，SHA-256 均为 `f733e0cd564a84c12e2d7dcedaeba8e44096d7798ed4c22e3b4c752499ea6b1e`；未用正则删除代码。SDK 构建、真实工程安装及 Saved／快照原字节携带的定向检查通过，动效关联检查 66／66、包级 typecheck 与完整 UI 构建通过。
 
-新固定分发材料为 `8368f4421466e44475c0e92c43f0fc6a05c4b809ed5e72e5742ab8801ea007d5`，192 文件／9,217,686 字节。其新增注释后的三平台实跑结果须独立记录；本节不将上面的旧源码验收改贴为新 SDK 字节通过。既有四支完整成片保留原材料标签，可执行代码相同也不改变其实际来源。
+新固定分发材料为 `8368f4421466e44475c0e92c43f0fc6a05c4b809ed5e72e5742ab8801ea007d5`，192 文件／9,217,686 字节。其新增注释后的三平台实跑结果见下；上面的旧源码验收保持原 SDK 字节身份。既有四支完整成片保留原材料标签，可执行代码相同也不改变其实际来源。
 
 ## 真实导演自主创作与人工续改
 
@@ -112,3 +112,33 @@ Linux 仅能按实际运行环境记录，容器无桌面或独立 GPU 时不得
 ## 实际成片播放
 
 交付播放页通过本机只读预览打开，真实 Chromium 分别播放三支24秒MP4；1920×1080、时长24秒、播放时间和解码帧数均前进、无媒体错误。测试使用静音基本播放，没有声称完成听感复核或随机 seek；透明 MOV 仍以实际 FFmpeg 解码／异色底合成为依据。原始播放记录 `.verification/general-motion/showcase-browser-playback.log` SHA-256 `e8c32ef6bd50ddc11ab8a147ed3ce3986d6c1093426b0cdcf49d65ad4c397d5d`。临时浏览器会话、只读服务器与端口均已关闭。
+
+### a34 完整许可候选的三平台实跑
+
+准确源码 `a34ac3e4c938e345e11496385e96f463e8c333cf`，归档 SHA-256 `8235e333dd10ec17de26327a8bb057abf9d915e39301df4bd34b85ebf2e52799`。三个环境分别新建源码、QA目录与任务，从冻结归档安装构建，未复用旧媒体冒称新运行。环境版本与前述平台表一致。每个平台的完整短验收八组全部通过，实际重新采集 DOM ROI；12／30fps 首显12／30帧、确认13／31帧，PCM峰1.008秒、音画差8ms。VP9／ProRes实际透明解码、Saved／MCP、取消、中断保留及显式新重试均通过。
+
+Mac／Linux各直接核对9份本次SDK复制件，Windows直接核对4份本次实际构建／工程／MCP／Saved复制件，全部323,726字节／`880d3640…c3f8d`；根MIT与实际五项依赖的许可逐份全文字节匹配，含 fast-uri 完整1813字节BSD-3-Clause原文。Windows／Linux最终4bf包装器实际 inspect／motion-inspect 两项通过；未把先前14项或runtime6项重贴为本轮重跑。
+
+| 本轮记录 | 内容与摘要 |
+| --- | --- |
+| `macos-a34ac3e/acceptance.json` | SHA-256 `a3003e333ef200fa53cdfcaca1fcabbf6787870b206a5636926148bf94f47764`；许可、summary、清理各有独立原始JSON。 |
+| `windows-a34ac3e/evidence-manifest.json` | 59文件，SHA-256 `eb8a6148882d3e22e4ef22ad2b0ab74148d136b8f377418059528ef145e81265`。 |
+| `linux-a34ac3e/evidence-manifest.json` | 51文件，SHA-256 `6660a72709feb3bff1ff048e745778306e703a9b6741829cf484d932d4abbf27`。 |
+
+以上路径均相对 `.verification/general-motion/`，媒体、实际probe／ROI像素、SDK原件／全文核验、任务与清理记录一并留存。普通服务EOF退出0、自有进程和端口归零；Linux容器正常退出0／Pid0／非OOM。旧失败及四支长片的原始来源标签保持不变。
+
+准确 a34 的 [core CI](https://github.com/desirecore-agent/video-creation/actions/runs/39120207062) 与 [Linux x64实际runtime CI](https://github.com/desirecore-agent/video-creation/actions/runs/39120207057) 均成功。材料C仅装7生产依赖，192文件／9,217,686字节、完整现行平台Schema及规范摘要独立通过；审计报告 `sdk-license/material-c-8368f442-audit.json` SHA-256 `6e3140bf10f0efb8c59aefed72a0d521e41e42d74e687c482597b06bf5596684`。
+
+### 样片辅助入口窄修与分发差异
+
+收尾发现 `prepare-samples.mjs` 的命令行入口以字面URL比较路径，经目录软链运行可能退出0却不复制。提交 `7db9f703ea61dfdea7a2aff524a14d209673693c` 仅将入口判断改为对称真实路径，并保持stdin／普通import无写入；`prepareSamples` 函数正文原字节保留。Mac真实子进程先复现旧版静默失败，再验证新目录软链、保留主软链、stdin无副作用与缺SDK明确失败，四份复制SDK均为新880d原字节。双语README同时纠正样片根 `motion.mjs` 与新工程安装路径的区别。
+
+最终材料D为 `bf787d53209c47b1798b4a43082b333fc7b9f191e7670df1317de3497fa229ab`，192文件／9,218,015字节。与C逐文件对比，只有 `examples/general-motion/prepare-samples.mjs` 增加329字节，其余191文件，包括UI、SDK、参数协议、求帧与导出实现，完全一致。定向入口检查归 `sample-helper-entry/`；a34的三平台主验收保持其真实来源，未重贴为辅助入口或最终文档提交。材料D的完整现行Schema、规范摘要和全部文件由独立审查再次验证，审计报告 `sdk-license/material-d-bf787d53-audit.json` SHA-256 `52648dd60a12bd830fc28473cd2d0c3e7a9ed3820863a07603ac256e89ba04c4`。
+
+Windows在全新小夹具使用真实目录junction，Linux在无网络短容器中使用目录软链，分别执行相同四场景：正常软链与保留主入口软链均退出0并复制4份准确880d SDK，stdin导入无输出／无写入，缺SDK明确退出1且不复制。均核对新入口1508字节／SHA-256 `ec3f17bf3606062b5d33f9d372c967bafc34a22a98a80a89112ffeb73818111e` 及函数正文未变；没有安装依赖、启动服务或重渲染。Windows记录在 `sample-helper-entry/windows/`，Linux11文件manifest SHA-256 `7cc0442a115b415a35af05a01a005888e1ddeec0bf51a1bb84e8dc8bbd82d7d4`；自有子进程结束，Linux容器自然退出0／Pid0／非OOM。
+
+### 导演工程交付副本
+
+原导演QA归档保持只读；另制作 `director-delivery/magnetic-fold-project.zip`，73,796字节，SHA-256 `69ad75d28f30cc0dbdbefa383fd6481554b3e9e3a8ef9011826c73b7ca4d965f`。ZIP包含实际film、原创场景、操作文件和本地SDK；场景／film／两操作文件逐字节保留人工锁与覆盖，只把SDK替换为补齐许可的880d版本，并在工程内README／PROVENANCE明确这是交付包装。没有重新调用模型、改写场景或渲染影片。
+
+同目录 `magnetic-fold.mp4` 是原05fa752…影片的原字节副本。ZIP CRC、相对路径及逐文件读回通过，独立复核确认无隐藏或软链项；`FILE-MANIFEST.json` SHA-256 `306787e19531ff6cb98655e413c283180aff7d0b62d1c0eb7419595db35a64f8`。用户解压后可直接使用film.html工程，不必从运行诊断数据中整理作品。
