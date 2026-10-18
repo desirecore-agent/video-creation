@@ -279,8 +279,8 @@
     },
     {
       "path": "examples/general-motion/prepare-samples.mjs",
-      "sha256": "91d0da62e9a1c0d54d19747166a8a637fa46035ff0aeb6284891c0c0387ecb2e",
-      "size": 1179,
+      "sha256": "ec3f17bf3606062b5d33f9d372c967bafc34a22a98a80a89112ffeb73818111e",
+      "size": 1508,
       "role": "runtime"
     },
     {
@@ -1180,7 +1180,7 @@
   ],
   "source": {
     "kind": "worktree",
-    "sha256": "e2b4f2711c99e7c69f66b989cb89ec231f43a4caa9bf16e48936f5ac062ec36f"
+    "sha256": "44ee42e9a1a2ef3d7b7ca4ff1d16a75499de12ff0aabbd5629047d671d71e136"
   },
   "supportedPlatforms": [
     "darwin",
@@ -1213,5 +1213,5 @@
     "restoreInstructionsPath": "desirecore/RUNTIME.md"
   },
   "instructionsPath": "desirecore/RUNTIME.md",
-  "releaseDigest": "8368f4421466e44475c0e92c43f0fc6a05c4b809ed5e72e5742ab8801ea007d5"
+  "releaseDigest": "bf787d53209c47b1798b4a43082b333fc7b9f191e7670df1317de3497fa229ab"
 }
