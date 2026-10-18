@@ -309,8 +309,8 @@
     },
     {
       "path": "examples/general-motion/product-demo/scene.html",
-      "sha256": "034ed2e1e97e6075a28ca141ff2c61f8eaf0026149d48ec472742e5afca6b6a0",
-      "size": 9394,
+      "sha256": "7542cd1a86e47cec1d36e69982824304ea6eba589cdf57b8fc5811bdcd2bd87a",
+      "size": 9403,
       "role": "runtime"
     },
     {
@@ -1180,7 +1180,7 @@
   ],
   "source": {
     "kind": "worktree",
-    "sha256": "2d63ea6e8514c9a7b46a736f95d6dde5fb54646a6fc97ae84d9d40390c6dad33"
+    "sha256": "a50bf4df6de4d36b8ef7a5a21baca36793cf636ae9a69ef5ab41655867eb2acf"
   },
   "supportedPlatforms": [
     "darwin",
@@ -1213,5 +1213,5 @@
     "restoreInstructionsPath": "desirecore/RUNTIME.md"
   },
   "instructionsPath": "desirecore/RUNTIME.md",
-  "releaseDigest": "64a90d67b3f85adb0e1eb5c9262d68b79ef893cdb83f679c33081e13eae8b11a"
+  "releaseDigest": "f8923fd8d597186bdd4f94b4628e792e4e5c92d8d301901a9b9d56de2cded45b"
 }
