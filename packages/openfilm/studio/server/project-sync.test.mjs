@@ -5,26 +5,30 @@ import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startStudio } from './server.mjs';
+import { watchTree } from './watch.mjs';
 
-/** A real project socket, retained across rename, with bounded waits rather than polling the API. */
-function stream(studio, projectId) {
-  const socket = new WebSocket(`${studio.origin.replace(/^http/, 'ws')}/api/projects/${projectId}/events`, { headers: { 'x-studio-key': studio.key } });
+function eventLog() {
   const events = [], waiting = new Set();
-  socket.addEventListener('message', (event) => {
-    events.push(JSON.parse(String(event.data)));
-    for (const check of waiting) check();
-  });
   return {
-    socket, events,
-    until(predicate) {
+    events,
+    on(event) { events.push(event); for (const check of waiting) check(); },
+    until(predicate, after = 0) {
       return new Promise((resolve, reject) => {
         const finish = () => { clearTimeout(timer); waiting.delete(check); };
-        const check = () => { const found = events.find(predicate); if (found) { finish(); resolve(found); } };
+        const check = () => { const found = events.slice(after).find(predicate); if (found) { finish(); resolve(found); } };
         const timer = setTimeout(() => { finish(); reject(new Error(`missing project event: ${JSON.stringify(events)}`)); }, 5000);
         waiting.add(check); check();
       });
     },
   };
+}
+
+/** A real project socket, retained across rename, with bounded waits rather than polling the API. */
+function stream(studio, projectId) {
+  const socket = new WebSocket(`${studio.origin.replace(/^http/, 'ws')}/api/projects/${projectId}/events`, { headers: { 'x-studio-key': studio.key } });
+  const log = eventLog();
+  socket.addEventListener('message', (event) => log.on(JSON.parse(String(event.data))));
+  return { socket, ...log };
 }
 
 test('API rename synchronizes the already-open project and keeps watching its new directory', async () => {
@@ -61,7 +65,21 @@ test('API rename synchronizes the already-open project and keeps watching its ne
 
     mkdirSync(join(renamed.path, 'scenes'));
     writeFileSync(join(renamed.path, 'scenes', 'after-rename.html'), '<p>new material</p>');
-    await first.until((event) => event.type === 'files' && event.paths?.includes('scenes/after-rename.html'));
+    /* Linux discovers a new directory and invalidates it as a whole; its already-created children need not each
+       have an event. The editor reloads the listing for either form of invalidation. */
+    await first.until((event) => event.type === 'files' && (!event.paths || event.paths.some((path) => path === 'scenes' || path === 'scenes/after-rename.html')));
+    const listed = await api(`projects/${project.id}/files`);
+    assert.ok(listed.pages.some((entry) => entry.path === 'scenes/after-rename.html'), 'the new directory invalidation exposes the actual new page');
+    const readPage = async () => {
+      const response = await fetch(new URL('scenes/after-rename.html', changed.folder));
+      assert.equal(response.status, 200);
+      return response.text();
+    };
+    assert.match(await readPage(), /new material/);
+    const afterDirectory = first.events.length;
+    writeFileSync(join(renamed.path, 'scenes', 'after-rename.html'), '<p>later material</p>');
+    await first.until((event) => event.type === 'files' && event.paths?.includes('scenes/after-rename.html'), afterDirectory);
+    assert.match(await readPage(), /later material/, 'the existing stream keeps watching children after discovering their new directory');
     /* A replaced film is seen through the original socket too, on Linux as well as native recursive watchers. */
     writeFileSync(join(renamed.path, 'film.next'), `${original}\n<!-- changed after rename -->`);
     renameSync(join(renamed.path, 'film.next'), join(renamed.path, 'film.html'));
@@ -79,4 +97,21 @@ test('API rename synchronizes the already-open project and keeps watching its ne
     if (oldLibrary === undefined) delete process.env.OPENFILM_LIBRARY; else process.env.OPENFILM_LIBRARY = oldLibrary;
     rmSync(scratch, { recursive: true, force: true });
   }
+});
+
+test('Linux-style nonrecursive watching invalidates a new directory and then watches changes inside it', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'vc-project-sync-tree-'));
+  writeFileSync(join(root, 'film.html'), '{}');
+  const log = eventLog();
+  const close = watchTree(root, log.on, false);
+  try {
+    mkdirSync(join(root, 'scenes'));
+    writeFileSync(join(root, 'scenes', 'new.html'), '<p>initial</p>');
+    await log.until((name) => name === 'scenes' || name === 'scenes/new.html');
+    assert.equal(readFileSync(join(root, 'scenes', 'new.html'), 'utf8'), '<p>initial</p>');
+    const afterDirectory = log.events.length;
+    writeFileSync(join(root, 'scenes', 'new.html'), '<p>updated</p>');
+    await log.until((name) => name === 'scenes/new.html', afterDirectory);
+    assert.equal(readFileSync(join(root, 'scenes', 'new.html'), 'utf8'), '<p>updated</p>');
+  } finally { close(); rmSync(root, { recursive: true, force: true }); }
 });

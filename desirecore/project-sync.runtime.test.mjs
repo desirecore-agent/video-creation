@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startStudio } from '../packages/openfilm/studio/server/server.mjs';
@@ -24,16 +24,27 @@ test('Studio follows an external same-id rename without losing the open director
     return response.json();
   };
   try {
-    const { project } = await api('projects', 'POST', { name: 'Rename draft' });
-    writeFileSync(join(project.path, 'film.html'), filmHtml({ stage: { w: 640, h: 360 }, tracks: [{ clips: [{ id: 'scene', src: 'scene.html', time: [0, 10] }] }] }));
-    writeFileSync(join(project.path, 'scene.html'), '<body><h1>Before rename</h1><script>window.film={duration:10,frame(t){}}</script></body>');
+    /* Complete the fixture before registering/opening it, so setup writes cannot refresh the first preview. */
+    const projectPath = join(scratch, 'projects', 'Rename draft');
+    mkdirSync(projectPath, { recursive: true });
+    writeFileSync(join(projectPath, 'film.html'), filmHtml({ stage: { w: 640, h: 360 }, tracks: [{ clips: [{ id: 'scene', src: 'scene.html', time: [0, 10] }] }] }));
+    writeFileSync(join(projectPath, 'scene.html'), '<body><h1>Before rename</h1><script>window.film={duration:10,frame(t){}}</script></body>');
+    const { project } = await api('projects', 'POST', { path: projectPath, create: false });
     browser = await launch();
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, locale: 'zh-CN' });
     await page.goto(`${studio.origin}/open?key=${studio.key}&to=/projects/${project.id}`);
     await page.getByRole('button', { name: '交给视频导演', exact: true }).waitFor();
-    await page.waitForFunction(() => [...document.querySelectorAll('iframe')].some((frame) => /\/film\.html/.test(frame.src)));
-    const preview = page.frames().find((frame) => /\/film\.html/.test(frame.url()));
+    /* Preview may replace its initial hidden iframe while mounting. Anchor only after its first picture is shown
+       and no replacement is loading; src assignment alone does not mean that a frame navigated or is ready. */
+    const readyFrame = await page.waitForFunction(() => {
+      const frames = [...document.querySelectorAll('.stage-frames > iframe[title="film"]')];
+      return frames.length === 1 && frames[0].style.opacity !== '0' ? frames[0] : null;
+    });
+    const preview = await readyFrame.asElement().contentFrame();
     assert.ok(preview, 'the actual film preview loaded');
+    const initialScene = preview.childFrames().find((frame) => /\/scene\.html/.test(frame.url()));
+    assert.ok(initialScene, 'the actual scene is loaded in the shown preview');
+    await initialScene.getByRole('heading', { name: 'Before rename', exact: true }).waitFor();
     const origin = await preview.evaluate(() => performance.timeOrigin);
     await page.getByRole('button', { name: '交给视频导演', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: '交给视频导演' });
