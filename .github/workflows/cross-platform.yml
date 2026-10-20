@@ -31,6 +31,8 @@ jobs:
           pnpm --filter @desirecore-agent/video-creation exec playwright-core install-deps chromium
           node desirecore/cli.mjs setup-runtime --home "$RUNNER_TEMP/video-creation-smoke/应用 数据"
       - run: node --test desirecore/platform-smoke.test.mjs
+      - name: Verify project rename in the actual editor
+        run: node --test desirecore/project-sync.runtime.test.mjs
       - run: pnpm test:motion:runtime
       - name: Exercise the local service, MCP and MP4 export
         shell: bash

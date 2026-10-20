@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { revOf } from './film.mjs';
@@ -70,4 +70,32 @@ test('watching folder by folder (Linux): a file replaced by a rename is seen eve
   } finally {
     close();
   }
+});
+
+test('a renamed project keeps its existing streams and their cleanup follows the new folder', async () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'of-watch-move-'));
+  const root = join(scratch, 'Draft'), to = join(scratch, 'Final');
+  mkdirSync(root);
+  writeFileSync(join(root, 'film.html'), '{}');
+  const watchers = createWatchers(), first = [], second = [];
+  const stopFirst = watchers.subscribe(root, (event) => first.push(event));
+  const stopSecond = watchers.subscribe(root, (event) => second.push(event));
+  try {
+    await settle();
+    renameSync(root, to);
+    watchers.move(root, to);
+    assert.deepEqual(watchers.roots(), [to]);
+    await settle();
+    first.length = second.length = 0;
+    writeFileSync(join(to, 'film.html'), '{"stage":{"w":2,"h":2},"tracks":[]}');
+    writeFileSync(join(to, 'new-page.html'), '<p>after rename</p>');
+    await settle();
+    assert.ok(first.some((event) => event.type === 'film'));
+    assert.ok(first.some((event) => event.type === 'files' && event.paths.includes('new-page.html')));
+    assert.deepEqual(first, second, 'both already-open pages receive changes at the renamed path');
+    stopFirst();
+    assert.deepEqual(watchers.roots(), [to], 'one page remains');
+    stopSecond();
+    assert.deepEqual(watchers.roots(), [], 'old cleanup closures also release the relocated watcher');
+  } finally { watchers.closeAll(); rmSync(scratch, { recursive: true, force: true }); }
 });

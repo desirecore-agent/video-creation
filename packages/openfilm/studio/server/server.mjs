@@ -149,9 +149,11 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     pageCame();
     return () => { editorPages.delete(send); };
   };
-  /** @param {{ path: string }} project @param {(event: any) => void} send */
+  /** @param {Awaited<ReturnType<typeof projectById>>} project @param {(event: any) => void} send */
   const projectStream = (project, send) => {
     const stop = watchers.subscribe(project.path, send);
+    /* A reconnect may have missed a rename. Metadata is separate from the editable film. */
+    send({ type: 'project', project, folder: pages.folderUrl(project) });
     for (const ask of asks.pending(project.path)) send(ask);
     return stop;
   };
@@ -487,7 +489,10 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
         const { name } = /** @type {{ name?: string }} */ (await readJson(req));
         const renamed = await renameProject(project.id, String(name ?? ''));
         /* its address stays: the preview open on it keeps loading from the folder by its new name */
-        pages.folderUrl(renamed);
+        const folder = pages.folderUrl(renamed);
+        watchers.move(project.path, renamed.path);
+        if (exportRoots.has(project.id)) exportRoots.set(project.id, renamed.path);
+        watchers.emit(renamed.path, { type: 'project', project: renamed, folder });
         return json(res, 200, { project: renamed });
       }
       /* the project is deleted: its folder goes to the Trash (pages showing it go back to the list) */

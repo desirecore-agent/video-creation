@@ -46,6 +46,16 @@ export async function projectClient(config, folder, options) {
   const base = `/api/projects/${encodeURIComponent(project.id)}`;
   return { ...studio, project, base,
     inspect: () => studio.call(base),
+    mediaCatalog: (verb) => studio.call(`/api/get${verb ? `?verb=${encodeURIComponent(verb)}` : ''}`),
+    getMedia: async (verb, args, { via, model } = {}) => {
+      try {
+        // Studio already checks provider options, authorisation and where files land. Do not create a second media executor.
+        return await studio.call('/api/get', { folder: project.path, verb, args, ...(via ? { via } : {}), ...(model ? { model } : {}) }, 'POST', { timeoutMs: 7 * 60_000 });
+      } catch (error) {
+        if (error?.status) throw error;
+        throw new Error('未取得媒体生成回执，结果未知；服务可能已经收到请求。请先检查工程素材和现有回执，勿直接重复付费调用。');
+      }
+    },
     motionCatalog: () => studio.call(`${base}/motion/catalog`),
     motionInspect: (clip) => studio.call(`${base}/motion${clip ? `?clip=${encodeURIComponent(clip)}` : ''}`),
     motionInstall: (revision) => studio.call(`${base}/motion/sdk`, { base: revision }),

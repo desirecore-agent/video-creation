@@ -67,9 +67,9 @@ export const VERBS = /** @type {Record<string, VerbSpec>} */ ({
       limit: { value: 'n', min: 1, max: 100, integer: true, default: 5, alias: 'n' } },
   },
   tts: {
-    help: 'Voice-over: one line spoken. Returns src, dur and its transcript: a WebVTT of the text in pause-separated cues, in source seconds. Its word timing is kept, so never run asr on it.',
+    help: 'Voice-over: one line spoken. Returns src and measured dur. Providers with word timing also return a source-time WebVTT; without word timing, align or transcribe the generated audio before claiming subtitle timing is measured. --style supplies delivery instructions where supported (MiMo).',
     dir: 'assets/audio/vo', timeoutSec: 300,
-    options: { out, text: { value: 'text', required: true }, voice: { value: 'voiceId', required: true } },
+    options: { out, text: { value: 'text', required: true }, voice: { value: 'voiceId', required: true }, style: { value: 'delivery instructions' } },
   },
   sfx: {
     help: 'A sound effect. Returns src, its measured dur and, when measured, attack (seconds into the file where the hit is) and peakDb. --sec is a request: the dur returned is what it is.',
@@ -327,7 +327,7 @@ export async function runGet(root, verb, given, { via, model, yes = false, ask, 
     await land(root, verb, args, result);
     return [...said, show(await receiptFor(root, verb, args, result.receipt))].join('\n');
   } catch (e) {
-    if (clock.timedOut()) throw new GetError(`${provider.name} did not finish within ${spec.timeoutSec + 60} s, so Studio stopped waiting. Nothing landed in the project; try again later.`);
+    if (clock.timedOut()) throw new GetError(`${provider.name} did not finish within ${spec.timeoutSec + 60} s, so Studio stopped waiting. Nothing landed in the project, but the service may have received the request. Check existing files and receipts before explicitly retrying; do not automatically resubmit a paid request.`);
     if (/** @type {{ code?: string }} */ (e)?.code === 'balance') {
       tell?.({ kind: 'balance', provider: provider.name, providerId: provider.id });
       throw new GetError(`This did not run: ${provider.name} doesn't have enough balance. The person can top it up at ${provider.billingUrl}, `

@@ -25,6 +25,8 @@ node desirecore/cli.mjs <命令> [项目目录] [选项]
                                                    按字段、属性轨和事件 ID 局部编辑
   patch <项目> --base <revision> --ops <JSON文件>     按基线提交结构化编辑
   check <项目> [时间或范围]                          抽帧并检查确定性与资源
+  get <项目> [媒体动词] --args <JSON文件>             复用已连接媒体服务；无动词时只读能力目录
+    --via <provider> --model <model>                明确选择服务与模型；不从参数读取密钥
   render <项目> [--output <目录>] [--wait]           提交固定输入的视频导出
     --codec <h264|hevc|vp9|prores422hq|prores4444|hevc_alpha|png>
     --alpha --fps <30|30000/1001> --quality <standard|high|master>
@@ -45,6 +47,7 @@ export function argumentsOf(args) {
     home: { type: 'string' }, project: { type: 'string' }, port: { type: 'string' },
     'no-browser': { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
     base: { type: 'string' }, ops: { type: 'string' }, output: { type: 'string' },
+    args: { type: 'string' }, via: { type: 'string' }, model: { type: 'string' },
     wait: { type: 'boolean' }, fps: { type: 'string' }, timeout: { type: 'string' },
     codec: { type: 'string' }, alpha: { type: 'boolean' }, quality: { type: 'string' },
     frame: { type: 'string' }, fill: { type: 'string' }, 'short-edge': { type: 'string' },
@@ -132,9 +135,19 @@ export async function command(args, output = (value) => process.stdout.write(`${
     if (!values.project && !folder) throw new Error('MCP 必须绑定明确的 --project。');
     return (await import('./mcp.mjs')).serveMcp(config, resolve(values.project ?? folder));
   }
-  if (!['inspect', 'patch', 'check', 'render', 'jobs', 'retry', 'cancel', 'motion-catalog', 'motion-inspect', 'motion-install', 'motion-take', 'motion-patch'].includes(name)) throw new Error(`未知命令：${name}；运行 --help 查看用法。`);
+  if (!['inspect', 'patch', 'check', 'get', 'render', 'jobs', 'retry', 'cancel', 'motion-catalog', 'motion-inspect', 'motion-install', 'motion-take', 'motion-patch'].includes(name)) throw new Error(`未知命令：${name}；运行 --help 查看用法。`);
   const client = await projectClient(config, folder);
   if (name === 'inspect') return output(await client.inspect());
+  if (name === 'get') {
+    if (!target) return output(await client.mediaCatalog());
+    if (!values.args) throw new Error('get 需要 --args JSON 文件；文件只包含媒体参数，不包含密钥。');
+    const args = JSON.parse(readFileSync(resolve(values.args), 'utf8'));
+    if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('get --args 必须是媒体参数 JSON 对象。');
+    const result = await client.getMedia(target, args, { via: values.via, model: values.model });
+    output(result);
+    if (!result.ok) process.exitCode = result.code === 2 ? 2 : 1;
+    return;
+  }
   if (name === 'motion-catalog') return output(await client.motionCatalog());
   if (name === 'motion-inspect') return output(await client.motionInspect(target));
   if (name === 'motion-install') return output(await client.motionInstall(values.base));

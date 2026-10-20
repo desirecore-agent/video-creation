@@ -1,7 +1,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -139,6 +139,8 @@ test('a video export is render: an MP4 named after the project, with progress, n
   assert.equal(done.status, 'done', done.error);
   assert.equal(done.out, join(exportsRoot(), 'Tiny.mp4'));
   assert.deepEqual(done.outputs, [done.out]);
+  assert.equal(done.bytes, statSync(done.out).size);
+  assert.deepEqual(done.outputSizes, [{ path: done.out, bytes: statSync(done.out).size }]);
   assert.ok(done.bytes > 0 && done.finishedAt >= done.startedAt);
   /* Use the same platform-aware hardware selection as video exports. */
   const available = new Set(
@@ -575,6 +577,9 @@ test('burned-in subtitles: drawn over the frame, bars included; a subtitle file 
   const video = await exported({ kind: 'video', fps: 5, range: [0, 1], shortEdge: 360, burnSubtitles: true, sidecar: 'vtt' }, 'Burn');
   assert.ok(bright(video.out) > 20, 'burned into the video');
   assert.deepEqual(video.outputs.map((f) => f.slice(exportsRoot().length + 1)), ['Burn 360p 0-1s.mp4', 'Burn 360p 0-1s.vtt']);
+  assert.deepEqual(video.outputSizes, video.outputs.map((path) => ({ path, bytes: statSync(path).size })));
+  assert.equal(video.bytes, statSync(video.out).size + statSync(video.outputs[1]).size);
+  assert.equal(video.outputSizes[0].bytes, statSync(video.out).size, 'the movie has its own final size, separate from its subtitle sidecar');
   assert.match(readFileSync(video.outputs[1], 'utf8'), /^WEBVTT\n\n00:00:00\.000 --> 00:00:00\.800\n<v Ann>Hello there\n\n00:00:00\.800 --> 00:00:01\.000\nAnd welcome\n$/);
   assert.equal(frameCount(video.out), 5);
   assert.deepEqual(existsSync(join(root, '.film', 'cache', 'export')) ? readdirSync(join(root, '.film', 'cache', 'export')) : [], [], 'the page drawing them is gone');

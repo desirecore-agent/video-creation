@@ -51,7 +51,7 @@
 import { execFile, fork, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { constants as fsConstants, existsSync, readFileSync, statSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -99,7 +99,8 @@ export { exportsRoot };
  * @typedef {{ id: string, project: string, name: string, label: string, kind: ExportSpec['kind'], ask: ExportAsk,
  *   status: 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted', progress: number, phase: ExportPhase | null,
  *   framesDone: number, framesTotal: number, rate: number, etaMs: number | null, encoder: string | null,
- *   out?: string, outputs: string[], bytes: number | null, alpha: { any: boolean } | null, error?: string, cancelling?: boolean,
+ *   out?: string, outputs: string[], bytes: number | null, outputSizes?: { path: string, bytes: number }[],
+ *   alpha: { any: boolean } | null, error?: string, cancelling?: boolean,
  *   at: number, startedAt: number | null, finishedAt: number | null, retryOf?: string, temporaryOutputs?: string[],
  *   inputSnapshot?: { filmRevision: string, bytes: number, files: number, manifest: string, limitations: string[] } }} ExportJob
  */
@@ -376,6 +377,29 @@ export async function projectSizes(root) {
     sizes[part] = sum((await projectFiles(root, [part])).filter((f) => f.name.startsWith(`${TOOL_DIR}/${part}/`)));
   }
   return sizes;
+}
+
+/**
+ * Measure completed deliveries, after every encoder, sidecar write and final rename has finished. `bytes` on a job
+ * is their total, not the size of `out` alone; these entries let a consumer check each file separately. A project
+ * folder counts its file contents recursively, never the filesystem's directory-entry size. A missing delivery is
+ * an export failure, rather than a successful receipt with zero bytes.
+ * @param {readonly string[]} outputs @returns {Promise<{ path: string, bytes: number }[]>}
+ */
+export async function exportOutputSizes(outputs) {
+  /** @param {string} path @returns {Promise<number>} */
+  const sizeOf = async (path) => {
+    const info = await lstat(path);
+    if (info.isFile()) return info.size;
+    if (!info.isDirectory()) throw new ExportError(`Export output is not a regular file or directory: ${path}`);
+    let bytes = 0;
+    for (const name of await readdir(path)) bytes += await sizeOf(join(path, name));
+    return bytes;
+  };
+  /** @type {{ path: string, bytes: number }[]} */
+  const measured = [];
+  for (const path of outputs) measured.push({ path, bytes: await sizeOf(path) });
+  return measured;
 }
 
 /* ── doing it ───────────────────────────────────────────────────────────── */
@@ -1392,12 +1416,14 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
       else if (kind === 'project') await exportProject(job, root, folder, abort.signal);
       else await exportStills(job, root, folder, abort.signal);
       if (abort.signal.aborted) throw new Error('cancelled');
-      const bytes = job.outputs.reduce((n, f) => n + (existsSync(f) ? statSync(f).size : 0), 0);
-      update(job, { status: 'done', progress: 1, phase: null, etaMs: null, bytes, finishedAt: Date.now() });
+      const outputSizes = await exportOutputSizes(job.outputs);
+      if (abort.signal.aborted) throw new Error('cancelled');
+      const bytes = outputSizes.reduce((n, file) => n + file.bytes, 0);
+      update(job, { status: 'done', progress: 1, phase: null, etaMs: null, bytes, outputSizes, finishedAt: Date.now() });
     } catch (e) {
       /* what a cancelled or failed export left half written is not an export */
       for (const f of job.outputs) await rm(f, { force: true, recursive: true }).catch(() => {});
-      const ended = { phase: null, etaMs: null, outputs: [], out: undefined, finishedAt: Date.now() };
+      const ended = { phase: null, etaMs: null, outputs: [], out: undefined, bytes: null, outputSizes: [], finishedAt: Date.now() };
       update(job, abort.signal.aborted ? { ...ended, status: 'cancelled' } : { ...ended, status: 'failed', error: e instanceof Error ? e.message : String(e) });
     } finally {
       /* Receipts and small manifests survive; potentially large input copies belong only to this attempt. */
@@ -1414,7 +1440,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
     const job = {
       id: randomBytes(6).toString('hex'), project: project.id, name: project.name, label: ask.label ?? '', kind: ask.kind, ask,
       status: 'waiting', progress: 0, phase: null, framesDone: 0, framesTotal: 0, rate: 0, etaMs: null, encoder: null,
-      outputs: [], bytes: null, alpha: null, at: Date.now(), startedAt: null, finishedAt: null,
+      outputs: [], bytes: null, outputSizes: [], alpha: null, at: Date.now(), startedAt: null, finishedAt: null,
     };
     const source = { root: project.path, folder };
     sources.set(job.id, source);
