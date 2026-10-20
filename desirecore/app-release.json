@@ -51,8 +51,8 @@
     },
     {
       "path": "desirecore/RUNTIME.md",
-      "sha256": "efc76716635b685b0548caf2cfb5eba9f0d4a770f7698baf80e26c12198ef823",
-      "size": 14080,
+      "sha256": "47a8d8625443fd8653722ae494801d5be829130a9ffc4bf04986e20cc4ef5689",
+      "size": 16347,
       "role": "documentation"
     },
     {
@@ -63,14 +63,14 @@
     },
     {
       "path": "desirecore/cli.mjs",
-      "sha256": "c9185cad58aee33c82526bb7e9f5f8b4bed6dc3b397c0f493be88c3ea520ce4d",
-      "size": 11345,
+      "sha256": "104fa64800adcb0581d1a42254b87df33b540fccb17fd9900b85383ecb11d852",
+      "size": 12279,
       "role": "runtime"
     },
     {
       "path": "desirecore/client.mjs",
-      "sha256": "55de44f5ad4345b3f8529161fef3089bea4b9814c5636e54793a60f65ea0de56",
-      "size": 4464,
+      "sha256": "0fd03251db3f68d0b9aeb62e102eebd4325ffed44c4c6bee4220c612eec26042",
+      "size": 5195,
       "role": "runtime"
     },
     {
@@ -315,8 +315,8 @@
     },
     {
       "path": "package.json",
-      "sha256": "c9aac7061ffaf93995790beaad477bdb330a88152be68aed963a0d5892b945c4",
-      "size": 2414,
+      "sha256": "a1379b6da103f6d4b2646ad251c38a195bfcaea5ed8bfd9417d26c3af786123c",
+      "size": 2779,
       "role": "dependency"
     },
     {
@@ -771,8 +771,8 @@
     },
     {
       "path": "packages/openfilm/studio/server/exports.mjs",
-      "sha256": "8f0fb3c084257fab001d604afbb59f2bd179112cb394ecea915ff9380a80cd1c",
-      "size": 92575,
+      "sha256": "fa5511f148db055358df77ff68cbc6762458e9bc60eefc1bddb534ded9b18c4e",
+      "size": 93953,
       "role": "runtime"
     },
     {
@@ -825,8 +825,8 @@
     },
     {
       "path": "packages/openfilm/studio/server/get.mjs",
-      "sha256": "cf7d0c95e39901808a2d269f899607582f605447534a4e3c6c3d232d3a294282",
-      "size": 42547,
+      "sha256": "5f0051cf624d3770508ca6bb6e706d8dd29c581df6a9504901cfc92be0e9dc8f",
+      "size": 42837,
       "role": "runtime"
     },
     {
@@ -1005,8 +1005,14 @@
     },
     {
       "path": "packages/openfilm/studio/server/providers/index.mjs",
-      "sha256": "612fe00f2e754400c6ec01966979bcace77821a84905eab9fd6777cae72e8aab",
-      "size": 11815,
+      "sha256": "041e5a50ff962693e755ec439c10df6780d0826cd5be402152af77aab472e8de",
+      "size": 11852,
+      "role": "runtime"
+    },
+    {
+      "path": "packages/openfilm/studio/server/providers/mimo.mjs",
+      "sha256": "08232b313df205a51e7ee7e28d74dcb2df1b2847cb8d7b7c830be920e6eda758",
+      "size": 9786,
       "role": "runtime"
     },
     {
@@ -1059,8 +1065,8 @@
     },
     {
       "path": "packages/openfilm/studio/server/server.mjs",
-      "sha256": "8f9a600436877e539210fc30d7db01ece1110a82eae6a35cea463fdc18c11168",
-      "size": 74535,
+      "sha256": "d463097a7d42ffe96a3918d5cd65a2b302237bba1d49b3e618d1bb683a04b992",
+      "size": 74959,
       "role": "runtime"
     },
     {
@@ -1119,8 +1125,8 @@
     },
     {
       "path": "packages/openfilm/studio/server/watch.mjs",
-      "sha256": "c4c85f7bd725f518f200a1cb4081c495daf1b2d1e7ba4a9b65e3b5dc2c641b7f",
-      "size": 7104,
+      "sha256": "afea36b1e0e1a12569814eb11cc3769af3fb05052fb9a0c432bb5ca52408861c",
+      "size": 8158,
       "role": "runtime"
     },
     {
@@ -1136,9 +1142,9 @@
       "role": "runtime"
     },
     {
-      "path": "packages/openfilm/studio/ui/dist/assets/index-Zrthek7U.js",
-      "sha256": "83423115d100bbcac3a0f7d367df51a4e4007b11f103b51a0e567b2e699dce21",
-      "size": 1832087,
+      "path": "packages/openfilm/studio/ui/dist/assets/index-BKu4UdX8.js",
+      "sha256": "fb5d66c872377d851aeee59ac5aaa1088ce47304a7bb3a06b3672267c94a9139",
+      "size": 1834098,
       "role": "ui"
     },
     {
@@ -1149,7 +1155,7 @@
     },
     {
       "path": "packages/openfilm/studio/ui/dist/index.html",
-      "sha256": "04d2c321673ac21b90fcd450e1cff7e1fa405170c20694a134d56e079041fdab",
+      "sha256": "7979d5563d5541c4ab7305f857a18efaed8ac2c38ceb31c28f65f77f042d3405",
       "size": 1176,
       "role": "ui"
     },
@@ -1180,7 +1186,7 @@
   ],
   "source": {
     "kind": "worktree",
-    "sha256": "44ee42e9a1a2ef3d7b7ca4ff1d16a75499de12ff0aabbd5629047d671d71e136"
+    "sha256": "c010086b65d039411dff3d4f5366c1ede4aaacb3bd481cf081f762cac9319f7d"
   },
   "supportedPlatforms": [
     "darwin",
@@ -1213,5 +1219,5 @@
     "restoreInstructionsPath": "desirecore/RUNTIME.md"
   },
   "instructionsPath": "desirecore/RUNTIME.md",
-  "releaseDigest": "bf787d53209c47b1798b4a43082b333fc7b9f191e7670df1317de3497fa229ab"
+  "releaseDigest": "8ac566832a5295281e32721c9c25d085ef1c39ac7bb1a5a64c943a45e079b823"
 }
