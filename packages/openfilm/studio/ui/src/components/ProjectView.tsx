@@ -9,7 +9,8 @@
 import * as React from 'react';
 import { BookmarkPlus, ClipboardCopy, ClipboardPaste, GalleryVerticalEnd, Layers, LibraryBig, MessageSquarePlus, Settings2, TriangleAlert } from 'lucide-react';
 import { applyOps } from '../../../server/ops.mjs';
-import { api, ApiError, PREFS_EVENT, projectEvents, type Clip, type Film, type Listing, type MotionComponent, type Op, type ProjectFilm, type ProjectSettings } from '@/api';
+import { api, ApiError, PREFS_EVENT, projectEvents, type Clip, type Film, type Listing, type MotionComponent, type Op, type ProjectFilm, type ProjectMetadata, type ProjectSettings } from '@/api';
+import { mergeProjectMetadata } from '@/lib/project-metadata';
 import { useT } from '@/i18n';
 import { useFilm, type Step } from '@/editor/use-film';
 import { Player } from '@/editor/player';
@@ -209,11 +210,19 @@ export function ProjectView({ projectId, onProject, onLeave }: {
 
   /* ── the project, its film and its files ── */
   React.useEffect(() => {
-    api.film(projectId).then(setLoaded, (e: Error) => setFailure(e.message));
+    let alive = true;
+    let metadata: ProjectMetadata | null = null;
+    /* The initial read can arrive after a rename event; keep its film but use the latest directory. */
+    api.film(projectId).then((next) => { if (alive) setLoaded(metadata ? mergeProjectMetadata(next, metadata) : next); }, (e: Error) => { if (alive) setFailure(e.message); });
     void api.opened(projectId).catch(() => {});
     const loadFiles = () => api.files(projectId).then(setRawListing, () => {});
     void loadFiles();
-    return projectEvents(projectId, (event) => {
+    const stop = projectEvents(projectId, (event) => {
+      if (event.type === 'project') {
+        metadata = event;
+        setLoaded((current) => mergeProjectMetadata(current, event));
+        return;
+      }
       /* a picture that could not be drawn is tried again whenever the folder changes: the missing file arrived, or
          the clip that named it is gone from film.html now that the edit is written */
       if (previewErrorRef.current && (event.type === 'film' || event.type === 'files')) { preview.current?.reload?.(); }
@@ -229,6 +238,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
       const used = new Set(blocksRef.current.map((b) => b.src).filter(Boolean));
       if (changesPicture(event.paths, used)) preview.current?.reload?.();
     });
+    return () => { alive = false; stop(); };
   }, [projectId]);
 
   /* the last film the folder had, to tell what an outside write left out (see droppedOverrides) */
@@ -240,7 +250,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
   const [undone, setUndone] = React.useState<PersonEdit[]>([]);
   const personSteps = React.useRef<readonly Step[]>([]);
   const settledEdits = React.useRef(new Set<PersonEdit>());
-  const initial = React.useMemo(() => (loaded?.doc && loaded.value ? { value: loaded.value, rev: loaded.rev } : null), [loaded]);
+  const initial = React.useMemo(() => (loaded?.doc && loaded.value ? { value: loaded.value, rev: loaded.rev } : null), [loaded?.doc, loaded?.value, loaded?.rev]);
   React.useEffect(() => { if (initial) lastServerDoc.current = initial.value; }, [initial]);
   const film = useFilm(projectId, initial, React.useCallback((value: Film, kind: 'edit' | 'server', head?: string) => {
     preview.current?.update(value, head);

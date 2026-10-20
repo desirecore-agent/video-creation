@@ -53,6 +53,9 @@ export interface ExportJob {
   encoder: string | null;
   /** Absolute paths of the files made (one, or the mix and its stems). */
   outputs: string[];
+  /** Exact logical bytes for each completed output; omitted by older receipts. A directory sums its files. */
+  outputSizes?: { path: string; bytes: number }[];
+  /** Total logical bytes across all outputs, including subtitle sidecars and audio stems. */
   bytes: number | null;
   /** Whether a transparent export lets anything through (sampled frames); null when not measured. */
   alpha: { any: boolean } | null;

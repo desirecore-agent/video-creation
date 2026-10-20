@@ -108,3 +108,98 @@ test('references freeze the source project and close cleanly when that project l
   stop();
   assert.equal(host.get().open, false);
 });
+
+test('renaming the source keeps an open director draft and its references, but prepares the current path', async () => {
+  const { host, calls } = fixture();
+  host.open(context);
+  await host.prepare(host.get().context!, 'Keep this instruction');
+  const before = host.get();
+  const firstProposal = calls.filter((call) => call.method === 'prepareWork').at(-1)!.payload as DirectorProposal;
+  host.relocate('another-project', '/work/Other');
+  assert.equal(host.get(), before, 'another project does not change the source-bound draft');
+  host.relocate(context.projectId, '/work/Renamed film');
+  const after = host.get();
+  assert.equal(after.open, true);
+  assert.equal(after.context?.projectPath, '/work/Renamed film');
+  assert.deepEqual(after.context?.refs, before.context?.refs);
+  assert.equal(after.context?.time, before.context?.time);
+  assert.equal(after.context?.filmRevision, before.context?.filmRevision);
+  assert.equal(after.generation, before.generation + 1, 'the previous prepared result is stale');
+  host.relocate(context.projectId, '/work/Renamed film');
+  assert.equal(host.get(), after, 'repeated metadata is not a new draft');
+  await host.prepare(after.context!, 'Keep this instruction');
+  const proposal = calls.filter((call) => call.method === 'prepareWork').at(-1)!.payload as DirectorProposal;
+  assert.notEqual(proposal.clientRequestId, firstProposal.clientRequestId);
+  assert.equal(JSON.parse(proposal.selection.summary).projectPath, '/work/Renamed film');
+  assert.ok(proposal.prompt.startsWith('Keep this instruction'));
+});
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+for (const phase of ['context', 'connect', 'publishSelection', 'prepareWork'] as const) {
+  test(`rename during ${phase} invalidates the stale preparation before it proceeds`, async () => {
+    const reached = deferred(), release = deferred();
+    const calls: Array<{ method: string; payload?: unknown }> = [];
+    let blocked = false, nextId = 0, current = structuredClone(context);
+    const pauseAt = async (step: string) => {
+      if (step !== phase || blocked) return;
+      blocked = true; reached.resolve(); await release.promise;
+    };
+    const bridge: DesirecoreAppBridge = { call: async (method, payload) => {
+      calls.push({ method, payload });
+      await pauseAt(method);
+      if (method === 'connect') return connection;
+      if (method === 'prepareWork') return { status: 'prepared', clientRequestId: (payload as DirectorProposal).clientRequestId };
+      return {};
+    } };
+    const host = new DirectorHost({ bridge: () => bridge, context: async () => {
+      await pauseAt('context'); return { directorAgentId: 'video-director' };
+    }, uuid: () => `deferred-${++nextId}` });
+    host.registerContext(() => current);
+    host.open(current);
+    const rejected = assert.rejects(host.prepare(host.get().context!, 'Preserve this draft'),
+      (cause) => cause instanceof DirectorBridgeError && cause.code === 'context-unavailable');
+    await reached.promise;
+    current = { ...current, projectPath: '/work/After rename' };
+    host.relocate(current.projectId, current.projectPath);
+    release.resolve();
+    await rejected;
+    assert.deepEqual(calls.map((call) => call.method), phase === 'context' ? [] : phase === 'connect' ? ['connect']
+      : phase === 'publishSelection' ? ['connect', 'publishSelection'] : ['connect', 'publishSelection', 'prepareWork']);
+    assert.equal(host.get().context?.projectPath, current.projectPath);
+    if (phase === 'publishSelection' || phase === 'prepareWork') {
+      assert.equal(JSON.parse((calls[1].payload as { summary: string }).summary).projectPath, context.projectPath,
+        'an already-published selection remains an observable fact');
+    }
+    if (phase === 'prepareWork') {
+      assert.equal(calls.filter((call) => call.method === 'prepareWork').length, 1,
+        'a preparation already sent remains auditable; invalidation does not cancel or repeat it');
+    }
+    await host.prepare(host.get().context!, 'Preserve this draft');
+    const proposal = calls.filter((call) => call.method === 'prepareWork').at(-1)!.payload as DirectorProposal;
+    assert.equal(JSON.parse(proposal.selection.summary).projectPath, current.projectPath, 'the person can prepare the retained draft from the renamed source');
+  });
+}
+
+test('a path change visible to the context reader invalidates preparation before the relocate effect runs', async () => {
+  const reached = deferred(), release = deferred(), calls: string[] = [];
+  let current = structuredClone(context);
+  const host = new DirectorHost({ context: async () => ({ directorAgentId: 'video-director' }), bridge: () => ({ call: async (method, payload) => {
+    calls.push(method);
+    if (method === 'connect') { reached.resolve(); await release.promise; return connection; }
+    if (method === 'prepareWork') return { status: 'prepared', clientRequestId: (payload as DirectorProposal).clientRequestId };
+    return {};
+  } }) });
+  host.registerContext(() => current);
+  host.open(current);
+  const rejected = assert.rejects(host.prepare(host.get().context!, 'Edit'), (cause) => cause instanceof DirectorBridgeError && cause.code === 'context-unavailable');
+  await reached.promise;
+  current = { ...current, projectPath: '/work/Current path from render' };
+  release.resolve();
+  await rejected;
+  assert.deepEqual(calls, ['connect']);
+});

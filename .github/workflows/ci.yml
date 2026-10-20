@@ -25,6 +25,7 @@ jobs:
       - run: pnpm build
       - run: pnpm test
       - run: pnpm test:reliability
+      - run: pnpm test:regressions
       - run: pnpm test:motion
       - run: node --test --test-concurrency=1 packages/openfilm/studio/ui/src/lib/desirecore-host.test.ts packages/openfilm/studio/ui/src/lib/host-appearance.test.ts packages/openfilm/studio/ui/src/lib/export-jobs.test.ts
 # Distribution is owned by DesireCore. No npm publication, desktop installer or upstream feed is triggered here.

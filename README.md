@@ -70,3 +70,9 @@ The [MIT license](LICENSE), original [trademark policy](TRADEMARK.md) and [third
 The general-motion layer and those samples are independently implemented on the existing MIT core. Overlay Studio was a design reference; none of its code, templates, skills or assets are included. Schema validation uses bundled Ajv and ajv-formats, with complete dependency licenses under `desirecore/licenses/`. The offline SDK also embeds the root license and complete MIT/BSD notices for its five actual dependencies, retaining them when a project or the single module is saved or copied.
 
 The complete film format and editor originate upstream. Integration verification is recorded in commits and pull requests. Paid media providers, the installed DesireCore host and final platform-specific packages require their own runtime verification.
+
+## Project synchronization, output sizes and MiMo narration
+
+Renaming an open project synchronizes its name, folder and file watchers while preserving edits and the director draft. Proposals already prepared for the previous folder need to be prepared again. The export tray labels the total delivery size and expands exact bytes for each video, subtitle or other output; API bytes remains the total and outputSizes records each output.
+
+MiMo preset TTS supports explicit voices and delivery instructions through the existing media service and managed get CLI. Keep credentials in Providers or the service environment, outside projects and export packages. Ordinary API and Token Plan endpoints and credential scopes are configured separately under their official terms; requests do not silently switch endpoints or repeat an unknown paid request. MiMo does not supply word timestamps, so subtitles must be aligned to the actual generated audio. See the [runtime contract](desirecore/RUNTIME.md).

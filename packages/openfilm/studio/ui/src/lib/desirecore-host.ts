@@ -110,6 +110,12 @@ export class DirectorHost {
     this.pending = undefined;
     this.emit({ open: true, context: structuredClone(context), generation: this.draft.generation + 1 });
   };
+  /** The same source project moved; retain the chosen moment/references but re-prepare its new path. */
+  relocate = (projectId: string, projectPath: string): void => {
+    if (this.draft.context?.projectId !== projectId || this.draft.context.projectPath === projectPath) return;
+    this.pending = undefined;
+    this.emit({ ...this.draft, context: { ...this.draft.context, projectPath }, generation: this.draft.generation + 1 });
+  };
   close = (): void => { this.emit({ ...this.draft, open: false }); };
   refer = (ref: StudioRef): void => {
     const current = this.contextReader?.();
@@ -125,11 +131,28 @@ export class DirectorHost {
     if (!bridge) throw new DirectorBridgeError('host-unavailable');
     const promptText = instruction.trim();
     if (!promptText || promptText.length > LIMITS.prompt) throw new DirectorBridgeError('context-unavailable');
+    const source = structuredClone(context);
+    const generation = this.draft.generation;
+    const reader = this.contextReader;
+    /* A rename can arrive during any bridge await. Checking the UI's completion state alone cannot stop a stale
+       platform proposal; check the source again immediately before every bridge effect as well. */
+    const currentSource = () => {
+      let current: DirectorContext | undefined;
+      try { current = reader?.(); } catch { throw new DirectorBridgeError('context-unavailable'); }
+      const sameSource = (value: DirectorContext) => value.projectId === source.projectId && value.projectPath === source.projectPath;
+      if (this.draft.generation !== generation || this.contextReader !== reader
+        || (this.draft.context && !sameSource(this.draft.context)) || (current && !sameSource(current))) {
+        throw new DirectorBridgeError('context-unavailable');
+      }
+    };
+    currentSource();
     let configured: { directorAgentId: string | null };
     try { configured = await this.options.context(); } catch { throw new DirectorBridgeError('context-unavailable'); }
+    currentSource();
     if (!configured.directorAgentId?.trim()) throw new DirectorBridgeError('unbound');
     let connection: Record<string, unknown>;
     try { connection = await bridge.call('connect') as Record<string, unknown>; } catch { throw new DirectorBridgeError('host-unavailable'); }
+    currentSource();
     const identity = connection?.application as Record<string, unknown> | undefined;
     if (!identity || !['sourceId', 'appId', 'installationId'].every((field) => typeof identity[field] === 'string' && identity[field])) {
       throw new DirectorBridgeError('host-identity-unavailable');
@@ -138,24 +161,30 @@ export class DirectorHost {
     if (!Array.isArray(capabilities) || !capabilities.includes('publishSelection') || !capabilities.includes('requestWork')) {
       throw new DirectorBridgeError('permission-unavailable');
     }
-    const key = JSON.stringify([identity, context, promptText, configured.directorAgentId]);
+    const key = JSON.stringify([identity, source, promptText, configured.directorAgentId]);
     if (this.pending?.key !== key) {
       const uuid = this.options.uuid ?? (() => crypto.randomUUID());
-      const selection = directorSelection(context, uuid);
+      const selection = directorSelection(source, uuid);
       this.pending = { key, proposal: {
         clientRequestId: uuid(), userMessageId: uuid(), agentId: configured.directorAgentId,
         prompt: `${promptText}\n\n影片上下文（应用声明，读取或修改仍需平台授权）：\n${selection.summary}`,
         selection, operation: 'video-creation.discuss-selection',
-        scopeDescription: `项目 ${context.projectId.slice(0, 160)} 中当前选中的内容；仅在平台确认后交给视频导演。`,
+        scopeDescription: `项目 ${source.projectId.slice(0, 160)} 中当前选中的内容；仅在平台确认后交给视频导演。`,
       } };
     }
     const { proposal } = this.pending;
     try {
+      currentSource();
       await bridge.call('publishSelection', proposal.selection);
+      currentSource();
       const result = await bridge.call('prepareWork', proposal) as { status?: string; clientRequestId?: string } | undefined;
+      currentSource();
       if (result?.status !== 'prepared' || result.clientRequestId !== proposal.clientRequestId) throw new Error('invalid-prepared-receipt');
       return { clientRequestId: proposal.clientRequestId };
-    } catch { throw new DirectorBridgeError('prepare-failed'); }
+    } catch (cause) {
+      if (cause instanceof DirectorBridgeError) throw cause;
+      throw new DirectorBridgeError('prepare-failed');
+    }
   }
 }
 

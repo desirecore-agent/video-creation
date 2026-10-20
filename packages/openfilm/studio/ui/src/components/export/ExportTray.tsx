@@ -281,6 +281,10 @@ function JobLine({ job, cancelling, t }: { job: ExportJob; cancelling: boolean; 
   }
   if (job.status === 'done') {
     const took = job.startedAt && job.finishedAt ? formatDuration(job.finishedAt - job.startedAt) : '';
+    const total = job.bytes != null
+      ? t('exportTray.totalSize').replace('{size}', job.bytes === 0 ? '0 B' : formatBytes(job.bytes))
+      : '';
+    const byteCount = (bytes: number) => t('exportTray.byteCount').replace('{n}', bytes.toLocaleString());
     /* a transparent export with nothing see-through: the file is fine, the element paints its own background */
     const opaque = job.alpha != null && !job.alpha.any;
     return (
@@ -288,8 +292,21 @@ function JobLine({ job, cancelling, t }: { job: ExportJob; cancelling: boolean; 
         {opaque && <p className="mt-0.5 text-[11.5px] leading-snug text-[var(--warn)]">{t('exportTray.notTransparent')}</p>}
         <p className="mt-0.5 truncate text-[11.5px] text-[var(--text-faint)]" title={job.outputs.join('\n')}>
           {[job.outputs.length === 1 ? basenameOf(job.outputs[0]!) : t('exportTray.files').replace('{n}', String(job.outputs.length)),
-            job.bytes ? formatBytes(job.bytes) : '', took ? t('exportTray.took').replace('{time}', took) : ''].filter(Boolean).join(' · ')}
+            total, took ? t('exportTray.took').replace('{time}', took) : ''].filter(Boolean).join(' · ')}
         </p>
+        {job.outputSizes?.length ? (
+          <details className="mt-1 text-[11.5px] text-[var(--text-faint)]">
+            <summary className="cursor-pointer select-none">{t('exportTray.fileSizes')}</summary>
+            <ul className="mt-1 max-h-40 space-y-1 overflow-y-auto">
+              {job.outputSizes.map((output) => (
+                <li key={output.path} className="flex min-w-0 items-baseline gap-2" title={output.path}>
+                  <span className="min-w-0 flex-1 truncate">{basenameOf(output.path)}</span>
+                  <span className="shrink-0 tabular-nums">{byteCount(output.bytes)}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
       </>
     );
   }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -47,12 +47,83 @@ test('a real export reads its frozen input after the source changes, persists it
     const done = await waitFor(queue, job.id);
     assert.equal(done.status, 'done', done.error);
     assert.match(await readFile(done.out, 'utf8'), /original saved words/);
+    assert.deepEqual(done.outputSizes, [{ path: done.out, bytes: (await readFile(done.out)).length }]);
+    assert.equal(done.bytes, done.outputSizes[0].bytes);
     assert.ok(done.inputSnapshot.filmRevision && existsSync(done.inputSnapshot.manifest));
     for (let i = 0; i < 100 && queue.busy(); i++) await new Promise((done) => setTimeout(done, 5));
     assert.equal(existsSync(input), false, 'input copies are removed after this attempt');
     const reopened = createExports({ stateDir, captions });
-    assert.equal(reopened.list('project').find((j) => j.id === job.id).status, 'done');
+    const receipt = reopened.list('project').find((j) => j.id === job.id);
+    assert.equal(receipt.status, 'done');
+    assert.deepEqual(receipt.outputSizes, done.outputSizes, 'per-output sizes survive a restart');
     assert.throws(() => reopened.retry(job.id), /only a stopped export/);
+  } finally { queue?.stopAll(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('completed output accounting distinguishes the video from its subtitle sidecar', async () => {
+  const { exportOutputSizes } = await import('./exports.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'vc-output-sizes-'));
+  try {
+    const movie = join(dir, '影片.mp4'), sidecar = join(dir, '影片.srt');
+    const media = Buffer.alloc(128, 0x6d), subtitle = Buffer.from('1\n00:00:00,000 --> 00:00:01,000\n公司为什么存在？\n');
+    await writeFile(movie, media);
+    await writeFile(sidecar, subtitle);
+    const measured = await exportOutputSizes([movie, sidecar]);
+    assert.deepEqual(measured, [{ path: movie, bytes: media.length }, { path: sidecar, bytes: subtitle.length }]);
+    assert.equal(measured.reduce((n, file) => n + file.bytes, 0), media.length + subtitle.length);
+    await assert.rejects(exportOutputSizes([movie, join(dir, 'missing.srt')]), /ENOENT/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('a completed project folder receipt counts nested file contents and persists the actual delivery size', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vc-folder-receipt-'));
+  let queue;
+  try {
+    const project = await createProject(join(dir, 'project'));
+    const payload = Buffer.from('可编辑场景\n'.repeat(400));
+    await mkdir(join(project.path, 'scenes', 'nested'), { recursive: true });
+    await writeFile(join(project.path, 'scenes', 'nested', 'title.html'), payload);
+    const expected = (await readFile(join(project.path, 'film.html'))).length
+      + (await readFile(join(project.path, '.film', 'subtitles.json'))).length + payload.length;
+    const stateDir = join(dir, 'state');
+    queue = createExports({ stateDir });
+    const submitted = queue.start(project, { kind: 'project', as: 'folder' }, { folder: join(dir, 'output') });
+    const done = await waitFor(queue, submitted.id);
+    assert.equal(done.status, 'done', done.error);
+    assert.deepEqual(await readFile(join(done.out, 'scenes', 'nested', 'title.html')), payload);
+    assert.equal(done.bytes, expected, 'folder size is the exported contents, not the directory inode');
+    assert.deepEqual(done.outputSizes, [{ path: done.out, bytes: expected }]);
+    const receipt = createExportJobStore(stateDir).load().find((item) => item.job.id === done.id).job;
+    assert.equal(receipt.bytes, expected);
+    assert.deepEqual(receipt.outputSizes, done.outputSizes);
+  } finally { queue?.stopAll(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('a delivery that disappears after its final rename cannot produce a done receipt', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vc-missing-delivery-'));
+  let queue, removed;
+  const seen = [];
+  try {
+    const project = await createProject(join(dir, 'project'));
+    const stateDir = join(dir, 'state');
+    queue = createExports({ stateDir, onChange: (job) => {
+      seen.push(job.status);
+      /* An external removal after the exporter's real atomic delivery but before its receipt is finalized. */
+      if (!removed && job.status === 'running' && job.out && existsSync(join(job.out, 'film.html'))) {
+        removed = job.out;
+        rmSync(job.out, { recursive: true });
+      }
+    } });
+    const submitted = queue.start(project, { kind: 'project', as: 'folder' }, { folder: join(dir, 'output') });
+    const failed = await waitFor(queue, submitted.id);
+    assert.ok(removed, 'the test removed a successfully renamed output');
+    assert.equal(failed.status, 'failed');
+    assert.match(failed.error, /ENOENT/);
+    assert.equal(failed.bytes, null);
+    assert.deepEqual(failed.outputSizes, []);
+    assert.deepEqual(failed.outputs, []);
+    assert.equal(seen.includes('done'), false);
+    assert.equal(createExportJobStore(stateDir).load()[0].job.status, 'failed');
   } finally { queue?.stopAll(); await rm(dir, { recursive: true, force: true }); }
 });
 

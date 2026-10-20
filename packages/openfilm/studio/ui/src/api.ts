@@ -30,6 +30,8 @@ export type Track = { clips: Clip[]; locked?: boolean; hidden?: boolean; muted?:
 export type Film = { stage?: { w: number; h: number }; tracks: Track[] };
 /** `value`: film.html as read, every clip named (a clip with no id takes its file's name, as the server and preview do). */
 export type ProjectFilm = { project: Project; folder: string; text: string; rev: string; value: Film | null; doc: Film | null; problems: string[] };
+/** The directory/name changed, without replacing film.html or the editor's current work. */
+export type ProjectMetadata = Pick<ProjectFilm, 'project' | 'folder'>;
 export type MediaFile = { path: string; kind: 'video' | 'image' | 'audio' | 'page' | 'other'; size: number; mtime: number; added?: number };
 /** A project's editor settings (studio/server/project-settings.mjs). */
 export type ProjectSettings = { fps?: number; trackNames?: { name: string; index: number; clips: string[] }[]; trackHeights?: { height: number; index: number; clips: string[] }[] };
@@ -167,6 +169,7 @@ export type SpendAsk = {
 export type StudioNotice = { id: string; kind: 'balance'; provider: string; providerId: string };
 
 export type FolderEvent = { type: 'film'; rev: string } | { type: 'files'; paths?: string[] } | { type: 'history' } | { type: 'export'; job: ExportJob } | { type: 'open'; to: string }
+  | ({ type: 'project' } & ProjectMetadata)
   | { type: 'history-progress'; op: string; phase: string; done: number; total: number }
   | { type: 'ask'; ask: SpendAsk } | { type: 'asked'; id: string } | { type: 'notice'; notice: StudioNotice };
 

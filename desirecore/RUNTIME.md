@@ -108,3 +108,19 @@ HTTP 合同分别为 `GET /api/projects/:id/motion/catalog`、`GET /api/projects
 - `samples:1` 不做运动模糊；2 到 32 使用内核现有快门区间平均。透明输出先以 16 位预乘颜色进行平均，再还原直通颜色，避免移动或淡出的透明边缘出现黑边。`shutter` 是一帧的 0 到 1 比例，必须同时提供 `samples`。PNG 序列不含音频；不支持的字段或组合直接拒绝，不静默忽略。
 
 CLI 示例：`node desirecore/cli.mjs render <项目> --codec vp9 --alpha --fps 30000/1001 --width 1080 --height 1920 --range 0-3 --samples 8 --shutter 0.5 --no-audio --wait`。立即返回的是提交回执；以 `video_jobs` 或 CLI `jobs` 的实际 `status`、`outputs`、`error` 和输入快照为事实源。`done` 才表示完成，`failed`、`cancelled`、`interrupted` 都不是成功；`--wait` 对这些终态返回非零。MCP 工具消息出现 `isError` 或回执终态失败时，即使 stdio 进程退出 0，也不能宣称样片成功。超时结果未知时先查原记录，不自动重复提交。
+
+
+## 工程重命名与导出大小
+
+项目身份以稳定id为准；重命名改变name/path时，服务通过独立project事件通知已连接编辑器，重连也发送当前元数据。编辑器合并元数据，保留已加载影片、编辑历史和当前播放点；文件监听和导出事件根同步迁移到新目录。已经打开的导演草稿更新目录并保留指令/引用，旧的已准备提案失效，需基于新来源重新准备。
+
+完成回执的`bytes`始终表示`outputs`全部交付的逻辑字节总计，包含字幕旁文件、分轨等，不是只指主MP4；`outputSizes:[{path,bytes}]`给出每项最终实际大小。目录按其文件内容递归求和。旧回执可能没有outputSizes，不能凭总计虚构单个文件大小。导出托盘标明总计，并可展开各文件的准确字节。最终声明交付缺失或不可读取会使该次导出失败，不发done。
+
+
+## 媒体调用与MiMo
+
+受管CLI复用现有`/api/get`：`node desirecore/cli.mjs get <项目目录> tts --args <JSON参数文件> --via mimo --model mimo-v2.5-tts --home <应用数据根>`。参数为`{"out":"intro-mimo","text":"准确的旁白正文","voice":"白桦","style":"自然、从容，数字清楚，避免播音腔。"}`。out是素材名称，实际src、精确dur和bytes以落盘回执为准；不是完整电影的导出命令。
+
+凭据只通过应用Providers的MiMo设置或服务进程MIMO_API_KEY配置，不作为CLI开关、参数文件或工程来源字段。MIMO_API_BASE_URL显式选择运行进程端点，默认https://api.xiaomimimo.com/v1；Token Plan中国区为https://token-plan-cn.xiaomimimo.com/v1，须与相应凭据及官方使用范围匹配。缺少显式匹配配置会在出站前报错，不静默改端点。MiMo沿现有provider/素材落盘合同运行，不新增算力或Agent运行时。
+
+风格进入user消息，正文原样进入assistant消息；适配只用预置TTS，不克隆真人，不自动润色正文。成功要求finish_reason=stop、有效完整PCM WAV和精确源时长；截断、错误或无音频不是成功。无MiMo词时间戳，因此不生成伪造逐字VTT。超时或传输断开时结果可能未知，应先检查素材与回执，不能自动重复付费请求。

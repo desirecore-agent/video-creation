@@ -24,6 +24,7 @@ const WRITING = /(^|[/\\])([^/\\]+\.[0-9a-f-]{8,}\.tmp|\.\d+\.\d+\.importing)$/;
  * is told, such as a provider with no balance left (get.mjs).
  * `history-progress`: how far a version history action is (history.mjs), `op` the action ('commit', 'checkout'…).
  * @typedef {{ type: 'film', rev: string } | { type: 'files', paths?: string[] } | { type: 'history' } | { type: 'export', job: object }
+ *   | { type: 'project', project: Awaited<ReturnType<typeof import('./projects.mjs').projectById>>, folder: string }
  *   | { type: 'history-progress', op: string, phase: string, done: number, total: number }
  *   | { type: 'ask', ask: object } | { type: 'asked', id: string } | { type: 'notice', notice: object }} FolderEvent
  */
@@ -116,29 +117,52 @@ export function watchTree(root, onChange, native = process.platform === 'darwin'
  * it with its last.
  */
 export function createWatchers() {
-  /** @type {Map<string, { close: () => void, listeners: Set<(e: FolderEvent) => void> }>} */
+  /** @typedef {{ on: (e: FolderEvent) => void, entry: WatchEntry }} Subscription */
+  /** @typedef {{ root: string, close: () => void, listeners: Set<Subscription> }} WatchEntry */
+  /** @type {Map<string, WatchEntry>} */
   const byRoot = new Map();
+  const start = (/** @type {WatchEntry} */ entry) => watchFolder(entry.root, (e) => { for (const sub of entry.listeners) sub.on(e); });
   return {
     /** @param {string} root @param {(e: FolderEvent) => void} listener */
     subscribe(root, listener) {
       let entry = byRoot.get(root);
       if (!entry) {
-        const listeners = new Set();
-        entry = { listeners, close: watchFolder(root, (e) => { for (const fn of listeners) fn(e); }) };
+        entry = { root, listeners: new Set(), close: () => {} };
+        entry.close = start(entry);
         byRoot.set(root, entry);
       }
-      entry.listeners.add(listener);
+      const sub = { on: listener, entry };
+      entry.listeners.add(sub);
       return () => {
-        const current = byRoot.get(root);
-        if (!current) return;
-        current.listeners.delete(listener);
-        if (!current.listeners.size) { current.close(); byRoot.delete(root); }
+        const current = sub.entry;
+        if (!current.listeners.delete(sub)) return;
+        if (!current.listeners.size) {
+          current.close();
+          if (byRoot.get(current.root) === current) byRoot.delete(current.root);
+        }
       };
+    },
+    /** A project's directory changed; keep its open streams and watch the new directory on every OS. */
+    move(/** @type {string} */ from, /** @type {string} */ to) {
+      if (from === to) return;
+      const entry = byRoot.get(from);
+      if (!entry) return;
+      entry.close();
+      byRoot.delete(from);
+      const target = byRoot.get(to);
+      if (target) {
+        for (const sub of entry.listeners) { sub.entry = target; target.listeners.add(sub); }
+        entry.listeners.clear();
+      } else {
+        entry.root = to;
+        entry.close = start(entry);
+        byRoot.set(to, entry);
+      }
     },
     /** The projects someone is watching now. */
     roots: () => [...byRoot.keys()],
     /** Tell everyone watching `root` something the folder itself does not say (a new version in its history). */
-    emit(/** @type {string} */ root, /** @type {FolderEvent} */ event) { for (const fn of byRoot.get(root)?.listeners ?? []) fn(event); },
+    emit(/** @type {string} */ root, /** @type {FolderEvent} */ event) { for (const sub of byRoot.get(root)?.listeners ?? []) sub.on(event); },
     closeAll() { for (const entry of byRoot.values()) entry.close(); byRoot.clear(); },
   };
 }
