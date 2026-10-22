@@ -93,3 +93,16 @@ node desirecore/cli.mjs review <项目> --source current-project --times 1,3 --l
 生成材料的 `observation: generated-not-viewed` 不是导演已看图。导演应再使用平台现有 `Read(path, expected_sha256)` 读取必要 PNG，将实际画面与准确版本、时间点一起作为修订依据；图像进入请求也不等于模型理解。读取帧会核对原字节和摘要，丢失或篡改不会以其他图片代替。审片不改影片、人工 overrides 或锁；修订仍走现有版本化编辑。
 
 每次最多六帧，每帧最多 4 MiB、总计 12 MiB。正式关闭服务会停止接收观察、结束并等待本实例审片资源及等待队列清理，不在后台暗中继续。完整暂存视频与工程输入在成功或失败后清理，只有帧和回执留在本应用数据根的 `reviews/<reviewId>/`；没有自动过期或隐式重建。清理精确审片目录后旧引用明确不可用。新导出输入清单逐项记录冻结副本的 SHA-256；历史清单可能只有路径与字节，没有场景/资源的历史摘要；远端或未解析动态依赖、系统字体与浏览器环境不能由本地摘要证明冻结。详细请求和 HTTP 读取合同见 [RUNTIME.md](desirecore/RUNTIME.md)。
+
+## 公开时间线修改合同
+
+无需读取应用材料源码、打开服务或指定工程/home，即可查询本版本支持的全部时间线操作：
+
+```sh
+node desirecore/cli.mjs patch --help
+node desirecore/cli.mjs patch --schema
+```
+
+后者只读输出版本化 Draft-07 操作数组 Schema，与 MCP `video_patch.ops` 同源。已有字段/删除/兼容宽值及最终校验归原内核；公开说明不授予新权限，也不是场景源码 CAS。正常修改先 `inspect`，再把 JSON 数组保存为工程内操作文件并用真实 `--base` 提交。
+
+仅切换已存在片段到导演创建的场景副本时，使用 `[{"op":"set","clip":"真实ID","field":"src","value":"tide-beacon-r2.html"}]`。该操作保留未指定的 `motion`、人工 DOM overrides、锁和 `time`。`inspect` 通常已把 HTML `#t` 分离为 `time`，只换 `src` 时不要重复拼接 `#t`；范围按实际返回值保留。冲突后重读合并，不换新 revision 盲重放。完整机器合同以当前安装版本 `patch --schema` 为准。

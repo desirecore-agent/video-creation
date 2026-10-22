@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { runtimeConfig, applyRuntimeEnvironment, runtimeIdentity, managedDocumentNavigation } from './config.mjs';
 import { projectClient } from './client.mjs';
 import { acquireApplicationLock } from './application-lock.mjs';
+import { timelineOpsSchema } from '../packages/openfilm/studio/server/op-schema.mjs';
 import { normalizeReviewRequest } from '../packages/openfilm/studio/server/reviews.mjs';
 import { normalizeVideoExportOptions } from '../packages/openfilm/studio/server/video-export-options.mjs';
 
@@ -25,6 +26,7 @@ node desirecore/cli.mjs <命令> [项目目录] [选项]
   motion-patch <项目> <片段ID> --base <revision> --ops <JSON文件>
                                                    按字段、属性轨和事件 ID 局部编辑
   patch <项目> --base <revision> --ops <JSON文件>     按基线提交结构化编辑
+  patch --schema                                  离线读取完整时间线 Op JSON Schema（不需项目/服务）
   check <项目> [时间或范围]                          抽帧并检查确定性与资源
   review <项目> --source <current-project|export-job> [--job <任务ID>]
     --times <0,2.5> | --count <1-6> [--last] [--max-edge <128-1920>]
@@ -49,6 +51,7 @@ node desirecore/cli.mjs <命令> [项目目录] [选项]
 export function argumentsOf(args) {
   return parseArgs({ args, allowPositionals: true, options: {
     home: { type: 'string' }, project: { type: 'string' }, port: { type: 'string' },
+    schema: { type: 'boolean' },
     'no-browser': { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
     base: { type: 'string' }, ops: { type: 'string' }, output: { type: 'string' },
     source: { type: 'string' }, job: { type: 'string' }, times: { type: 'string' }, count: { type: 'string' }, last: { type: 'boolean' }, 'max-edge': { type: 'string' },
@@ -142,6 +145,11 @@ export async function start(config, options = {}) {
 export async function command(args, output = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)) {
   const { values, positionals } = argumentsOf(args);
   const [name, folder, target] = positionals;
+  if (name === 'patch' && values.schema) return output(timelineOpsSchema);
+  if (name === 'patch' && values.help) {
+    process.stdout.write('patch <项目> --base <inspect真实revision> --ops <JSON数组文件>\n先运行 patch --schema 离线读取完整 Op/字段与例子，无需项目、服务或 home。只换 src 使用 set/clip/field/value；保留其他人工字段，原 #t 范围按 inspect 确认。\n');
+    return;
+  }
   if (values.help || !name) { process.stdout.write(`${HELP}\n`); return; }
   const config = runtimeConfig(values);
   applyRuntimeEnvironment(config);

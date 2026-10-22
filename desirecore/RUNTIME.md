@@ -158,3 +158,15 @@ CLI 对应 `--job <ID>`、`--times 0,2.5`、`--count 4`、`--last`、`--max-edge
 `observation: generated-not-viewed` 只说明材料已生成。导演通过现有 `Read(path, expected_sha256)` 实际读取必要画面，并按返回尺寸与实际时间描述观察；指针、生成回执或仅文本摘要不证明看图，图片包含于模型请求也不证明理解或审美结论。此入口不写 film.html、场景源码、人工 DOM overrides 或锁，不规定导演如何构思或修订。真实原生调用、图像请求证据和人工锁比较以固定验收记录为准。
 
 审片运行生命周期归现有 Studio：`whenIdle` 退出会把在途/等待审片视为 busy。正式关闭服务时停止接收新审片，取消并等待仅该实例拥有的审片 FFmpeg/FFprobe、FilmPage 与本地文件 site，再清理其独占临时输入；不调用全局进程清理。等待队列也明确结束，不在重启后暗中恢复观察。读取已生成材料仍以原摘要为准；进行中观察停止为 `review-stopped`，未生成成功回执时不能当作已经看图。
+
+## 不读材料源码的时间线操作发现
+
+`node desirecore/cli.mjs patch --schema` 在配置/home/项目/服务发现之前返回 Draft-07 操作数组 Schema；`patch --help` 给出此入口。它不启动 Studio、不读取 `runtime-config.json`、不创建 home，也不要求把应用材料目录加入智能体文件读取范围。Schema 的 `$id: urn:desirecore:video-creation:timeline-ops:v1` 标明合同版本；MCP `video_patch.inputSchema.properties.ops` 使用同一份 `op-schema.mjs` 描述数据。它描述现有 `set`、`motion`、`motion-locks`、`move`、`insert`、`remove`、`split`、`props`、`fields`、`stage`、`track`、`reorder` 十二类操作，并保留旧内核的省略/删除与未消费附加字段语义。Schema 是发现入口，最终领域合法性、真实 revision、并发冲突和人工锁仍由原 `applyOps`／影片检查执行。
+
+最小换源文件示例（先从实际 `inspect` 取 clip ID 和 revision）：
+
+```json
+[{"op":"set","clip":"scene","field":"src","value":"tide-beacon-r2.html"}]
+```
+
+沿现有 `patch <项目> --base <真实revision> --ops <JSON文件>` 提交；HTTP 仍为既有 `POST /api/projects/:id/edit {base,ops}`，MCP 仍为 `video_patch {base,ops}`。只改 `src` 不重交或清空 `motion`、人工 overrides、锁、轨标记及 `time`。格式读取通常把 HTML src 的 `#t=0,8` 拆成 `src` 与 `time:[0,8]`，写出时由内核重新组成一个片段；保留 inspect 的 `time`，不要在新 `value` 重复拼入片段。该操作不是场景源码 CAS；对新场景的参数/人工锁兼容性与最终影片格式仍检查，旧基线的同一 src 已变则冲突。没有明确用户意图时，不为换源解锁参数或重写整片。

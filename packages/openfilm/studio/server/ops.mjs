@@ -7,6 +7,7 @@
 import { FILM_FILE, clipFade, clipIdFor, clipKind, clipSpeed, kindOf } from '../../src/film-doc.mjs';
 import { checkMotionLocks, validateMotionInstance } from '../../src/motion-schema.mjs';
 import { applyMotionChanges } from './motion-edits.mjs';
+import { SETTABLE_FIELDS } from './op-schema.mjs';
 
 /** @typedef {{ src: string, id: string, [field: string]: unknown }} Clip */
 /** @typedef {{ clips: Clip[], locked?: boolean, hidden?: boolean, muted?: boolean }} Track */
@@ -73,7 +74,7 @@ function targetTrack(/** @type {FilmValue} */ value, /** @type {number | undefin
 const dropEmptyTracks = (/** @type {FilmValue} */ value) => { value.tracks = value.tracks.filter((track) => track.clips.length); };
 
 /** Fields a person sets from Studio, by kind of clip (the rest of a clip is the agent's to write). */
-const SETTABLE = new Set(['at', 'time', 'box', 'size', 'volume', 'speed', 'overrides', 'src']);
+const SETTABLE = new Set(SETTABLE_FIELDS);
 
 /** @param {FilmValue} value @param {Op[]} ops */
 export function applyOps(value, ops) {
