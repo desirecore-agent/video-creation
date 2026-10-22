@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, rm, stat, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, stat, symlink, link } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -23,7 +23,7 @@ async function fixture(run) {
 }
 const result = async (dir, requestedTime = 0, actualPTS = null) => {
   const file = join(dir, 'frame-0.png'); await writeFile(file, png);
-  return { duration: 1, lastFramePolicy: actualPTS === null ? 'project-duration-minus-0.001s' : 'last-decoded-video-frame-pts', frames: [{ requestedTime, actualTime: 0, actualPTS, width: 1, height: 1, timeBasis: actualPTS === null ? 'project-seek' : 'encoded-pts', file }] };
+  return { duration: 1, lastFramePolicy: actualPTS === null ? 'project-duration-minus-0.001s' : 'last-decoded-video-frame-pts', frames: [{ requestedTime, actualTime: 0, actualPTS, width: 1, height: 1, timeBasis: actualPTS === null ? 'project-seek' : 'encoded-pts', captureSha256: hash(png), captureBytes: png.length, file }] };
 };
 
 test('审片 CLI/MCP 共用精确来源和六帧预算，不接受任意输出路径或混用来源', () => {
@@ -193,4 +193,114 @@ test('open 在 launch 等待期间取消会关闭刚返回的本次 browser 且�
     await assert.rejects(open(project.path, { signal: preAborted.signal }), (error) => error.name === 'AbortError');
     assert.equal(closes, 1);
   } finally { release(); chromium.launch = original; }
+}));
+
+test('firstLast规范补首尾且仍受六帧预算，CLI及MCP发现同源P1合同', async () => {
+  const { reviewContract, reviewRequestSchema } = await import('./review-contract.mjs');
+  const { command } = await import('../../../../desirecore/cli.mjs');
+  let contract; await command(['review', '--schema'], (value) => { contract = value; });
+  assert.equal(contract, reviewContract); assert.equal(contract.contractVersion, 2);
+  assert.equal(tools.find((tool) => tool.name === 'video_review').inputSchema, reviewRequestSchema);
+  assert.deepEqual(reviewOptionsOf({ source: 'current-project', 'first-last': true, 'target-width': '390' }), { source: 'current-project', firstLast: true, targetWidth: 390, times: [0], last: true, maxEdge: 1280 });
+  assert.deepEqual(normalizeReviewRequest({ source: 'current-project', times: [0.25], firstLast: true }).times, [0, 0.25]);
+  assert.equal(normalizeReviewRequest({ source: 'current-project', count: 5, firstLast: true }).count, 5);
+  assert.throws(() => normalizeReviewRequest({ source: 'current-project', count: 6, firstLast: true }), (error) => error.code === 'over-budget');
+  for (const targetWidth of [0, 63, 4097, 390.5]) assert.throws(() => normalizeReviewRequest({ source: 'current-project', targetWidth }));
+});
+
+test('首尾制品只消费本次精确帧buffer并保留真实时间，旧导出无当前DOM推论', () => fixture(async ({ root, project }) => {
+  const out = join(root, 'encoded.mp4'); await writeFile(out, 'encoded');
+  const job = { id: '123456abcdef', status: 'done', kind: 'video', out, outputs: [out], inputSnapshot: { filmRevision: 'a'.repeat(16) } };
+  const combined = Buffer.from(png); combined.writeUInt32BE(2, 16);
+  const reviews = createReviews({ root: join(root, 'reviews'), jobs: () => [job], decodeVideo: async (_file, dir) => {
+    const first = await result(dir, 0, 2.1);
+    const file = join(dir, 'frame-1.png'); await writeFile(file, png);
+    first.frames[0].actualPTSTicks = '21'; first.frames[0].ptsTimeBase = '1/10';
+    first.frames.push({ ...first.frames[0], requestedTime: 'last', actualTime: 0.2, actualPTS: 2.3, actualPTSTicks: '23', file });
+    // 旧编码来源即便错误携带mock DOM结果，store也不得发表当前DOM结论。
+    return { ...first, findings: [{ code: 'fake-current-dom' }] };
+  }, composePNG: async (first, last, layout) => {
+    assert.deepEqual(first, png); assert.deepEqual(last, png); assert.equal(layout.width, 2); return combined;
+  } });
+  const receipt = await reviews.create(project, { source: 'export-job', job: job.id, firstLast: true, targetWidth: 390 });
+  assert.equal(receipt.frames.length, 2); assert.equal(receipt.artifacts.length, 1);
+  assert.equal(receipt.frames[0].presentation.actualWidth, 1);
+  assert.deepEqual(receipt.frames[0].presentation.limitedBy, ['source-no-upscale']);
+  assert.equal(receipt.findings[0].status, 'unknown'); assert.equal(receipt.findings.some((f) => f.code === 'fake-current-dom'), false);
+  const { reviewContract } = await import('./review-contract.mjs');
+  const { Ajv } = await import('ajv'); const ajv = new Ajv({ allErrors: true });
+  const validateArtifact = ajv.compile(reviewContract.artifactSchema), validateFinding = ajv.compile(reviewContract.findingSchema), validateCoverage = ajv.compile(reviewContract.coverageSchema);
+  for (const artifact of receipt.artifacts) assert.equal(validateArtifact(artifact), true, JSON.stringify(validateArtifact.errors));
+  for (const finding of receipt.findings) assert.equal(validateFinding(finding), true, JSON.stringify(validateFinding.errors));
+  for (const coverage of receipt.coverage) assert.equal(validateCoverage(coverage), true, JSON.stringify(validateCoverage.errors));
+  const artifact = receipt.artifacts[0];
+  assert.equal(artifact.timeBasis, 'composite-not-timed-frame'); assert.equal(artifact.width, 2);
+  assert.deepEqual(artifact.derivedFrom.map((frame) => frame.actualPTSTicks), ['21', '23']);
+  assert.equal(receipt.totalImageBytes, png.length * 2 + combined.length);
+  assert.deepEqual((await reviews.artifact(project, receipt.reviewId, 'first-last', artifact.sha256)).data, combined);
+  await assert.rejects(reviews.artifact(project, receipt.reviewId, 'other'), (e) => e.code === 'missing-artifact');
+  await assert.rejects(reviews.artifact(project, receipt.reviewId, 'first-last', 'a'.repeat(64)), (e) => e.code === 'digest-mismatch');
+  const other = join(root, 'other.png'); await writeFile(other, combined);
+  await rm(artifact.path); await symlink(other, artifact.path);
+  await assert.rejects(reviews.artifact(project, receipt.reviewId, 'first-last'), (e) => e.code === 'digest-mismatch');
+}));
+
+test('捕获后的源PNG篡改或派生期间落盘变化均失败且不发布回执', () => fixture(async ({ root, project }) => {
+  const captureChanged = createReviews({ root: join(root, 'reviews-a'), drawProject: async (_s, dir) => {
+    const answer = await result(dir); await writeFile(answer.frames[0].file, 'changed'); return answer;
+  } });
+  await assert.rejects(captureChanged.create(project, { source: 'current-project', times: [0] }));
+  const changedDuring = createReviews({ root: join(root, 'reviews-b'), drawProject: (_s, dir) => result(dir), resizePNG: async (buffer) => {
+    const { readdir } = await import('node:fs/promises'); const reviewId = (await readdir(join(root, 'reviews-b')))[0];
+    await writeFile(join(root, 'reviews-b', reviewId, 'frame-0.png'), 'changed during derivation'); return buffer;
+  } });
+  await assert.rejects(changedDuring.create(project, { source: 'current-project', times: [0] }), (e) => ['stale', 'digest-mismatch'].includes(e.code));
+  const { readdir } = await import('node:fs/promises');
+  assert.deepEqual(await readdir(join(root, 'reviews-a')), []); assert.deepEqual(await readdir(join(root, 'reviews-b')), []);
+}));
+
+test('首尾制品与timed帧共用总字节预算，超界整体失败而非静默丢图', () => fixture(async ({ root, project }) => {
+  const large = Buffer.alloc(3 * 1024 * 1024 + 128); png.copy(large);
+  const reviews = createReviews({ root: join(root, 'reviews'), drawProject: async (_s, dir, request) => {
+    const frames = [];
+    for (const [index, requestedTime] of [...request.times, 'last'].entries()) {
+      const file = join(dir, `frame-${index}.png`); await writeFile(file, large);
+      frames.push({ requestedTime, actualTime: typeof requestedTime === 'number' ? requestedTime : 0.999, actualPTS: null, timeBasis: 'project-seek', width: 1, height: 1, captureSha256: hash(large), captureBytes: large.length, file });
+    }
+    return { duration: 1, frames };
+  }, composePNG: async () => { const wide = Buffer.from(large); wide.writeUInt32BE(2, 16); return wide; } });
+  await assert.rejects(reviews.create(project, { source: 'current-project', times: [0, 0.25], firstLast: true }), (e) => e.code === 'over-budget');
+  assert.deepEqual(await (await import('node:fs/promises')).readdir(join(root, 'reviews')), []);
+}));
+
+
+test('公开review Schema离线发现不创建home或项目，也不读取无效运行配置', () => fixture(async ({ root }) => {
+  const { command } = await import('../../../../desirecore/cli.mjs');
+  const home = join(root, 'must-not-create'); let schema;
+  await command(['review', '--schema', '--home', home], (value) => { schema = value; });
+  assert.equal(schema.contractVersion, 2); assert.equal(schema.requestSchema.properties.source.enum[1], 'export-job');
+  await assert.rejects(stat(home));
+}));
+
+
+test('resize返回新buffer时同inode原PNG变化在truncate前stale，不覆盖并发字节或发布回执', () => fixture(async ({ root, project }) => {
+  const reviewRoot = join(root, 'reviews'), changed = Buffer.from(png); changed[changed.length - 1] ^= 1;
+  let sameInode = false, directory;
+  const reviews = createReviews({ root: reviewRoot, drawProject: async (_snapshot, dir) => { directory = dir; return result(dir); },
+    resizePNG: async (buffer) => {
+      const file = join(directory, 'frame-0.png'), before = await stat(file);
+      await link(file, join(root, 'concurrent-writer.png'));
+      await writeFile(file, changed); const after = await stat(file);
+      sameInode = before.dev === after.dev && before.ino === after.ino;
+      // 返新对象确保真正进入rewrite分支，而不是原buffer的发布前检查分支。
+      return Buffer.from(buffer);
+    },
+  });
+  // 自有临时hard link只用于在清理后核原inode字节，不能把已变化输入重写回旧PNG。
+  await assert.rejects(reviews.create(project, { source: 'current-project', times: [0] }), (error) => {
+    assert.equal(error.code, 'stale'); assert.match(error.message, /派生前原 PNG|派生期间原 PNG/); return true;
+  });
+  assert.equal(sameInode, true);
+  assert.deepEqual(await readFile(join(root, 'concurrent-writer.png')), changed);
+  assert.deepEqual(await (await import('node:fs/promises')).readdir(reviewRoot), []);
 }));

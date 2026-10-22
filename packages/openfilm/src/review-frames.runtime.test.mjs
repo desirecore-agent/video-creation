@@ -127,3 +127,68 @@ test('真实单例 Chromium 审片在 ready 等待期间关闭会释放自有资
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('P1真实编码目标图和首尾组合只派生固定PNG，整图cap与整数PTS来源可复核', { skip: !enabled, timeout: 60_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'video-review-p1-encoded-'));
+  let reviews;
+  try {
+    const out = join(root, 'encoded.mp4');
+    execFileSync('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=4:duration=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-output_ts_offset', '2', out], { timeout: 20_000 });
+    const original = sha(await readFile(out)), project = { id: 'p1-encoded', path: root };
+    const job = { id: '123456abcdef', kind: 'video', status: 'done', out, outputs: [out], inputSnapshot: { filmRevision: 'd'.repeat(16), manifest: join(root, 'missing.json') } };
+    reviews = createReviews({ root: join(root, 'reviews'), jobs: () => [job] });
+    const receipt = await reviews.create(project, { source: 'export-job', job: job.id, targetWidth: 96, firstLast: true, maxEdge: 128 });
+    assert.deepEqual(receipt.frames.map((frame) => frame.requestedTime), [0, 'last']);
+    assert.deepEqual(receipt.frames.map((frame) => frame.actualPTS), [2, 2.75]);
+    assert.deepEqual(receipt.frames.map((frame) => frame.actualTime), [0, 0.75]);
+    assert.ok(receipt.frames.every((frame) => frame.actualPTSTicks && frame.ptsTimeBase));
+    assert.ok(receipt.frames.every((frame) => frame.width === 96 && frame.height === 54 && frame.presentation.sourceWidth === 320 && frame.presentation.captureWidth === 128));
+    const artifact = receipt.artifacts[0];
+    assert.equal(artifact.width, 128); assert.equal(artifact.height, 36); assert.equal(artifact.layout.maxEdge, 128);
+    assert.deepEqual(artifact.layout.cells.map((cell) => [cell.width, cell.height, cell.x]), [[64, 36, 0], [64, 36, 64]]);
+    assert.equal(artifact.timeBasis, 'composite-not-timed-frame');
+    assert.deepEqual(artifact.derivedFrom.map((frame) => frame.sha256), receipt.frames.map((frame) => frame.sha256));
+    for (const [index, frame] of receipt.frames.entries()) {
+      const reference = execFileSync('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-i', frame.path, '-vf', 'scale=64:36:flags=lanczos,format=rgba', '-frames:v', '1', '-f', 'rawvideo', 'pipe:1']);
+      const cell = execFileSync('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-i', artifact.path, '-vf', `crop=64:36:${index * 64}:0,format=rgba`, '-frames:v', '1', '-f', 'rawvideo', 'pipe:1']);
+      assert.equal(sha(cell), sha(reference));
+      assert.equal(sha((await reviews.frame(project, receipt.reviewId, index, frame.sha256)).data), frame.sha256);
+    }
+    assert.equal(sha((await reviews.artifact(project, receipt.reviewId, 'first-last', artifact.sha256)).data), artifact.sha256);
+    assert.equal(receipt.findings[0].status, 'unknown'); assert.equal(receipt.coverage[0].status, 'unknown');
+    assert.equal(sha(await readFile(out)), original);
+    assert.deepEqual((await readdir(join(root, 'reviews', receipt.reviewId))).sort(), ['artifact-first-last.png', 'frame-0.png', 'frame-1.png', 'review.json']);
+  } finally { await reviews?.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('P1真实Chromium在同求帧窗口测文字与裁切，目标图和组合不改人工锁', { skip: !enabled, timeout: 90_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'video-review-p1-dom-'));
+  let reviews;
+  try {
+    const project = { id: 'p1-dom', path: join(root, 'project') }; await mkdir(project.path);
+    const scene = '<!doctype html><body style="margin:0;background:#123;color:white"><div id="tiny" style="position:absolute;left:8px;top:8px;font-size:8px">细字</div><div id="title" style="position:absolute;left:310px;top:20px;white-space:nowrap;font-size:16px">原始标题</div><canvas width="40" height="20"></canvas><svg width="80" height="40" viewBox="0 0 40 20" style="position:absolute;left:80px;top:80px"><text id="svg-title" x="0" y="12" font-size="8">SVG</text></svg><script>window.film={duration:1,width:320,height:180,frame(t){document.body.style.background=t>0.5?"#234":"#123"}}</script>';
+    const film = filmHtml({ stage: { w: 320, h: 180 }, tracks: [{ locked: true, clips: [{ id: 'scene', src: 'scene.html', at: 0, duration: 1, overrides: [{ at: '#title', text: '人工定稿' }] }] }] });
+    await writeFile(join(project.path, 'film.html'), film); await writeFile(join(project.path, 'scene.html'), scene);
+    reviews = createReviews({ root: join(root, 'reviews') });
+    const receipt = await reviews.create(project, { source: 'current-project', firstLast: true, targetWidth: 96, maxEdge: 128 });
+    assert.equal(receipt.observation, 'generated-not-viewed'); assert.equal(receipt.frames.length, 2); assert.equal(receipt.artifacts.length, 1);
+    assert.ok(receipt.findings.some((finding) => finding.source.clipId === 'scene' && finding.selector === '#tiny' && finding.status === 'observed'));
+    assert.ok(receipt.findings.some((finding) => finding.selector === '#title' && finding.severity === 'warning'));
+    assert.ok(receipt.coverage.some((item) => item.status === 'unknown'));
+    assert.ok(receipt.findings.filter((finding) => finding.source.page === 'scene.html').every((finding) => finding.source.inputSha256 === sha(scene) && finding.source.filmRevision === receipt.filmRevision));
+    assert.equal(receipt.artifacts[0].timeBasis, 'composite-not-timed-frame');
+    const svg = receipt.findings.filter((item) => item.selector === '#svg-title' && item.code === 'dom-text-size');
+    assert.equal(svg.length, 2);
+    assert.ok(svg.every((item) => item.status === 'observed' && item.measurement.fontSizeCssPx === 8 && item.measurement.targetFontSizePx === null && item.bounds.width > 0));
+    assert.ok(receipt.findings.some((item) => item.selector === '#tiny' && item.code === 'dom-text-size' && item.measurement.targetFontSizePx === 2.4));
+    assert.ok(receipt.coverage.some((item) => item.code === 'text-target-projection' && item.status === 'unknown' && item.details.projectedSamples < item.details.textSamples));
+    const { look } = await import('./look.mjs');
+    const inspected = await look([project.path, '0'], { targetWidth: 96, offline: true, root: project.path });
+    assert.equal(typeof inspected.ok, 'boolean'); assert.ok(Array.isArray(inspected.lines)); assert.ok(Array.isArray(inspected.files));
+    assert.ok(inspected.findings.some((item) => item.code === 'dom-text-size' && item.source.kind === 'live-check' && item.source.consistency === 'live-files-unfenced'));
+    assert.ok(inspected.coverage.some((item) => item.code === 'source-version' && item.details.frozen === false));
+    assert.ok(inspected.findings.some((item) => item.selector === '#svg-title' && item.measurement.targetFontSizePx === null));
+    for (const image of [...receipt.frames, ...receipt.artifacts]) { assert.ok(Math.max(image.width, image.height) <= 128); assert.equal(sha(await readFile(image.path)), image.sha256); }
+    assert.equal(await readFile(join(project.path, 'film.html'), 'utf8'), film); assert.equal(await readFile(join(project.path, 'scene.html'), 'utf8'), scene);
+  } finally { await reviews?.close(); await rm(root, { recursive: true, force: true }); }
+});

@@ -10,7 +10,7 @@ import { runtimeConfig, applyRuntimeEnvironment, runtimeIdentity, managedDocumen
 import { projectClient } from './client.mjs';
 import { acquireApplicationLock } from './application-lock.mjs';
 import { timelineOpsSchema } from '../packages/openfilm/studio/server/op-schema.mjs';
-import { normalizeReviewRequest } from '../packages/openfilm/studio/server/reviews.mjs';
+import { normalizeReviewRequest, reviewContract } from '../packages/openfilm/studio/server/reviews.mjs';
 import { normalizeVideoExportOptions } from '../packages/openfilm/studio/server/video-export-options.mjs';
 
 export const HELP = `视频创作 — 本地影片编辑与视频导演协作
@@ -30,7 +30,9 @@ node desirecore/cli.mjs <命令> [项目目录] [选项]
   check <项目> [时间或范围]                          抽帧并检查确定性与资源
   review <项目> --source <current-project|export-job> [--job <任务ID>]
     --times <0,2.5> | --count <1-6> [--last] [--max-edge <128-1920>]
-                                                   生成带版本、实际帧时间和 SHA-256 的审片 PNG
+    [--target-width <64-4096>] [--first-last]
+                                                   生成带版本、实际帧时间和 SHA-256 的审片 PNG 与结构化测量
+  review --schema                                 离线发现同源请求、finding 和组合图 Schema
   get <项目> [媒体动词] --args <JSON文件>             复用已连接媒体服务；无动词时只读能力目录
     --via <provider> --model <model>                明确选择服务与模型；不从参数读取密钥
   render <项目> [--output <目录>] [--wait]           提交固定输入的视频导出
@@ -54,7 +56,7 @@ export function argumentsOf(args) {
     schema: { type: 'boolean' },
     'no-browser': { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
     base: { type: 'string' }, ops: { type: 'string' }, output: { type: 'string' },
-    source: { type: 'string' }, job: { type: 'string' }, times: { type: 'string' }, count: { type: 'string' }, last: { type: 'boolean' }, 'max-edge': { type: 'string' },
+    source: { type: 'string' }, job: { type: 'string' }, times: { type: 'string' }, count: { type: 'string' }, last: { type: 'boolean' }, 'max-edge': { type: 'string' }, 'target-width': { type: 'string' }, 'first-last': { type: 'boolean' },
     args: { type: 'string' }, via: { type: 'string' }, model: { type: 'string' },
     wait: { type: 'boolean' }, fps: { type: 'string' }, timeout: { type: 'string' },
     codec: { type: 'string' }, alpha: { type: 'boolean' }, quality: { type: 'string' },
@@ -92,6 +94,8 @@ export function reviewOptionsOf(values) {
     ...(values.count !== undefined ? { count: Number(values.count) } : {}),
     ...(values.last !== undefined ? { last: values.last } : {}),
     ...(values['max-edge'] !== undefined ? { maxEdge: Number(values['max-edge']) } : {}),
+    ...(values['target-width'] !== undefined ? { targetWidth: Number(values['target-width']) } : {}),
+    ...(values['first-last'] !== undefined ? { firstLast: values['first-last'] } : {}),
   });
 }
 
@@ -145,6 +149,7 @@ export async function start(config, options = {}) {
 export async function command(args, output = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)) {
   const { values, positionals } = argumentsOf(args);
   const [name, folder, target] = positionals;
+  if (name === 'review' && values.schema) return output(reviewContract);
   if (name === 'patch' && values.schema) return output(timelineOpsSchema);
   if (name === 'patch' && values.help) {
     process.stdout.write('patch <项目> --base <inspect真实revision> --ops <JSON数组文件>\n先运行 patch --schema 离线读取完整 Op/字段与例子，无需项目、服务或 home。只换 src 使用 set/clip/field/value；保留其他人工字段，原 #t 范围按 inspect 确认。\n');
@@ -190,7 +195,7 @@ export async function command(args, output = (value) => process.stdout.write(`${
   if (name === 'review') return output(await client.review(reviewOptionsOf(values)));
   if (name === 'check') {
     const { look } = await import('../packages/openfilm/src/look.mjs');
-    const result = await look([client.project.path, ...(target ? [target] : [])], { count: 6 });
+    const result = await look([client.project.path, ...(target ? [target] : [])], { count: 6, ...(values['target-width'] !== undefined ? { targetWidth: Number(values['target-width']) } : {}) });
     output(result);
     if (!result.ok) process.exitCode = 1;
     return;

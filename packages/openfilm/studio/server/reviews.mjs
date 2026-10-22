@@ -1,6 +1,6 @@
 /** 带来源的只读审片。派生材料属于应用数据根，影片、人工锁和导出记录均不改写。 */
 import { constants, createReadStream } from 'node:fs';
-import { chmod, copyFile, mkdir, readFile, lstat, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, lstat, open as openFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { addAbortSignal } from 'node:stream';
@@ -10,18 +10,10 @@ import { reviewEncodedFrames, reviewProjectFrames, REVIEW_MAX_FRAMES, REVIEW_MAX
 import { snapshotFilm } from './export-snapshot.mjs';
 import { filmClosure, folderView } from './closure.mjs';
 import { readProjectFilm } from './film.mjs';
+import { reviewRequestSchema } from './review-contract.mjs';
+import { reviewPresentation, downscaleReviewPNG, firstLastLayout, firstLastReviewPNG } from '../../src/review-derivatives.mjs';
+export { reviewRequestSchema, reviewContract } from './review-contract.mjs';
 
-export const reviewRequestSchema = {
-  $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', additionalProperties: false, required: ['source'],
-  properties: {
-    source: { enum: ['current-project', 'export-job'], description: 'current-project 是当前工程的浏览器求帧预览；export-job 只解码此工程已经完成的真实视频导出。' },
-    job: { type: 'string', pattern: '^[a-f0-9]{12}$', description: 'export-job 必须指定 video_jobs 返回的 done 视频任务 ID；不是任意输出文件路径。' },
-    times: { type: 'array', minItems: 1, maxItems: REVIEW_MAX_FRAMES, uniqueItems: true, items: { type: 'number', minimum: 0, maximum: 86400 }, description: '明确的秒数；编码视频以首个真实视频帧为播放零点，选择不早于请求的第一帧，另报原始实际 PTS。与 count 互斥。' },
-    last: { type: 'boolean', description: '额外读取真实编码末帧；当前工程则读取 duration 前 1ms 的预览末态，两者不能混称。' },
-    count: { type: 'integer', minimum: 1, maximum: REVIEW_MAX_FRAMES, description: '未指定 times 时均匀取样的帧数；与 last 合计最多六帧。' },
-    maxEdge: { type: 'integer', minimum: 128, maximum: 1920, default: 1280, description: '派生 PNG 最长边上限；保持画幅且不放大，回执记录实际尺寸。' },
-  },
-};
 const ajv = new Ajv({ allErrors: true });
 const validate = ajv.compile(reviewRequestSchema);
 const stamp = (s) => `${s.dev}:${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`;
@@ -33,6 +25,11 @@ export function normalizeReviewRequest(value) {
   if ((value.source === 'export-job') !== Boolean(value.job)) throw new ReviewError('只有 export-job 需要且必须提供 job。', 400, 'invalid-request');
   if (value.times && value.count !== undefined) throw new ReviewError('times 与 count 不能同时提供。', 400, 'invalid-request');
   const request = { ...value, maxEdge: value.maxEdge ?? 1280 };
+  if (request.firstLast) {
+    if (request.times) request.times = request.times.includes(0) ? [...request.times] : [0, ...request.times];
+    else if (!request.count) request.times = [0];
+    request.last = true;
+  }
   if (!request.times && !request.count && !request.last) request.count = 4;
   if ((request.times?.length ?? request.count ?? 0) + Number(Boolean(request.last)) > REVIEW_MAX_FRAMES) throw new ReviewError('times/count 与 last 合计最多六帧。', 400, 'over-budget');
   return request;
@@ -63,8 +60,57 @@ async function localInputs(root, signal) {
 }
 const sameDigest = (a, b) => a.bytes === b.bytes && a.sha256 === b.sha256;
 
-/** @param {{ root?: string, jobs?: (projectId: string) => import('./exports.mjs').ExportJob[], drawProject?: typeof reviewProjectFrames, decodeVideo?: typeof reviewEncodedFrames, newId?: () => string }} [options] */
-export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, drawProject = reviewProjectFrames, decodeVideo = reviewEncodedFrames, newId = () => randomBytes(12).toString('hex') } = {}) {
+const pngDigest = (data) => {
+  if (data.length > REVIEW_MAX_FRAME_BYTES) throw new ReviewError('单图超过 4 MiB 审片预算。', 422, 'over-budget');
+  return { bytes: data.length, sha256: createHash('sha256').update(data).digest('hex') };
+};
+async function readReviewPNG(file, signal) {
+  signal?.throwIfAborted();
+  const before = await lstat(file), parent = await lstat(join(file, '..'));
+  if (before.isSymbolicLink() || parent.isSymbolicLink() || !before.isFile() || before.size > REVIEW_MAX_FRAME_BYTES) throw new ReviewError('审片 PNG 被替换或超过原预算。', 409, 'digest-mismatch');
+  const handle = await openFile(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  let data;
+  try {
+    if (stamp(before) !== stamp(await handle.stat())) throw new ReviewError('审片 PNG 在打开期间变化。', 409, 'stale');
+    // 最多读原大小加一字节，文件增长也不能令 readFile 无界分配。
+    const buffer = Buffer.alloc(before.size + 1); let offset = 0;
+    while (offset < buffer.length) {
+      signal?.throwIfAborted();
+      const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
+      if (!bytesRead) break;
+      offset += bytesRead;
+    }
+    data = buffer.subarray(0, offset);
+    if (stamp(before) !== stamp(await handle.stat()) || stamp(before) !== stamp(await lstat(file)) || stamp(parent) !== stamp(await lstat(join(file, '..'))) || data.length !== before.size) throw new ReviewError('审片 PNG 在读取期间变化。', 409, 'stale');
+  } finally { await handle.close(); }
+  signal?.throwIfAborted();
+  let dimensions;
+  try { dimensions = pngSize(data); } catch { throw new ReviewError('审片 PNG 已损坏。', 409, 'digest-mismatch'); }
+  return { data, identity: { dev: before.dev, ino: before.ino, stamp: stamp(before) }, ...pngDigest(data), ...dimensions };
+}
+async function rewriteReviewPNG(file, data, captured, signal) {
+  // 先读写打开但不截断；同 inode 的并发修改也必须在覆盖前失败。
+  const handle = await openFile(file, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
+  try {
+    signal?.throwIfAborted();
+    const actual = await handle.stat();
+    if (stamp(actual) !== captured.identity.stamp || actual.dev !== captured.identity.dev || actual.ino !== captured.identity.ino || actual.size !== captured.bytes) throw new ReviewError('派生前原 PNG 身份或版本变化。', 409, 'stale');
+    const buffer = Buffer.alloc(captured.bytes + 1); let offset = 0;
+    while (offset < buffer.length) {
+      signal?.throwIfAborted();
+      const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
+      if (!bytesRead) break;
+      offset += bytesRead;
+    }
+    const original = buffer.subarray(0, offset);
+    if (offset !== captured.bytes || createHash('sha256').update(original).digest('hex') !== captured.sha256 || stamp(await handle.stat()) !== captured.identity.stamp || stamp(await lstat(file)) !== captured.identity.stamp) throw new ReviewError('派生期间原 PNG 字节变化。', 409, 'stale');
+    signal?.throwIfAborted();
+    await handle.truncate(0); await handle.writeFile(data);
+  } finally { await handle.close(); }
+}
+
+/** @param {{ root?: string, jobs?: (projectId: string) => import('./exports.mjs').ExportJob[], drawProject?: typeof reviewProjectFrames, decodeVideo?: typeof reviewEncodedFrames, resizePNG?: typeof downscaleReviewPNG, composePNG?: typeof firstLastReviewPNG, newId?: () => string }} [options] */
+export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, drawProject = reviewProjectFrames, decodeVideo = reviewEncodedFrames, resizePNG = downscaleReviewPNG, composePNG = firstLastReviewPNG, newId = () => randomBytes(12).toString('hex') } = {}) {
   let tail = Promise.resolve(), closed = false, pending = 0;
   const active = new Set();
   const stopped = () => new ReviewError('审片已停止，此服务不再接收新审片。', 409, 'review-stopped');
@@ -76,8 +122,16 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
     let receipt;
     try { receipt = JSON.parse(await readFile(join(directory(id), 'review.json'), 'utf8')); }
     catch (e) { if (e instanceof ReviewError) throw e; throw new ReviewError('找不到可读取的审片回执。', 404, 'missing-review'); }
-    if (receipt.reviewId !== id || receipt.projectId !== project.id || receipt.version !== 1 || !Array.isArray(receipt.frames) || receipt.frames.length < 1 || receipt.frames.length > REVIEW_MAX_FRAMES) throw new ReviewError('审片回执与项目或材料不匹配。', 409, 'receipt-mismatch');
+    if (receipt.reviewId !== id || receipt.projectId !== project.id || ![1, 2].includes(receipt.version) || !Array.isArray(receipt.frames) || receipt.frames.length < 1 || receipt.frames.length > REVIEW_MAX_FRAMES) throw new ReviewError('审片回执与项目或材料不匹配。', 409, 'receipt-mismatch');
     return receipt;
+  };
+  const exactPNG = async (id, declared, file, expectedSha256, missingCode) => {
+    if (declared.path !== file || (expectedSha256 !== undefined && expectedSha256 !== declared.sha256)) throw new ReviewError('审片图片摘要与调用者期望不符。', 409, 'digest-mismatch');
+    let observed;
+    try { observed = await readReviewPNG(file); }
+    catch (error) { if (error instanceof ReviewError) throw error; throw new ReviewError('审片图片已丢失或不可读。', 404, missingCode); }
+    if (!sameDigest(observed, declared) || observed.width !== declared.width || observed.height !== declared.height) throw new ReviewError('审片图片字节或尺寸已改变。', 409, 'digest-mismatch');
+    return { data: observed.data, frame: declared };
   };
   return {
     read,
@@ -86,19 +140,13 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
     async frame(project, id, index, expectedSha256) {
       const receipt = await read(project, id);
       if (!Number.isInteger(index) || index < 0 || index >= receipt.frames.length) throw new ReviewError('没有此审片帧。', 404, 'missing-frame');
-      const declared = receipt.frames[index], file = join(directory(id), `frame-${index}.png`);
-      if (declared.path !== file || (expectedSha256 !== undefined && expectedSha256 !== declared.sha256)) throw new ReviewError('审片帧摘要与调用者期望不符。', 409, 'digest-mismatch');
-      let data;
-      try {
-        if ((await lstat(file)).isSymbolicLink() || (await lstat(directory(id))).isSymbolicLink()) throw new ReviewError('审片帧被替换为目录链接。', 409, 'digest-mismatch');
-        if ((await stat(file)).size > REVIEW_MAX_FRAME_BYTES) throw new ReviewError('审片帧超过原预算。', 409, 'digest-mismatch');
-        data = await readFile(file);
-      } catch (error) { if (error instanceof ReviewError) throw error; throw new ReviewError('审片帧已丢失或不可读。', 404, 'missing-frame'); }
-      if (data.length !== declared.bytes || createHash('sha256').update(data).digest('hex') !== declared.sha256) throw new ReviewError('审片帧字节已改变，不能返回其他材料代替。', 409, 'digest-mismatch');
-      let dimensions;
-      try { dimensions = pngSize(data); } catch { throw new ReviewError('审片帧已不是有效 PNG。', 409, 'digest-mismatch'); }
-      if (dimensions.width !== declared.width || dimensions.height !== declared.height) throw new ReviewError('审片帧尺寸与回执不一致。', 409, 'digest-mismatch');
-      return { data, frame: declared };
+      return exactPNG(id, receipt.frames[index], join(directory(id), `frame-${index}.png`), expectedSha256, 'missing-frame');
+    },
+    async artifact(project, id, artifactId, expectedSha256) {
+      const receipt = await read(project, id);
+      const declared = receipt.artifacts?.find((item) => item.artifactId === artifactId);
+      if (artifactId !== 'first-last' || !declared) throw new ReviewError('没有此审片制品。', 404, 'missing-artifact');
+      return exactPNG(id, declared, join(directory(id), 'artifact-first-last.png'), expectedSha256, 'missing-artifact');
     },
     create(project, ask) {
       if (closed) return Promise.reject(stopped());
@@ -164,19 +212,51 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
       const expectedCount = (request.times?.length ?? request.count ?? 0) + Number(Boolean(request.last));
       if (result.frames.length !== expectedCount) throw new ReviewError('实际审片帧数与请求不一致。');
       let total = 0;
-      const frames = [];
+      const frames = [], buffers = [];
       for (const [index, item] of result.frames.entries()) {
         if (item.file !== join(dir, `frame-${index}.png`)) throw new ReviewError('审片图片路径与本次身份不符。');
-        const digest = await digestFile(item.file, REVIEW_MAX_FRAME_BYTES, signal); total += digest.bytes;
-        const dimensions = pngSize(await readFile(item.file));
-        if (dimensions.width !== item.width || dimensions.height !== item.height || Math.max(item.width, item.height) > request.maxEdge) throw new ReviewError('审片 PNG 实际尺寸与回执不符。');
+        const captured = await readReviewPNG(item.file, signal);
+        if (captured.sha256 !== item.captureSha256 || captured.bytes !== item.captureBytes) throw new ReviewError('捕获后的 PNG 字节变化，不能派生成功材料。', 409, 'stale');
+        if (captured.width !== item.width || captured.height !== item.height || Math.max(item.width, item.height) > request.maxEdge) throw new ReviewError('审片 PNG 实际尺寸与回执不符。');
+        const presentation = reviewPresentation(captured, request, { width: item.sourceWidth ?? item.width, height: item.sourceHeight ?? item.height });
+        const png = await resizePNG(captured.data, presentation, { signal });
+        const digest = pngDigest(png); total += digest.bytes;
+        if (png !== captured.data) await rewriteReviewPNG(item.file, png, captured, signal);
         if (total > REVIEW_MAX_TOTAL_BYTES) throw new ReviewError('PNG 总计超过 12 MiB 审片预算。', 422, 'over-budget');
-        const { file, ...meta } = item;
-        frames.push({ index, ...meta, path: file, ...digest, mimeType: 'image/png', url: `/api/projects/${encodeURIComponent(project.id)}/reviews/${reviewId}/frames/${index}` });
+        const { file, captureSha256, captureBytes, sourceWidth, sourceHeight, ...meta } = item;
+        frames.push({ index, ...meta, width: presentation.actualWidth, height: presentation.actualHeight, presentation, path: file, ...digest, mimeType: 'image/png', url: `/api/projects/${encodeURIComponent(project.id)}/reviews/${reviewId}/frames/${index}` });
+        buffers.push(png);
       }
-      const receipt = { version: 1, reviewId, sourceKind: request.source, projectId: project.id, filmRevision, createdAt: new Date().toISOString(), request, source,
-        duration: result.duration, durationOrigin: result.durationOrigin ?? 'project-duration', timeOrigin: result.timeOrigin ?? 'project-timeline', timeOriginPTS: result.timeOriginPTS ?? null, ...(result.encodedRange ? { encodedRange: result.encodedRange } : {}), lastFramePolicy: result.lastFramePolicy, frames, totalFrameBytes: total, observation: 'generated-not-viewed',
-        observationNote: '本回执只证明生成指定来源的图片。导演应通过 Read(path, expected_sha256) 实际读取必要图片；图片进入请求不证明模型理解。' };
+      const artifacts = [];
+      if (request.firstLast) {
+        const first = frames.find((frame) => frame.requestedTime === 0), last = frames.find((frame) => frame.requestedTime === 'last');
+        if (!first || !last) throw new ReviewError('首尾组合图缺少同次真实首尾帧。');
+        const layout = firstLastLayout(first, last, request.maxEdge);
+        const png = await composePNG(buffers[first.index], buffers[last.index], layout, { signal });
+        const digest = pngDigest(png); total += digest.bytes;
+        if (total > REVIEW_MAX_TOTAL_BYTES) throw new ReviewError('PNG 与组合图总计超过 12 MiB 审片预算。', 422, 'over-budget');
+        const file = join(dir, 'artifact-first-last.png');
+        await writeFile(file, png, { flag: 'wx', mode: 0o600 });
+        artifacts.push({ artifactId: 'first-last', kind: 'first-last-composite', timeBasis: 'composite-not-timed-frame', width: layout.width, height: layout.height,
+          path: file, ...digest, mimeType: 'image/png', url: `/api/projects/${encodeURIComponent(project.id)}/reviews/${reviewId}/artifacts/first-last`,
+          derivedFrom: [first, last].map((frame) => ({ frameIndex: frame.index, sha256: frame.sha256, bytes: frame.bytes, actualTime: frame.actualTime, actualPTS: frame.actualPTS,
+            timeBasis: frame.timeBasis, ...(frame.actualPTSTicks !== undefined ? { actualPTSTicks: frame.actualPTSTicks, ptsTimeBase: frame.ptsTimeBase } : {}) })),
+          layout: { ...layout, maxEdge: request.maxEdge }, limitations: ['只组合本次两个真实帧，不代表连续过程、音频或整体审美；透明补边不属于原画面。'] });
+      }
+      // 派生读取固定 buffer；发布前再核落盘结果，期间替换不能留下成功回执。
+      for (const item of [...frames, ...artifacts]) {
+        const final = await readReviewPNG(item.path, signal);
+        if (!sameDigest(final, item) || final.width !== item.width || final.height !== item.height) throw new ReviewError('派生期间审片 PNG 变化。', 409, 'stale');
+      }
+      const bind = (entry) => ({ ...entry, source: { ...entry.source, reviewId, filmRevision,
+        inputSha256: source.inputs?.files?.find((file) => file.path === entry.source?.page)?.sha256 ?? null } });
+      const limitations = ['编码帧不能提供 DOM 字号、裁切选择器或复杂背景对比度事实；没有 finding 不表示通过。'];
+      const findings = request.source === 'export-job' ? [{ code: 'dom-analysis', severity: 'info', status: 'unknown', time: null, source: { kind: 'export-job' }, selector: null, bounds: null, measurement: {}, evidence: [], limitations }] : result.findings ?? [];
+      const coverage = request.source === 'export-job' ? [{ code: 'dom-analysis', status: 'unknown', time: null, source: { kind: 'export-job' }, details: { measured: false, reason: 'encoded-output-has-no-current-dom' }, limitations }] : result.coverage ?? [];
+      const receipt = { version: 2, reviewId, sourceKind: request.source, projectId: project.id, filmRevision, createdAt: new Date().toISOString(), request, source,
+        duration: result.duration, durationOrigin: result.durationOrigin ?? 'project-duration', timeOrigin: result.timeOrigin ?? 'project-timeline', timeOriginPTS: result.timeOriginPTS ?? null, ...(result.encodedRange ? { encodedRange: result.encodedRange } : {}), lastFramePolicy: result.lastFramePolicy,
+        frames, artifacts, findings: findings.map(bind), coverage: coverage.map(bind), totalFrameBytes: frames.reduce((n, frame) => n + frame.bytes, 0), totalImageBytes: total,
+        observation: 'generated-not-viewed', observationNote: '回执只证明生成和测量。导演应通过 Read(path, expected_sha256) 实际读取必要图片；图片进入请求不证明模型理解。DOM 与 PNG 是同一求帧采样窗口，不是像素与 DOM 原子快照。' };
       signal.throwIfAborted();
       await writeFile(join(dir, 'review.json'), `${JSON.stringify(receipt, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
       return receipt;

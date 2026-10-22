@@ -55,7 +55,7 @@ import { transitionPageRoutes } from './transition-pages.mjs';
 import { createAsks, getRoute, subtitleTranscriber, subtitleTranslator } from './get.mjs';
 import { LOCATION_KEYS, locations, usableFolder } from '../../src/locations.mjs';
 import { PRODUCT, MANAGED_UPDATE_MESSAGE } from '../../src/product.mjs';
-import { ReviewError, createReviews } from './reviews.mjs';
+import { ReviewError, createReviews, reviewContract } from './reviews.mjs';
 import { catalogProjectMotion, inspectProjectMotion, installProjectMotionSdk, takeBuiltinMotion } from './motion-project.mjs';
 
 /** @typedef {import('./http.mjs').Req} Req @typedef {import('./http.mjs').Res} Res */
@@ -211,6 +211,7 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
       return json(res, 200, { directorAgentId: directorAgentId ?? null, directorName: '视频导演' });
     }
     const parts = path.slice('/api/'.length).split('/').map(decodeURIComponent);
+    if (path === '/api/review-schema' && req.method === 'GET') return json(res, 200, reviewContract);
 
     /* stop: another app is taking over this machine's Studio, or `openfilm open` starts it afresh (`whenIdle`: not
        while an export runs or media is made — it would be lost). `pages`: how many were open, to come back */
@@ -477,6 +478,11 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     if (parts[2] === 'reviews' && parts[4] === 'frames' && parts.length === 6 && req.method === 'GET') {
       if (!/^\d+$/.test(parts[5])) throw new ReviewError('审片帧编号无效。', 400, 'invalid-request');
       const { data, frame } = await reviews.frame(project, parts[3], Number(parts[5]), url.searchParams.get('expected_sha256') ?? undefined);
+      res.writeHead(200, { 'content-type': 'image/png', 'content-length': data.length, 'cache-control': 'no-store', etag: `"sha256-${frame.sha256}"` });
+      return res.end(data);
+    }
+    if (parts[2] === 'reviews' && parts[4] === 'artifacts' && parts.length === 6 && req.method === 'GET') {
+      const { data, frame } = await reviews.artifact(project, parts[3], parts[5], url.searchParams.get('expected_sha256') ?? undefined);
       res.writeHead(200, { 'content-type': 'image/png', 'content-length': data.length, 'cache-control': 'no-store', etag: `"sha256-${frame.sha256}"` });
       return res.end(data);
     }

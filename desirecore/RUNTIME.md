@@ -127,13 +127,13 @@ CLI 示例：`node desirecore/cli.mjs render <项目> --codec vp9 --alpha --fps 
 
 ## 带来源的审片材料
 
-正式入口是 `review <项目> --source current-project|export-job`、MCP `video_review` 和原鉴权下的 `POST /api/projects/:id/reviews`。HTTP/MCP 共用 Draft-07 `reviewRequestSchema`：
+正式入口是 `review <项目> --source current-project|export-job`、MCP `video_review` 和原鉴权下的 `POST /api/projects/:id/reviews`。HTTP/MCP 共用 `studio/server/review-contract.mjs` 的 Draft-07 `reviewRequestSchema`。CLI `review --schema` 在 home/服务发现前只读返回 `contractVersion:2`、requestSchema/findingSchema/coverageSchema/artifactSchema；原鉴权下 `GET /api/review-schema` 返回同一合同：
 
 ```json
 {"source":"export-job","job":"真实12位十六进制任务ID","times":[0,2.5],"last":true,"maxEdge":1280}
 ```
 
-`source` 必须显式提供。只有 `export-job` 必须提供 `job`，且仅接受此项目真实 `done` 视频任务的主输出；不接受任意路径、未完成任务、音频或无输入版本的旧记录，不自动降级为当前工程。`times` 是 1–6 个不重复的非负有限秒数，与 `count` 互斥；`count` 为 1–6，工程按 duration、编码视频按真实首末 PTS 范围均匀取样。`last` 额外一帧，总数最多六帧。无任何取样选项时默认 `count:4`。`maxEdge` 为 128–1920，默认 1280，保持画幅且不放大。时间越界或请求之后没有编码帧明确失败，不能偷偷钳到末帧。
+`source` 必须显式提供。只有 `export-job` 必须提供 `job`，且仅接受此项目真实 `done` 视频任务的主输出；不接受任意路径、未完成任务、音频或无输入版本的旧记录，不自动降级为当前工程。`times` 是 1–6 个不重复的非负有限秒数，与 `count` 互斥；`count` 为 1–6，工程按 duration、编码视频按真实首末 PTS 范围均匀取样。`last` 额外一帧，总数最多六帧。未给 `firstLast` 和其他取样选项时默认 `count:4`。`maxEdge` 为 128–1920，默认 1280，保持画幅且不放大。时间越界或请求之后没有编码帧明确失败，不能偷偷钳到末帧。
 
 CLI 对应 `--job <ID>`、`--times 0,2.5`、`--count 4`、`--last`、`--max-edge 1280`。编码末帧使用真实解码 PTS，不由 duration×fps 猜测；`durationOrigin:container-format-metadata` 的 `duration` 是容器元数据（可能与首末帧范围不同），编码范围另报 `encodedRange:{firstPTS,lastPTS}`，不据容器 duration 提前拒绝存在的画面；数字时间以首个真实解码视频帧为零点，返回不早于所求相对时间的第一帧；`actualTime` 为此相对秒数，`actualPTS` 为原始 PTS，顶层 `timeOrigin:first-decoded-video-frame` 与 `timeOriginPTS` 声明这个工具口径，不把它推广成包含 edit-list/负 PTS 等媒体的通用播放器时钟。`source.output.outputTimeToFilmTime:null` 明确不提供 range/clip 输出到原 film 全局时间的隐式映射。当前工程没有编码 PTS，末态按 duration 前 1ms 求帧。每帧区分：
 
@@ -151,7 +151,7 @@ CLI 对应 `--job <ID>`、`--times 0,2.5`、`--count 4`、`--last`、`--max-edge
 
 当前工程复用 `snapshotFilm` / `filmClosure`，静态本地输入快照逐文件记录 `{path,bytes,sha256}` 与整体摘要，并在求帧前后核当前工程同一闭包和影片版本；`consistency: local-snapshot-with-live-before-after-checks` 不表示跨文件原子事务。导出从 job 的原 `inputSnapshot.filmRevision` 取版本，将输出复制到本次自有暂存目录、核原观察字节后仅解码该副本，并再次核副本摘要；`source.output.digestOrigin: observed-at-review`、`exportCompletionDigest:null` 明确不是任务完成时的摘要。新导出输入清单逐项 SHA-256 来自同次提交冻结副本；旧清单只有 path/bytes 时仍照实返回，不虚构场景或素材的历史 SHA。已生成的旧导出审片不随当前工程更新而改变来源。
 
-临时完整视频和工程快照在成功/失败后精确删除。只保留应用数据根 `reviews/<reviewId>/` 的 PNG 与 `review.json`，没有自动 TTL；清理该精确目录即使其引用失效，不改变导出或影片。每次最多 10000 个静态输入、2 GiB 输入、6 张 PNG（单张 4 MiB、总计 12 MiB）；应用内串行生成审片，不启动第二任务系统或媒体服务。
+临时完整视频和工程快照在成功/失败后精确删除。只保留应用数据根 `reviews/<reviewId>/` 的 PNG 与 `review.json`，没有自动 TTL；清理该精确目录即使其引用失效，不改变导出或影片。每次最多 10000 个静态输入、2 GiB 输入、6 张 timed 帧及至多 1 张独立 artifact PNG（单张 4 MiB、两类总计 12 MiB）；应用内串行生成审片，不启动第二任务系统或媒体服务。
 
 `GET /api/projects/:id/reviews/:reviewId` 读取原回执；`GET .../reviews/:reviewId/frames/:index?expected_sha256=<原摘要>` 只按该项目和 review 身份读取精确 PNG，先核实际尺寸预算、字节和 SHA，返回 `image/png`、`Cache-Control:no-store` 与 SHA ETag。路径不可由请求替换。缺帧为 404 / `missing-frame`，字节/摘要或调用者期望不符为 409 / `digest-mismatch`，读取中源变化为 409 / `stale`，导出未完成为 409 / `job-not-complete`，非法请求/预算为 400 或 422；失败不隐式补帧或重渲染。权限仍由应用原 loopback/key、浏览器 origin 和平台原文件权限约束，不给影片 iframe 新桥或管理权限。
 
@@ -170,3 +170,18 @@ CLI 对应 `--job <ID>`、`--times 0,2.5`、`--count 4`、`--last`、`--max-edge
 ```
 
 沿现有 `patch <项目> --base <真实revision> --ops <JSON文件>` 提交；HTTP 仍为既有 `POST /api/projects/:id/edit {base,ops}`，MCP 仍为 `video_patch {base,ops}`。只改 `src` 不重交或清空 `motion`、人工 overrides、锁、轨标记及 `time`。格式读取通常把 HTML src 的 `#t=0,8` 拆成 `src` 与 `time:[0,8]`，写出时由内核重新组成一个片段；保留 inspect 的 `time`，不要在新 `value` 重复拼入片段。该操作不是场景源码 CAS；对新场景的参数/人工锁兼容性与最终影片格式仍检查，旧基线的同一 src 已变则冲突。没有明确用户意图时，不为换源解锁参数或重写整片。
+
+
+## 目标尺寸、首尾制品与结构化检查
+
+P1 请求新增 `targetWidth`（64–4096）与 `firstLast`；CLI 对应 `--target-width 390 --first-last`，MCP/HTTP 字段同名。`firstLast:true` 保留显式采样并补 0 和 last；没有 times/count 时规范为 `times:[0],last:true`，不默认加四帧。补完仍超过六个 timed 帧则整体 `over-budget`。首尾同时指向一个实际编码帧时也诚实保留两格引用，不伪造两个时点。
+
+`frames[].presentation` 包括 `requestedTargetWidth`、`sourceWidth/sourceHeight`、`captureWidth/captureHeight`、`actualWidth/actualHeight`、`scale`、`maxEdge` 和 `limitedBy`（源像素不足为 source-no-upscale、捕获 cap 限制为 max-edge）。先沿 P0 捕获尺寸上限获取 PNG，再从该精确 buffer 缩小；宽高整数舍入可能有一像素比例差。`targetWidth` 不是改变影片布局的响应式 viewport，也不重新渲染到另一分辨率。
+
+`artifacts[]` 默认空，最多一个 `artifactId:first-last`、`kind:first-last-composite`、`timeBasis:composite-not-timed-frame`。从本回执的首尾帧固定 buffer，经既有自有 FFmpeg 做等比缩小、透明补边、并列，`derivedFrom` 记录帧 index、bytes、sha256、actualTime、actualPTS、timeBasis，编码源另含 actualPTSTicks/ptsTimeBase。`layout.maxEdge` 是整个合成图上限；`layout.cells` 的坐标为 artifact-pixels，分别记录各格 sourceWidth/sourceHeight、width/height、x/y/scale。组合不是单一时间点，不把缺省容器 duration 当末帧。`GET .../reviews/:reviewId/artifacts/first-last?expected_sha256=<摘要>` 与 frames 同鉴权、精确身份、PNG IHDR/尺寸/字节/SHA 校验、no-store 与 ETag；未知、清理或丢失的制品为 missing-artifact，不接收任意文件路径、也不重建。
+
+派生读取的是同次捕获 Buffer 的 SHA/bytes fence，组合读取的是同回执最终帧 buffer；发布回执前再次核全部落盘 PNG。输入在此期间变化会 stale/失败，不留下成功回执。`totalFrameBytes` 仍只统计 timed 帧；新 `totalImageBytes` 统计帧与制品，后者共同受 12 MiB 限制。输出继续 `generated-not-viewed`；先生成不表示 Read 已发生，更不表示模型理解。暂存视频、工程输入、解码中间件仍按原 finally 清理，只保留有界帧、请求制品与回执。v1 旧回执没有 artifacts 仍可读取。
+
+`findings` 和 `coverage` 的具体字段以同源公开 Schema 为准。每条事实包含 time、source、selector、bounds、measurement、evidence、limitations；review 将它绑定 reviewId/filmRevision，只有精确路径命中同次静态清单才补 inputSha256。工程的 DOM 量值来自同次 FilmPage.seek 后的实际文字 Range/overflow 测量。裁切与字体量值分开，目标投影只在可解释的二维几何下给值；复杂变换、背景对比度、遮挡、伪元素、Canvas/WebGL 等明确 unknown。采样有界且截断报告 partial；没有 finding/未运行不能推出通过。DOM 和 PNG 是同源求帧窗口，不能称原子快照。编码源只给原输出像素与时间事实，DOM 分析 unknown，不混用当前工程状态。
+
+`look`/`check` 兼容保留 `ok/lines/files`，在实际测量点增加 findings/coverage；其 `source.kind:live-check` 是未冻结的 live 输入，不借用 review 版本保证。新增技术量值不自动选创作路线、调字号或改字幕，也不把无音轨、静默或技术检查替代人工审美。专用 `review-frames.runtime.test.mjs` 通过既有 `test:motion:runtime` 的显式 opt-in runner 在 Linux 已准备 FFmpeg/Chromium 后执行；core 只运行不需要真实浏览器的直接合同测试。原生与 CI 成功仍需各自记录准确 source 与平台边界。
