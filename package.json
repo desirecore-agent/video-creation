@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "pnpm build && node desirecore/cli.mjs start --home .dev/video-creation --project examples/first-film",
     "build": "pnpm --filter @desirecore-agent/video-creation build:ui",
-    "test": "node --test --test-concurrency=1 desirecore/application-lock.test.mjs desirecore/runtime.test.mjs desirecore/service.integration.test.mjs desirecore/release.test.mjs && pnpm --filter @desirecore-agent/video-creation test:smoke",
+    "test": "node --test --test-concurrency=1 desirecore/application-lock.test.mjs desirecore/runtime.test.mjs desirecore/service.integration.test.mjs desirecore/release.test.mjs packages/openfilm/studio/server/reviews.test.mjs desirecore/review.integration.test.mjs && pnpm --filter @desirecore-agent/video-creation test:smoke",
     "typecheck": "pnpm --filter @desirecore-agent/video-creation typecheck",
     "audit:public": "node scripts/audit-public.mjs",
     "skills:sync": "node scripts/sync-skills.mjs",

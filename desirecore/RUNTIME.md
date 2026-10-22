@@ -124,3 +124,37 @@ CLI 示例：`node desirecore/cli.mjs render <项目> --codec vp9 --alpha --fps 
 凭据只通过应用Providers的MiMo设置或服务进程MIMO_API_KEY配置，不作为CLI开关、参数文件或工程来源字段。MIMO_API_BASE_URL显式选择运行进程端点，默认https://api.xiaomimimo.com/v1；Token Plan中国区为https://token-plan-cn.xiaomimimo.com/v1，须与相应凭据及官方使用范围匹配。缺少显式匹配配置会在出站前报错，不静默改端点。MiMo沿现有provider/素材落盘合同运行，不新增算力或Agent运行时。
 
 风格进入user消息，正文原样进入assistant消息；适配只用预置TTS，不克隆真人，不自动润色正文。成功要求finish_reason=stop、有效完整PCM WAV和精确源时长；截断、错误或无音频不是成功。无MiMo词时间戳，因此不生成伪造逐字VTT。超时或传输断开时结果可能未知，应先检查素材与回执，不能自动重复付费请求。
+
+## 带来源的审片材料
+
+正式入口是 `review <项目> --source current-project|export-job`、MCP `video_review` 和原鉴权下的 `POST /api/projects/:id/reviews`。HTTP/MCP 共用 Draft-07 `reviewRequestSchema`：
+
+```json
+{"source":"export-job","job":"真实12位十六进制任务ID","times":[0,2.5],"last":true,"maxEdge":1280}
+```
+
+`source` 必须显式提供。只有 `export-job` 必须提供 `job`，且仅接受此项目真实 `done` 视频任务的主输出；不接受任意路径、未完成任务、音频或无输入版本的旧记录，不自动降级为当前工程。`times` 是 1–6 个不重复的非负有限秒数，与 `count` 互斥；`count` 为 1–6，工程按 duration、编码视频按真实首末 PTS 范围均匀取样。`last` 额外一帧，总数最多六帧。无任何取样选项时默认 `count:4`。`maxEdge` 为 128–1920，默认 1280，保持画幅且不放大。时间越界或请求之后没有编码帧明确失败，不能偷偷钳到末帧。
+
+CLI 对应 `--job <ID>`、`--times 0,2.5`、`--count 4`、`--last`、`--max-edge 1280`。编码末帧使用真实解码 PTS，不由 duration×fps 猜测；`durationOrigin:container-format-metadata` 的 `duration` 是容器元数据（可能与首末帧范围不同），编码范围另报 `encodedRange:{firstPTS,lastPTS}`，不据容器 duration 提前拒绝存在的画面；数字时间以首个真实解码视频帧为零点，返回不早于所求相对时间的第一帧；`actualTime` 为此相对秒数，`actualPTS` 为原始 PTS，顶层 `timeOrigin:first-decoded-video-frame` 与 `timeOriginPTS` 声明这个工具口径，不把它推广成包含 edit-list/负 PTS 等媒体的通用播放器时钟。`source.output.outputTimeToFilmTime:null` 明确不提供 range/clip 输出到原 film 全局时间的隐式映射。当前工程没有编码 PTS，末态按 duration 前 1ms 求帧。每帧区分：
+
+```js
+{
+  index: 0, requestedTime: 2.5, actualTime: 2.533333,
+  actualPTS: 2.533333, actualPTSTicks: '38912', ptsTimeBase: '1/15360', timeBasis: 'encoded-pts', frameIndex: 76,
+  width: 1280, height: 720, path: '<本次独立PNG绝对路径>',
+  bytes: 12345, sha256: '<精确SHA-256>', mimeType: 'image/png',
+  url: '/api/projects/<id>/reviews/<reviewId>/frames/0'
+}
+```
+
+工程预览的 `timeBasis` 为 `project-seek`、`actualPTS:null`，`lastFramePolicy` 为 `project-duration-minus-0.001s`；真实导出为 `last-decoded-video-frame-pts`。`actualPTSTicks` 与 `ptsTimeBase` 保留原始整数时间戳及时间基，解码对应关系用整数交叉乘积验证，不因 showinfo 的低精度秒显示放宽容差。`reviewId`、`sourceKind`、`projectId`、`filmRevision`、`createdAt`、原请求和 `source` 与帧一并存入独立回执。每次产生新 24 位 ID，不覆盖其他审片。
+
+当前工程复用 `snapshotFilm` / `filmClosure`，静态本地输入快照逐文件记录 `{path,bytes,sha256}` 与整体摘要，并在求帧前后核当前工程同一闭包和影片版本；`consistency: local-snapshot-with-live-before-after-checks` 不表示跨文件原子事务。导出从 job 的原 `inputSnapshot.filmRevision` 取版本，将输出复制到本次自有暂存目录、核原观察字节后仅解码该副本，并再次核副本摘要；`source.output.digestOrigin: observed-at-review`、`exportCompletionDigest:null` 明确不是任务完成时的摘要。新导出输入清单逐项 SHA-256 来自同次提交冻结副本；旧清单只有 path/bytes 时仍照实返回，不虚构场景或素材的历史 SHA。已生成的旧导出审片不随当前工程更新而改变来源。
+
+临时完整视频和工程快照在成功/失败后精确删除。只保留应用数据根 `reviews/<reviewId>/` 的 PNG 与 `review.json`，没有自动 TTL；清理该精确目录即使其引用失效，不改变导出或影片。每次最多 10000 个静态输入、2 GiB 输入、6 张 PNG（单张 4 MiB、总计 12 MiB）；应用内串行生成审片，不启动第二任务系统或媒体服务。
+
+`GET /api/projects/:id/reviews/:reviewId` 读取原回执；`GET .../reviews/:reviewId/frames/:index?expected_sha256=<原摘要>` 只按该项目和 review 身份读取精确 PNG，先核实际尺寸预算、字节和 SHA，返回 `image/png`、`Cache-Control:no-store` 与 SHA ETag。路径不可由请求替换。缺帧为 404 / `missing-frame`，字节/摘要或调用者期望不符为 409 / `digest-mismatch`，读取中源变化为 409 / `stale`，导出未完成为 409 / `job-not-complete`，非法请求/预算为 400 或 422；失败不隐式补帧或重渲染。权限仍由应用原 loopback/key、浏览器 origin 和平台原文件权限约束，不给影片 iframe 新桥或管理权限。
+
+`observation: generated-not-viewed` 只说明材料已生成。导演通过现有 `Read(path, expected_sha256)` 实际读取必要画面，并按返回尺寸与实际时间描述观察；指针、生成回执或仅文本摘要不证明看图，图片包含于模型请求也不证明理解或审美结论。此入口不写 film.html、场景源码、人工 DOM overrides 或锁，不规定导演如何构思或修订。真实原生调用、图像请求证据和人工锁比较以固定验收记录为准。
+
+审片运行生命周期归现有 Studio：`whenIdle` 退出会把在途/等待审片视为 busy。正式关闭服务时停止接收新审片，取消并等待仅该实例拥有的审片 FFmpeg/FFprobe、FilmPage 与本地文件 site，再清理其独占临时输入；不调用全局进程清理。等待队列也明确结束，不在重启后暗中恢复观察。读取已生成材料仍以原摘要为准；进行中观察停止为 `review-stopped`，未生成成功回执时不能当作已经看图。

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { snapshotFilm } from './export-snapshot.mjs';
 import { filmHtml } from '../../src/film-doc.mjs';
 
@@ -19,9 +20,16 @@ test('render snapshot freezes its local film closure, excludes unrelated media, 
     await writeFile(join(root, 'assets', 'unused.mp4'), 'unrelated video');
     const manifest = await snapshotFilm(root, input);
     assert.deepEqual(manifest.files.map((f) => f.path).sort(), ['assets/used.png', 'film.html', 'scenes/a.html']);
+    for (const file of manifest.files) {
+      const copied = await readFile(join(input, file.path));
+      assert.equal(file.bytes, copied.length);
+      assert.equal(file.sha256, createHash('sha256').update(copied).digest('hex'));
+    }
+    const frozenSourceSha = manifest.files.find((file) => file.path === 'assets/used.png').sha256;
     await writeFile(join(root, 'assets', 'used.png'), 'human changed picture');
     await writeFile(join(root, 'film.html'), 'human changed film');
     assert.equal(await readFile(join(input, 'assets', 'used.png'), 'utf8'), 'original picture');
+    assert.equal(frozenSourceSha, createHash('sha256').update('original picture').digest('hex'));
     assert.equal(await readFile(join(input, 'film.html'), 'utf8'), film);
     assert.equal(JSON.parse(await readFile(join(dir, 'job', 'input-manifest.json'), 'utf8')).filmRevision, manifest.filmRevision);
     assert.ok(manifest.limitations.length, 'static closure limits are explicit');

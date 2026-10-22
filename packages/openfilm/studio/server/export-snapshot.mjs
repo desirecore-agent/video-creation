@@ -2,7 +2,7 @@
 /** Freeze the same bounded local dependency closure used by project history. Copies/reflinks, never hardlinks.
  * The manifest records exactly what was frozen, and the static-closure/remote limitations for audit.
  */
-import { constants } from 'node:fs';
+import { constants, createReadStream } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
@@ -40,7 +40,7 @@ export async function snapshotFilm(root, dir, { signal, maxFiles = 10000, maxByt
   if (bytes > maxBytes) throw new Error(`Render input needs ${bytes} bytes; the snapshot limit is ${maxBytes}.`);
   /** @type {Map<string, string>} */
   const stamps = new Map();
-  /** @type {{ version: number, createdAt: number, source: string, filmRevision: string, bytes: number, files: { path: string, bytes: number }[], limitations: string[] }} */
+  /** @type {{ version: number, createdAt: number, source: string, filmRevision: string, bytes: number, files: { path: string, bytes: number, sha256: string }[], limitations: string[] }} */
   const manifest = { version: 1, createdAt: Date.now(), source: root, filmRevision: '', bytes, files: [],
     limitations: ['Only local inputs resolved by OpenFilm filmClosure are frozen. Dynamically constructed paths must name their dependencies in page code; remote resources are not snapshotted.'] };
   try {
@@ -56,9 +56,13 @@ export async function snapshotFilm(root, dir, { signal, maxFiles = 10000, maxByt
       if (texts.has(name) && (await readFile(to, 'utf8')) !== texts.get(name)) {
         throw new Error(`Render input changed while resolving dependencies: ${name}. Retry after saving the project.`);
       }
+      // 摘要只取本次冻结副本的真实字节；历史清单仍可没有此字段。
+      const digest = createHash('sha256'); let copiedBytes = 0;
+      for await (const chunk of createReadStream(to)) { aborted(signal); digest.update(chunk); copiedBytes += chunk.length; }
+      if (copiedBytes !== size) throw new Error(`Render snapshot bytes changed: ${name}.`);
       const after = await stat(from);
       if (stamp(after) !== stamp(before)) throw new Error(`Render input changed while snapshotting: ${name}. Retry after saving the project.`);
-      manifest.files.push({ path: name, bytes: size });
+      manifest.files.push({ path: name, bytes: size, sha256: digest.digest('hex') });
     }
     /* Verify the whole set after copying: a file copied first may have changed while later media was copied. */
     for (const [name, before] of stamps) {
