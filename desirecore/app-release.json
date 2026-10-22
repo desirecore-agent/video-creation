@@ -51,8 +51,8 @@
     },
     {
       "path": "desirecore/RUNTIME.md",
-      "sha256": "47a8d8625443fd8653722ae494801d5be829130a9ffc4bf04986e20cc4ef5689",
-      "size": 16347,
+      "sha256": "9b9628822df45ade662c89bf90ad6aea143b01f5e6253f50d0d676197d5e3b6d",
+      "size": 22108,
       "role": "documentation"
     },
     {
@@ -63,14 +63,14 @@
     },
     {
       "path": "desirecore/cli.mjs",
-      "sha256": "104fa64800adcb0581d1a42254b87df33b540fccb17fd9900b85383ecb11d852",
-      "size": 12279,
+      "sha256": "cef9f4a81974814d6c895cd05c7870e2f3fb81d021797bb06c56cb4719f3ebca",
+      "size": 13493,
       "role": "runtime"
     },
     {
       "path": "desirecore/client.mjs",
-      "sha256": "0fd03251db3f68d0b9aeb62e102eebd4325ffed44c4c6bee4220c612eec26042",
-      "size": 5195,
+      "sha256": "ef5dac490d7ac88fd2565ae3139272f5925312b1a03ab2b7144c4f4df564122f",
+      "size": 5374,
       "role": "runtime"
     },
     {
@@ -195,8 +195,8 @@
     },
     {
       "path": "desirecore/mcp.mjs",
-      "sha256": "636d3739b865250bc939ef1d37d3447a09258fb5153f75a5396dd1ba547c7301",
-      "size": 9073,
+      "sha256": "e31d0827460f2d8b731731b25f3a198e9cf38cf1e1b0a74af87804e47bde8398",
+      "size": 9583,
       "role": "runtime"
     },
     {
@@ -315,8 +315,8 @@
     },
     {
       "path": "package.json",
-      "sha256": "a1379b6da103f6d4b2646ad251c38a195bfcaea5ed8bfd9417d26c3af786123c",
-      "size": 2779,
+      "sha256": "cf55dd7e46ec8fdd7fbd6f691849ca33ec1c890f77a7731dc6f0b46483a56bf5",
+      "size": 2867,
       "role": "dependency"
     },
     {
@@ -668,6 +668,12 @@
       "role": "runtime"
     },
     {
+      "path": "packages/openfilm/src/review-frames.mjs",
+      "sha256": "a0bd349b6340e9381af70a2f31f2bc6a0e9e46825d67714091315edeaab17407",
+      "size": 10148,
+      "role": "runtime"
+    },
+    {
       "path": "packages/openfilm/src/seekable.mjs",
       "sha256": "fa3b91513d666ebd414fc6c4fc1798f3aad5c09c6be1e760ca3ae9d95be85b79",
       "size": 4992,
@@ -675,14 +681,14 @@
     },
     {
       "path": "packages/openfilm/src/shared.d.mts",
-      "sha256": "5d73cdbff6650b755a8925026743fc7e80036b2a30384cfe64735a0d684321de",
-      "size": 2687,
+      "sha256": "97bb80ef2c478618a19453b0169692e834f5d879dc402ea9aac525e4410c5f72",
+      "size": 2748,
       "role": "runtime"
     },
     {
       "path": "packages/openfilm/src/shared.mjs",
-      "sha256": "cc58ebb58fbd860f27ce683dbbb97f423483edd5550021ceed140be45cb9fbfb",
-      "size": 21235,
+      "sha256": "ea8d85671d1aa9fd54a6cabf125f2f017dc4f8a297b32b02e5e8ee58fded7d8f",
+      "size": 21901,
       "role": "runtime"
     },
     {
@@ -765,8 +771,8 @@
     },
     {
       "path": "packages/openfilm/studio/server/export-snapshot.mjs",
-      "sha256": "6dd4782a5a7cbbf9eaccfe9b640d4d124c89019567db8ca364d4cc50230e19ed",
-      "size": 4804,
+      "sha256": "955452340969eccc51582bb52e822e1ef659d0005b741cd24fba0357ac5c6dcc",
+      "size": 5244,
       "role": "runtime"
     },
     {
@@ -1058,6 +1064,12 @@
       "role": "runtime"
     },
     {
+      "path": "packages/openfilm/studio/server/reviews.mjs",
+      "sha256": "822a1b372b7ce4463cc09cf743fb929b3aefe0ea3740b70e7840219f7abadbc0",
+      "size": 16247,
+      "role": "runtime"
+    },
+    {
       "path": "packages/openfilm/studio/server/saved.mjs",
       "sha256": "d3d2600aa6525a5f6387d76ec549e0ad1b1feb01951ec6d44f65e1a9d1c1f933",
       "size": 18431,
@@ -1065,8 +1077,8 @@
     },
     {
       "path": "packages/openfilm/studio/server/server.mjs",
-      "sha256": "d463097a7d42ffe96a3918d5cd65a2b302237bba1d49b3e618d1bb683a04b992",
-      "size": 74959,
+      "sha256": "d6066b1892194d9420352d805ad6ca8ed5b583b13841da6d634add7ee30711c2",
+      "size": 76238,
       "role": "runtime"
     },
     {
@@ -1186,7 +1198,7 @@
   ],
   "source": {
     "kind": "worktree",
-    "sha256": "c010086b65d039411dff3d4f5366c1ede4aaacb3bd481cf081f762cac9319f7d"
+    "sha256": "0b828ad31118c12d8ce9b00d483fefb805555da52147bd535782bd0fbe06c072"
   },
   "supportedPlatforms": [
     "darwin",
@@ -1219,5 +1231,5 @@
     "restoreInstructionsPath": "desirecore/RUNTIME.md"
   },
   "instructionsPath": "desirecore/RUNTIME.md",
-  "releaseDigest": "8ac566832a5295281e32721c9c25d085ef1c39ac7bb1a5a64c943a45e079b823"
+  "releaseDigest": "cb54390d268912bf2932bb7a16c450cb793bafe9268d2c5566c50b1d44e92e35"
 }
