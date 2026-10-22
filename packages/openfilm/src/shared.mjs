@@ -370,8 +370,12 @@ export async function spread(browser, png) {
  * partly cut off by a box that hides its overflow (`box`). Text entirely out of view is left alone (it is on its way
  * in or out). Runs inside the page (look evaluates it in every web page's frame).
  */
-export function cutText() {
+export function cutText(options = undefined) {
+  const measured = options?.measure === true;
   const W = innerWidth, H = innerHeight, out = [];
+  const samples = [];
+  let visited = 0, partial = false;
+  const rect = (r) => ({ x: r.x, y: r.y, width: r.width, height: r.height });
   const name = (el) => {
     if (el.id) return `#${el.id}`;
     const tag = el.tagName.toLowerCase();
@@ -391,22 +395,58 @@ export function cutText() {
   };
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   const seen = new Set();
-  for (let n = walker.nextNode(); n && out.length < 50; n = walker.nextNode()) {
+  for (let n = walker.nextNode(); n && (measured || out.length < 50); n = walker.nextNode()) {
+    // 扩展测量有独立上界；旧调用仍只限制被裁文字，不改变原有警告语义。
+    if (measured && ++visited > 10_000) { partial = true; break; }
     const el = n.parentElement;
     if (!el || seen.has(el) || !n.textContent.trim() || /^(SCRIPT|STYLE|NOSCRIPT|TITLE)$/.test(el.tagName)) continue;
     seen.add(el);
     const range = document.createRange(); range.selectNodeContents(n);
     const r = range.getBoundingClientRect();
     if (!(r.width > 1 && r.height > 1) || !shows(el)) continue;
-    if (partly(r, { left: 0, top: 0, right: W, bottom: H })) { out.push({ sel: name(el), why: 'edge', text: n.textContent.trim().slice(0, 40) }); continue; }
+    let clipped = null, clipBounds = null;
+    if (partly(r, { left: 0, top: 0, right: W, bottom: H })) {
+      clipped = 'edge'; clipBounds = { x: 0, y: 0, width: W, height: H };
+      out.push({ sel: name(el), why: 'edge', text: n.textContent.trim().slice(0, 40) });
+      if (!measured) continue;
+    }
     for (let a = el.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+      if (clipped) break;
       const cs = getComputedStyle(a);
       if (!/hidden|clip/.test(cs.overflowX + cs.overflowY)) continue;
-      if (partly(r, a.getBoundingClientRect())) out.push({ sel: name(el), why: 'box', text: n.textContent.trim().slice(0, 40) });
+      if (partly(r, a.getBoundingClientRect())) {
+        clipped = 'box'; clipBounds = rect(a.getBoundingClientRect());
+        out.push({ sel: name(el), why: 'box', text: n.textContent.trim().slice(0, 40) });
+      }
       break;
     }
+    if (measured && r.right > 0 && r.bottom > 0 && r.left < W && r.top < H) {
+      if (samples.length >= 50) { partial = true; break; }
+      let scaleY = 1, simpleTransform = true;
+      for (let a = el; a; a = a.parentElement) {
+        // SVG 的 viewBox/用户坐标映射未在此核验，包含 foreignObject 内的 HTML 文字。
+        if (a.namespaceURI === 'http://www.w3.org/2000/svg') simpleTransform = false;
+        const cs = getComputedStyle(a);
+        if (cs.perspective !== 'none' || (cs.zoom && Number(cs.zoom) !== 1) || (cs.rotate && cs.rotate !== 'none')
+          || (cs.scale && cs.scale !== 'none') || cs.writingMode !== 'horizontal-tb') simpleTransform = false;
+        if (cs.transform && cs.transform !== 'none') {
+          try {
+            const m = new DOMMatrixReadOnly(cs.transform);
+            if (!m.is2D || Math.abs(m.b) > 1e-8 || Math.abs(m.c) > 1e-8 || !(m.a > 0 && m.d > 0)) simpleTransform = false;
+            else scaleY *= m.d;
+          } catch { simpleTransform = false; }
+        }
+      }
+      const fontSize = Number.parseFloat(getComputedStyle(el).fontSize);
+      samples.push({ sel: name(el), text: n.textContent.trim().slice(0, 160), bounds: rect(r), clipped, clipBounds,
+        fontSizeCssPx: Number.isFinite(fontSize) ? fontSize : null, localScaleY: simpleTransform ? scaleY : null,
+        projection: simpleTransform ? 'axis-aligned-css' : 'unknown-complex-transform' });
+    }
   }
-  return out;
+  if (!measured) return out;
+  return { samples, clipped: out, viewport: { width: W, height: H }, visitedTextNodes: visited, partial,
+    sampleLimit: 50, textNodeLimit: 10_000, canvasCount: document.querySelectorAll('canvas').length,
+    failedFonts: [...(document.fonts ?? [])].filter((f) => f.status === 'error').map((f) => f.family) };
 }
 
 /** A fixed shuffle: the same order every run, but not one a film would happen to be drawn in. */

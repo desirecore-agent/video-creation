@@ -1,4 +1,6 @@
 /** 审片只复用 look 所用的 FilmPage 和 FFmpeg；工程预览与真实编码帧保持不同时间口径。 */
+import { createHash } from 'node:crypto';
+import { collectFrameFindings } from './review-findings.mjs';
 import { spawn } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -17,11 +19,12 @@ export function pngSize(bytes) {
 }
 
 /** 子进程输出和执行时间有界；不启动 shell、不继承输入，也不取消其他渲染。 */
-function run(program, args, { line, timeoutMs = 120_000, maxBytes = 4 * 1024 * 1024, signal } = {}) {
+export function runReviewProcess(program, args, { line, binary = false, inputs = [], timeoutMs = 120_000, maxBytes = 4 * 1024 * 1024, signal } = {}) {
   signal?.throwIfAborted();
   return new Promise((done, fail) => {
-    const child = spawn(program, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(program, args, { stdio: ['ignore', 'pipe', 'pipe', ...inputs.map(() => 'pipe')], windowsHide: true });
     let stdout = '', stderr = '', pending = '', bytes = 0, error;
+    const chunks = [];
     const stop = (reason) => { error ??= new Error(reason); kill(child); };
     const abort = () => stop('审片已停止。');
     signal?.addEventListener('abort', abort, { once: true });
@@ -30,7 +33,8 @@ function run(program, args, { line, timeoutMs = 120_000, maxBytes = 4 * 1024 * 1
     child.stdout.on('data', (chunk) => {
       bytes += chunk.length;
       if (bytes > maxBytes) return stop(`${program} 审片输出超过预算。`);
-      if (!line) stdout += chunk;
+      if (binary) chunks.push(chunk);
+      else if (!line) stdout += chunk;
       else {
         pending += chunk;
         const parts = pending.split(/\r?\n/); pending = parts.pop();
@@ -38,6 +42,11 @@ function run(program, args, { line, timeoutMs = 120_000, maxBytes = 4 * 1024 * 1
       }
     });
     child.stderr.on('data', (chunk) => { stderr += chunk; if (stderr.length > 1024 * 1024) stop(`${program} 审片诊断超过预算。`); });
+    for (const [index, input] of inputs.entries()) {
+      const pipe = child.stdio[index + 3];
+      pipe.on('error', (e) => { error ??= e; kill(child); });
+      pipe.end(input);
+    }
     child.once('error', (e) => { error = e; });
     child.once('close', (code) => {
       clearTimeout(timer);
@@ -45,7 +54,7 @@ function run(program, args, { line, timeoutMs = 120_000, maxBytes = 4 * 1024 * 1
       if (line && pending && !error) { try { line(pending); } catch (e) { error = e; } }
       if (error) fail(error);
       else if (code !== 0) fail(new Error(`${program} 审片失败：${stderr.trim() || code}`));
-      else done({ stdout, stderr });
+      else done({ stdout: binary ? Buffer.concat(chunks) : stdout, stderr });
     });
   });
 }
@@ -59,7 +68,7 @@ export async function reviewProjectFrames(root, dir, request, stage, { signal } 
     if (!Number.isFinite(duration) || duration <= 0) throw new Error('当前工程需要明确的正 duration 才能审片。');
     const lastTime = Math.max(0, duration - 0.001);
     const points = requestedPoints(request, duration, lastTime);
-    const frames = [];
+    const frames = [], findings = [], coverage = [];
     for (const [index, point] of points.entries()) {
       signal?.throwIfAborted();
       await session.film.seek(point.actualTime);
@@ -67,15 +76,19 @@ export async function reviewProjectFrames(root, dir, request, stage, { signal } 
       if (png.length > REVIEW_MAX_FRAME_BYTES) throw new Error('单帧 PNG 超过 4 MiB 审片预算。');
       const file = join(dir, `frame-${index}.png`);
       await writeFile(file, png, { flag: 'wx', mode: 0o600 });
-      frames.push({ ...point, actualPTS: null, timeBasis: 'project-seek', ...pngSize(png), file });
+      const time = { ...point, actualPTS: null, timeBasis: 'project-seek' };
+      const dimensions = pngSize(png);
+      const measured = await collectFrameFindings(session.film, { time, stage, targetWidth: Math.min(dimensions.width, request.targetWidth ?? dimensions.width), source: { kind: 'current-project', consistency: 'same-seek-capture-window-not-atomic' } });
+      findings.push(...measured.findings); coverage.push(...measured.coverage);
+      frames.push({ ...time, ...dimensions, sourceWidth: stage.w, sourceHeight: stage.h, captureSha256: createHash('sha256').update(png).digest('hex'), captureBytes: png.length, file });
     }
-    return { duration, frames, lastFramePolicy: 'project-duration-minus-0.001s' };
+    return { duration, frames, findings, coverage, lastFramePolicy: 'project-duration-minus-0.001s' };
   } finally { await session.close(); }
 }
 
 /** 输入只能是本次独立副本。扫描真实 PTS，不从 duration×fps 猜 VFR、尾帧或目标时间。 */
 export async function reviewEncodedFrames(file, dir, request, { signal } = {}) {
-  const metadata = await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,time_base:format=duration', '-of', 'json', file], { signal });
+  const metadata = await runReviewProcess('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,time_base:format=duration', '-of', 'json', file], { signal });
   const info = JSON.parse(metadata.stdout), stream = info.streams?.[0];
   if (!stream?.width || !stream?.height) throw new Error('导出没有可解码的视频流。');
   const duration = Number(info.format?.duration);
@@ -83,7 +96,7 @@ export async function reviewEncodedFrames(file, dir, request, { signal } = {}) {
   if (!/^\d+\/\d+$/.test(timeBase ?? '')) throw new Error('视频流缺少可核验 time_base。');
   const timestamps = [], ticks = [];
   let index = 0, last = null;
-  await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_frames', '-show_entries', 'frame=best_effort_timestamp,best_effort_timestamp_time', '-of', 'compact=p=0', file], {
+  await runReviewProcess('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_frames', '-show_entries', 'frame=best_effort_timestamp,best_effort_timestamp_time', '-of', 'compact=p=0', file], {
     maxBytes: 32 * 1024 * 1024, signal,
     line(value) {
       if (!value.trim()) return;
@@ -102,7 +115,7 @@ export async function reviewEncodedFrames(file, dir, request, { signal } = {}) {
   const { points, firstPTS } = selectReviewFrames(timestamps, request);
   const indices = [...new Set(points.map((p) => p.index))].sort((a, b) => a - b);
   const filter = `select=${indices.map((n) => `eq(n\\,${n})`).join('+')},scale=w='min(iw,${request.maxEdge})':h='min(ih,${request.maxEdge})':force_original_aspect_ratio=decrease,showinfo`;
-  const decoded = await run('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'info', '-copyts', '-i', file, '-map', '0:v:0', '-vf', filter, '-fps_mode', 'passthrough', '-frames:v', String(indices.length), '-start_number', '0', join(dir, 'decoded-%d.png')], { signal });
+  const decoded = await runReviewProcess('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'info', '-copyts', '-i', file, '-map', '0:v:0', '-vf', filter, '-fps_mode', 'passthrough', '-frames:v', String(indices.length), '-start_number', '0', join(dir, 'decoded-%d.png')], { signal });
   // showinfo 的 pts_time 使用低精度显示，长时间戳只能核整数 pts 与对应 time_base。
   const decodedBase = /config in time_base:\s*(\d+\/\d+)/.exec(decoded.stderr)?.[1];
   const observed = [...decoded.stderr.matchAll(/\bn:\s*\d+\s+pts:\s*(-?\d+)\s+pts_time:/g)].map((m) => m[1]);
@@ -115,7 +128,7 @@ export async function reviewEncodedFrames(file, dir, request, { signal } = {}) {
     if (png.length > REVIEW_MAX_FRAME_BYTES) throw new Error('单帧 PNG 超过 4 MiB 审片预算。');
     const out = join(dir, `frame-${frameIndex}.png`);
     await writeFile(out, png, { flag: 'wx', mode: 0o600 });
-    frames.push({ requestedTime: point.requestedTime, actualTime: relativePTS(point.pts, firstPTS), actualPTS: point.pts, actualPTSTicks: ticks[point.index], ptsTimeBase: timeBase, frameIndex: point.index, timeBasis: 'encoded-pts', ...pngSize(png), file: out });
+    frames.push({ requestedTime: point.requestedTime, actualTime: relativePTS(point.pts, firstPTS), actualPTS: point.pts, actualPTSTicks: ticks[point.index], ptsTimeBase: timeBase, frameIndex: point.index, timeBasis: 'encoded-pts', ...pngSize(png), sourceWidth: stream.width, sourceHeight: stream.height, captureSha256: createHash('sha256').update(png).digest('hex'), captureBytes: png.length, file: out });
   }
   return { duration: Number.isFinite(duration) && duration > 0 ? duration : null, durationOrigin: 'container-format-metadata', timeOrigin: 'first-decoded-video-frame', timeOriginPTS: firstPTS, encodedRange: { firstPTS, lastPTS: last.pts }, frames, decodedFiles: indices.map((_, i) => join(dir, `decoded-${i}.png`)), lastFramePolicy: 'last-decoded-video-frame-pts' };
 }

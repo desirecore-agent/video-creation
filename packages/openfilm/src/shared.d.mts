@@ -29,3 +29,13 @@ export declare function ffmpeg(args: string[], opts?: { input?: boolean; timeout
 export declare function fileOf(root: string, entry: string, src: string): string;
 /** A sound as a film or a page lists it: a path, and numbers where numbers go; throws otherwise. */
 export declare function checkSound<T extends { src: string }>(sound: T): T;
+export interface CutTextResult { sel: string; why: 'edge' | 'box'; text: string }
+export interface DomTextMeasurements {
+  samples: Array<{ sel: string; text: string; bounds: { x: number; y: number; width: number; height: number }; clipped: 'edge' | 'box' | null;
+    clipBounds: { x: number; y: number; width: number; height: number } | null; fontSizeCssPx: number | null; localScaleY: number | null; projection: 'axis-aligned-css' | 'unknown-complex-transform' }>;
+  clipped: CutTextResult[]; viewport: { width: number; height: number }; visitedTextNodes: number; partial: boolean;
+  sampleLimit: number; textNodeLimit: number; canvasCount: number; failedFonts: string[];
+}
+/** 浏览器内自包含测量；无参数保留既有裁切数组，measure 分支添加定量事实和显式上界。 */
+export declare function cutText(): CutTextResult[];
+export declare function cutText(options: { measure: true }): DomTextMeasurements;

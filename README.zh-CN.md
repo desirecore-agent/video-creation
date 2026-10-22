@@ -92,7 +92,7 @@ node desirecore/cli.mjs review <项目> --source current-project --times 1,3 --l
 
 生成材料的 `observation: generated-not-viewed` 不是导演已看图。导演应再使用平台现有 `Read(path, expected_sha256)` 读取必要 PNG，将实际画面与准确版本、时间点一起作为修订依据；图像进入请求也不等于模型理解。读取帧会核对原字节和摘要，丢失或篡改不会以其他图片代替。审片不改影片、人工 overrides 或锁；修订仍走现有版本化编辑。
 
-每次最多六帧，每帧最多 4 MiB、总计 12 MiB。正式关闭服务会停止接收观察、结束并等待本实例审片资源及等待队列清理，不在后台暗中继续。完整暂存视频与工程输入在成功或失败后清理，只有帧和回执留在本应用数据根的 `reviews/<reviewId>/`；没有自动过期或隐式重建。清理精确审片目录后旧引用明确不可用。新导出输入清单逐项记录冻结副本的 SHA-256；历史清单可能只有路径与字节，没有场景/资源的历史摘要；远端或未解析动态依赖、系统字体与浏览器环境不能由本地摘要证明冻结。详细请求和 HTTP 读取合同见 [RUNTIME.md](desirecore/RUNTIME.md)。
+每次最多六个 timed 帧和一个独立组合制品；每图最多 4 MiB、两类合计 12 MiB。正式关闭服务会停止接收观察、结束并等待本实例审片资源及等待队列清理，不在后台暗中继续。完整暂存视频与工程输入在成功或失败后清理，只有帧、请求的组合图和回执留在本应用数据根的 `reviews/<reviewId>/`；没有自动过期或隐式重建。清理精确审片目录后旧引用明确不可用。新导出输入清单逐项记录冻结副本的 SHA-256；历史清单可能只有路径与字节，没有场景/资源的历史摘要；远端或未解析动态依赖、系统字体与浏览器环境不能由本地摘要证明冻结。详细请求和 HTTP 读取合同见 [RUNTIME.md](desirecore/RUNTIME.md)。
 
 ## 公开时间线修改合同
 
@@ -106,3 +106,18 @@ node desirecore/cli.mjs patch --schema
 后者只读输出版本化 Draft-07 操作数组 Schema，与 MCP `video_patch.ops` 同源。已有字段/删除/兼容宽值及最终校验归原内核；公开说明不授予新权限，也不是场景源码 CAS。正常修改先 `inspect`，再把 JSON 数组保存为工程内操作文件并用真实 `--base` 提交。
 
 仅切换已存在片段到导演创建的场景副本时，使用 `[{"op":"set","clip":"真实ID","field":"src","value":"tide-beacon-r2.html"}]`。该操作保留未指定的 `motion`、人工 DOM overrides、锁和 `time`。`inspect` 通常已把 HTML `#t` 分离为 `time`，只换 `src` 时不要重复拼接 `#t`；范围按实际返回值保留。冲突后重读合并，不换新 revision 盲重放。完整机器合同以当前安装版本 `patch --schema` 为准。
+
+
+## 目标尺寸与可追溯的测量
+
+`node desirecore/cli.mjs review --schema` 可离线读取 `contractVersion:2` 的请求、finding、coverage 与 artifact Draft-07 合同，不读取项目或 home、不启动服务。MCP `video_review` 与原鉴权下的 `GET /api/review-schema` 使用同源合同。首尾及目标宽度示例：
+
+```sh
+node desirecore/cli.mjs review <项目> --source export-job --job <任务ID> --first-last --target-width 390 --max-edge 1280 --home <应用数据根>
+```
+
+`targetWidth` 为 64–4096，仅从本次核验 PNG 字节缩小，不能放大或突破 `maxEdge`。每帧的 `presentation` 分列原生源尺寸、捕获尺寸、目标实际尺寸、比例和 `limitedBy`；请求 390 不保证得到 390 像素。`firstLast` 补充 0 与 last，未给其他采样时只生成首尾两帧；总 timed 帧仍不得超过六。`artifacts[]` 的一个 `first-last-composite` 从这两帧的固定 buffer 组合，`derivedFrom` 绑定精确 bytes/SHA/实际时间及编码整数时间基；它的 `timeBasis:composite-not-timed-frame` 不是时间线上一帧。`maxEdge` 约束整个组合图，`layout.cells` 另报每格坐标、源/实际尺寸与比例，透明补边不算原画面。
+
+`findings[]` 给出实际采样的 time/source/selector/bounds/measurement/evidence/limitations；`coverage[]` 说明 observed、unknown 或 partial 的范围。工程预览从同一 FilmPage 的求帧窗口测文字 Range、局部裁切和目标宽度下的数量值；CSS 字号与裁切分列，不按固定字号判审美好坏。复杂变换、遮挡、Canvas/WebGL、复杂背景对比度、未测点位或静默不能被冒称“正常”。DOM 与 PNG 是同采样窗口，不是原子像素快照；旧编码任务只解码原输出，不附当前工程 DOM 的选择器或字号结论。`check` 保留原 `{ok,lines,files}` 并添加结构化事实，但其 live-check 没有 review 的版本快照保证。
+
+导演仍应按用途选必要图片，经 `Read(path, expected_sha256)` 实际看图并自主决定修订。首尾、目标小图、技术测量均不证明连续动画、整段音频或整体审美；没有 finding 或未运行检查也不表示通过。所有观察保持影片、人工 DOM/动效字段及锁不变，不自动拦截导出。
