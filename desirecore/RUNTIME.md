@@ -185,3 +185,26 @@ P1 请求新增 `targetWidth`（64–4096）与 `firstLast`；CLI 对应 `--targ
 `findings` 和 `coverage` 的具体字段以同源公开 Schema 为准。每条事实包含 time、source、selector、bounds、measurement、evidence、limitations；review 将它绑定 reviewId/filmRevision，只有精确路径命中同次静态清单才补 inputSha256。工程的 DOM 量值来自同次 FilmPage.seek 后的实际文字 Range/overflow 测量。裁切与字体量值分开，目标投影只在可解释的二维几何下给值；复杂变换、背景对比度、遮挡、伪元素、Canvas/WebGL 等明确 unknown。采样有界且截断报告 partial；没有 finding/未运行不能推出通过。DOM 和 PNG 是同源求帧窗口，不能称原子快照。编码源只给原输出像素与时间事实，DOM 分析 unknown，不混用当前工程状态。
 
 `look`/`check` 兼容保留 `ok/lines/files`，在实际测量点增加 findings/coverage；其 `source.kind:live-check` 是未冻结的 live 输入，不借用 review 版本保证。新增技术量值不自动选创作路线、调字号或改字幕，也不把无音轨、静默或技术检查替代人工审美。专用 `review-frames.runtime.test.mjs` 通过既有 `test:motion:runtime` 的显式 opt-in runner 在 Linux 已准备 FFmpeg/Chromium 后执行；core 只运行不需要真实浏览器的直接合同测试。原生与 CI 成功仍需各自记录准确 source 与平台边界。
+
+## 场景源码摘要与新版本修订
+
+`scene-read <项目> <片段ID>`、`scene-revise <项目> --args <JSON文件>` 复用既有 Studio 实例；MCP 为 `video_scene_read` / `video_scene_revise`，HTTP 为原 key/origin 鉴权下的 `POST /api/projects/:id/scene/read` / `scene/revise`。`scene-read --schema` 和 `scene-revise --schema` 在配置、home 与服务发现之前返回同一 `sceneSourceContract()`；原鉴权 `GET /api/scene-source-schema`、MCP inputSchema 均引用 `studio/server/scene-source.mjs` 的唯一 Draft-07 数据，不要求开放应用材料源码读取权限。
+
+```sh
+node desirecore/cli.mjs scene-read <项目> <真实片段ID> --home <应用数据根>
+node desirecore/cli.mjs scene-revise <项目> --args <修订JSON文件> --home <应用数据根>
+```
+
+read 请求为 `{"clipId":"scene"}`。回执的 `filmRevision` 是当前影片版本，`source:{path,sha256,bytes,encoding,textIncluded,text?}` 来自同一个有界原始 Buffer，fatal UTF-8 解码失败不以替换字符冒充原文。它不是旧 motion 字符串摘要，也不是像素审片。`shared` 记录已知当前影片中指向同一物理文件的实例、完整性与数量；截断的引用列表明确 `complete:false`。影片和源码前后围栏只界定观察窗口，不是原子文件系统快照。
+
+revise 参数文件包含完整对象，不能把大段源码作为单个 OS argv 参数：
+
+```json
+{"base":"<scene-read的16位filmRevision>","sourcePath":"scene.html","expectedSourceSha256":"<同次原字节64位sha256>","clipIds":["scene"],"targetPath":"scene-r2.html","content":"<完整新源码>"}
+```
+
+严格 `base` 与原源码 `expectedSourceSha256` 均须相等；仅源码改动而影片版本未变也会冲突。`clipIds` 为 1–100 个明确且不重复实例，均须仍指向同一实际原源；选一不影响未选共享实例。`targetPath` 是项目内已有父目录中的 `.html/.htm` 新版本，不带 query/fragment、不能别名原源或 `film.html`。同字节普通目标可显式 `reused`；已有不同字节、符号链接或非法路径拒绝，不覆盖。完整新源先写请求私有 temp 并核字节，再以 no-replace link 发布；文件系统不支持时失败，不退回覆盖 rename。随后复核原源、新源及 strict base，只切选定片段的 `src`，保留时间、motion、人工 overrides、锁和其他字段。可选 `film-motion` 需兼容每个选定实例；没有 motion 的自由 HTML/SVG/Canvas/WebGL 仍可创作，不强制模板。不执行脚本证明语义，参数、锁与 DOM 数据保留不保证任意新代码仍消费它们或每个时点选择器存在。
+
+字节预算分别计算：read 原文件至多 4 MiB；完整 read 回执的实际 `JSON.stringify` UTF-8 至多 480 KiB，否则 `source.textIncluded:false` / `omissionReason:complete-source-exceeds-receipt-budget`，保留完整摘要和有限元数据，绝不截断正文伪装全文。revise `content` 实际 UTF-8 至多 256 KiB，完整领域 JSON 输入至多 768 KiB；CLI 参数文件也只读取实际上限加一字节再决定是否解析。HTTP 仍先执行既有 4 MiB 请求体检查；MCP 仍是整请求行 1 MiB 在 parse 前检查、工具内部 `JSON.stringify(data)` 512 KiB 在调用后检查。后者不是完整 JSON-RPC 响应上限：实际 id、wrapper、第二层转义及末尾换行会增加 wire 字节。本功能不新增完整 RPC cap、不扩大全局预算、不分块或静默省略输入。
+
+成功 `outcome:completed` 包含 `publication:{path,sha256,bytes,disposition}`、新 `filmRevision` 和明确变更映射。新源发布与影片切换不是两文件事务，也不是 OS CAS；同进程队列只协调合作写者，外部写者及最后围栏后的窗口仍存在。若发布后切换失败或未取得完整成功回执，已发布路径保留，错误 `sceneSourceError:true / kind:recovery` 的有限 `recovery` 包含 publication、可观察 filmRevision（无法读取为 null）、selectedMappings、mappingsComplete 与 `action:fresh-inspect-before-retry`。只清理本请求私有 temp，不按推测归属删除公开版本。CLI 对这些领域错误输出有限 JSON 到 stderr，409 返回 exit3；MCP 保持 `isError:true` 并保留同源有限字段，不透传任意 error.details、全文或请求。客户端断开/超时不证明服务端取消；先 fresh inspect/scene-read，检查保留路径与当前映射，再自主决定，不能盲重试或承诺 exactly-once。旧 `patch`/一般文件写入没有新增此源码前置条件，调用者需明确选择该领域入口。

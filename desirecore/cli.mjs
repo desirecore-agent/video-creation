@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** 视频创作正式入口。复用上游 Studio 与影片内核，CLI 和 MCP 都走同一服务提交编辑。 */
 import { parseArgs } from 'node:util';
-import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, openSync, fstatSync, readSync, closeSync, writeFileSync, constants } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { runtimeConfig, applyRuntimeEnvironment, runtimeIdentity, managedDocumentNavigation } from './config.mjs';
 import { projectClient } from './client.mjs';
 import { acquireApplicationLock } from './application-lock.mjs';
+import { sceneSourceContract, projectSceneSourceErrorReceipt, SCENE_SOURCE_LIMITS } from '../packages/openfilm/studio/server/scene-source.mjs';
 import { timelineOpsSchema } from '../packages/openfilm/studio/server/op-schema.mjs';
 import { normalizeReviewRequest, reviewContract } from '../packages/openfilm/studio/server/reviews.mjs';
 import { normalizeVideoExportOptions } from '../packages/openfilm/studio/server/video-export-options.mjs';
@@ -26,6 +27,9 @@ node desirecore/cli.mjs <命令> [项目目录] [选项]
   motion-patch <项目> <片段ID> --base <revision> --ops <JSON文件>
                                                    按字段、属性轨和事件 ID 局部编辑
   patch <项目> --base <revision> --ops <JSON文件>     按基线提交结构化编辑
+  scene-read <项目> <片段ID>                         读取同一原字节的完整 SHA 与可用源码全文
+  scene-revise <项目> --args <JSON文件>               严格核旧源摘要与影片版本，发布新源码并只切选定 src
+  scene-read --schema | scene-revise --schema         离线发现同源场景源码合同与预算
   patch --schema                                  离线读取完整时间线 Op JSON Schema（不需项目/服务）
   check <项目> [时间或范围]                          抽帧并检查确定性与资源
   review <项目> --source <current-project|export-job> [--job <任务ID>]
@@ -99,6 +103,19 @@ export function reviewOptionsOf(values) {
   });
 }
 
+/** JSON 文件避免把大段源码塞入操作系统 argv；只读上限加一字节后再解析。 */
+export function readSceneReviseArguments(file) {
+  const fd = openSync(resolve(file), constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error('scene-revise --args 必须为普通 JSON 文件。');
+    const bytes = Buffer.alloc(SCENE_SOURCE_LIMITS.inputBytes + 1);
+    let count = 0, n = 0;
+    do { n = readSync(fd, bytes, count, bytes.length - count, null); count += n; } while (n > 0 && count < bytes.length);
+    if (count > SCENE_SOURCE_LIMITS.inputBytes) throw new Error('场景修订 JSON 文件超过 768 KiB。');
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, count)));
+  } finally { closeSync(fd); }
+}
+
 export async function waitForJob(client, id, { timeoutMs = 30 * 60_000, intervalMs = 500 } = {}) {
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 12 * 60 * 60_000) throw new Error('等待时间必须在 1 毫秒到 12 小时之间。');
   const end = Date.now() + timeoutMs;
@@ -149,6 +166,7 @@ export async function start(config, options = {}) {
 export async function command(args, output = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)) {
   const { values, positionals } = argumentsOf(args);
   const [name, folder, target] = positionals;
+  if (['scene-read', 'scene-revise'].includes(name) && values.schema) return output(sceneSourceContract());
   if (name === 'review' && values.schema) return output(reviewContract);
   if (name === 'patch' && values.schema) return output(timelineOpsSchema);
   if (name === 'patch' && values.help) {
@@ -164,9 +182,17 @@ export async function command(args, output = (value) => process.stdout.write(`${
     if (!values.project && !folder) throw new Error('MCP 必须绑定明确的 --project。');
     return (await import('./mcp.mjs')).serveMcp(config, resolve(values.project ?? folder));
   }
-  if (!['inspect', 'patch', 'check', 'review', 'get', 'render', 'jobs', 'retry', 'cancel', 'motion-catalog', 'motion-inspect', 'motion-install', 'motion-take', 'motion-patch'].includes(name)) throw new Error(`未知命令：${name}；运行 --help 查看用法。`);
+  if (!['inspect', 'patch', 'check', 'review', 'scene-read', 'scene-revise', 'get', 'render', 'jobs', 'retry', 'cancel', 'motion-catalog', 'motion-inspect', 'motion-install', 'motion-take', 'motion-patch'].includes(name)) throw new Error(`未知命令：${name}；运行 --help 查看用法。`);
   const client = await projectClient(config, folder);
   if (name === 'inspect') return output(await client.inspect());
+  if (name === 'scene-read') {
+    if (!target) throw new Error('scene-read 需要 inspect 中真实的片段 ID。');
+    return output(await client.sceneRead({ clipId: target }));
+  }
+  if (name === 'scene-revise') {
+    if (!values.args) throw new Error('scene-revise 需要 --args JSON 文件；先运行 scene-revise --schema。');
+    return output(await client.sceneRevise(readSceneReviseArguments(values.args)));
+  }
   if (name === 'get') {
     if (!target) return output(await client.mediaCatalog());
     if (!values.args) throw new Error('get 需要 --args JSON 文件；文件只包含媒体参数，不包含密钥。');
@@ -220,7 +246,10 @@ function isDirectEntry() {
 
 if (isDirectEntry()) {
   command(process.argv.slice(2)).catch((error) => {
-    process.stderr.write(`${error.message}\n`);
+    let sceneEntry = false;
+    try { sceneEntry = ['scene-read', 'scene-revise'].includes(argumentsOf(process.argv.slice(2)).positionals[0]); } catch { /* 原参数解析错误仍按通用错误输出。 */ }
+    const detail = sceneEntry ? projectSceneSourceErrorReceipt(error.details) : null;
+    process.stderr.write(`${detail ? JSON.stringify({ ...detail, ...(error.status ? { status: error.status } : {}) }) : error.message}\n`);
     process.exitCode = error.status === 409 ? 3 : 1;
   });
 }

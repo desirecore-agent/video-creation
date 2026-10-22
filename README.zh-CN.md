@@ -121,3 +121,19 @@ node desirecore/cli.mjs review <项目> --source export-job --job <任务ID> --f
 `findings[]` 给出实际采样的 time/source/selector/bounds/measurement/evidence/limitations；`coverage[]` 说明 observed、unknown 或 partial 的范围。工程预览从同一 FilmPage 的求帧窗口测文字 Range、局部裁切和目标宽度下的数量值；CSS 字号与裁切分列，不按固定字号判审美好坏。复杂变换、遮挡、Canvas/WebGL、复杂背景对比度、未测点位或静默不能被冒称“正常”。DOM 与 PNG 是同采样窗口，不是原子像素快照；旧编码任务只解码原输出，不附当前工程 DOM 的选择器或字号结论。`check` 保留原 `{ok,lines,files}` 并添加结构化事实，但其 live-check 没有 review 的版本快照保证。
 
 导演仍应按用途选必要图片，经 `Read(path, expected_sha256)` 实际看图并自主决定修订。首尾、目标小图、技术测量均不证明连续动画、整段音频或整体审美；没有 finding 或未运行检查也不表示通过。所有观察保持影片、人工 DOM/动效字段及锁不变，不自动拦截导出。
+
+## 明确前置条件的场景源码修订
+
+读取当前场景的原字节 SHA-256 和影片版本，再发布独立新版本，只切换明确选定片段的来源：
+
+```sh
+node desirecore/cli.mjs scene-read --schema
+node desirecore/cli.mjs scene-read <项目> <真实片段ID> --home <应用数据根>
+node desirecore/cli.mjs scene-revise <项目> --args <revision.json> --home <应用数据根>
+```
+
+`scene-revise --schema` 离线返回同一 Draft-07 合同。JSON 文件包含 `{base,sourcePath,expectedSourceSha256,clipIds,targetPath,content}`；MCP `video_scene_read` / `video_scene_revise` 和原鉴权 project HTTP 使用同一领域 Schema。摘要须用返回的原字节摘要，不能拿影片版本或解码后的 motion 摘要代替。即使影片未变，原源码改变也冲突。选定实例必须共享该实际原源；未选引用及所有非 `src` 字段、人工 overrides、motion 输入、锁和时间均保留。不覆盖已有不同内容，已有同字节普通目标可明确返回 reused。原创 HTML/SVG/Canvas/WebGL 仍受支持；静态兼容与数据保留不证明任意新 JavaScript 仍遵守其画面语义。
+
+原文件读取至多 4 MiB。完整序列化 read 回执不超过 480 KiB 才返回全文，否则明确 `textIncluded:false` 与省略原因，同时保留完整 bytes/SHA 和有限元数据。新 content 实际 UTF-8 至多 256 KiB，领域 JSON 输入至多 768 KiB；通过 JSON 文件传入，避免 OS 单参数尺寸限制。原全局预算保持：HTTP 请求体 4 MiB、MCP 请求行 1 MiB、**内部工具数据 JSON** 512 KiB。二次转义、真实 request id、wrapper 和换行会增大完整 MCP 响应；本功能未新增整 RPC 上限。
+
+完整私有文件先以 no-replace 语义发布，再切换影片；两资源不是文件系统事务或 OS CAS。后续切换失败时保留已发布源码，有限错误 `recovery` 包含其 path/SHA/bytes 及可观察的当前影片版本/映射。CLI 通过 stderr 保留这些字段，409 返回 exit3；MCP 保持 `isError:true`。超时不证明取消，先重读和检查再决定，不盲重试或按推测归属删除已发布路径。旧 `patch` 和一般文件写入不会获得这项新源码前置条件。准确边界见 [RUNTIME.md](desirecore/RUNTIME.md)。

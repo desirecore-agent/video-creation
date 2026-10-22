@@ -66,6 +66,15 @@ export async function projectClient(config, folder, options) {
       if (!Array.isArray(ops) || !ops.length || ops.length > 1000) throw new Error('patch 需要 1 到 1000 项明确操作。');
       return studio.call(`${base}/edit`, { base: revision, ops });
     },
+    sceneRead: (ask) => studio.call(`${base}/scene/read`, ask),
+    sceneRevise: async (ask) => {
+      try { return await studio.call(`${base}/scene/revise`, ask); }
+      catch (error) {
+        if (error?.status) throw error;
+        // 断连不证明服务端未发布或未换源；不自动重复不可确定结果的修改。
+        throw new Error('未取得场景修订回执，结果未知；新源码可能已发布或影片已换源。请先 scene-read/inspect 查询当前源与版本，勿直接重复提交。', { cause: error });
+      }
+    },
     review: (ask) => studio.call(`${base}/reviews`, ask, 'POST', { timeoutMs: 10 * 60_000 }),
     reviewReceipt: (id) => studio.call(`${base}/reviews/${encodeURIComponent(id)}`),
     jobs: async () => (await studio.call(`${base}/exports?statusOnly=1`)).exports,

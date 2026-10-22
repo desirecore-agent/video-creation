@@ -57,6 +57,7 @@ import { LOCATION_KEYS, locations, usableFolder } from '../../src/locations.mjs'
 import { PRODUCT, MANAGED_UPDATE_MESSAGE } from '../../src/product.mjs';
 import { ReviewError, createReviews, reviewContract } from './reviews.mjs';
 import { catalogProjectMotion, inspectProjectMotion, installProjectMotionSdk, takeBuiltinMotion } from './motion-project.mjs';
+import { SceneSourceError, readSceneSource, reviseSceneSource, sceneSourceContract, sceneSourceErrorReceipt } from './scene-source.mjs';
 
 /** @typedef {import('./http.mjs').Req} Req @typedef {import('./http.mjs').Res} Res */
 
@@ -212,6 +213,7 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     }
     const parts = path.slice('/api/'.length).split('/').map(decodeURIComponent);
     if (path === '/api/review-schema' && req.method === 'GET') return json(res, 200, reviewContract);
+    if (path === '/api/scene-source-schema' && req.method === 'GET') return json(res, 200, sceneSourceContract());
 
     /* stop: another app is taking over this machine's Studio, or `openfilm open` starts it afresh (`whenIdle`: not
        while an export runs or media is made — it would be lost). `pages`: how many were open, to come back */
@@ -615,6 +617,9 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
       }
       throw new HttpError(404, 'no such history action');
     }
+    // 场景源码读写沿本项目鉴权与唯一领域合同，不开放任意文件读取或覆盖入口。
+    if (rest === 'scene/read' && req.method === 'POST') return json(res, 200, await readSceneSource(project.path, await readJson(req)));
+    if (rest === 'scene/revise' && req.method === 'POST') return json(res, 200, await reviseSceneSource(project.path, await readJson(req)));
     // 动效与自由场景共用原影片、鉴权、revision 和编辑队列。
     if (rest === 'motion/catalog' && req.method === 'GET') return json(res, 200, await catalogProjectMotion(project.path));
     if (rest === 'motion' && req.method === 'GET') return json(res, 200, await inspectProjectMotion(project.path, url.searchParams.get('clip') ?? undefined));
@@ -869,10 +874,10 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     if (!ownHost(req, /** @type {import('node:net').AddressInfo} */ (editor.address()).port)) { json(res, 403, { error: 'not this address' }); return; }
     route(req, res).catch((/** @type {unknown} */ e) => {
       const status = e instanceof HttpError || e instanceof ProjectError || e instanceof FileError || e instanceof HistoryError || e instanceof MediaError || e instanceof ExportError
-        || e instanceof FetchError || e instanceof BrowseError || e instanceof ReviewError ? e.status : 500;
+        || e instanceof FetchError || e instanceof BrowseError || e instanceof ReviewError || e instanceof SceneSourceError ? e.status : 500;
       if (status === 500) console.error(e);
       if (res.headersSent) return res.end();
-      json(res, status, { error: e instanceof Error ? e.message : String(e), ...(e instanceof HttpError ? e.extra : {}), ...(e instanceof ReviewError ? { code: e.code } : {}),
+      json(res, status, { error: e instanceof Error ? e.message : String(e), ...(e instanceof SceneSourceError ? sceneSourceErrorReceipt(e) : {}), ...(e instanceof HttpError ? e.extra : {}), ...(e instanceof ReviewError ? { code: e.code } : {}),
         ...((e instanceof ProjectError || e instanceof FetchError || e instanceof BrowseError) && e.code ? { code: e.code } : {}),
         ...(e instanceof HistoryError && e.code ? { code: e.code, ...('commits' in e ? { commits: e.commits } : {}) } : {}) });
     });

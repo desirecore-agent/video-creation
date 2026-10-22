@@ -5,6 +5,7 @@ import { Ajv } from 'ajv';
 import { projectClient } from './client.mjs';
 import { videoExportOptionsSchema } from '../packages/openfilm/studio/server/video-export-options.mjs';
 import { reviewRequestSchema } from '../packages/openfilm/studio/server/reviews.mjs';
+import { SCENE_READ_SCHEMA, SCENE_REVISE_SCHEMA, projectSceneSourceErrorReceipt } from '../packages/openfilm/studio/server/scene-source.mjs';
 import { timelineOpsSchema } from '../packages/openfilm/studio/server/op-schema.mjs';
 import { motionChangesSchema } from '../packages/openfilm/studio/server/motion-edits.mjs';
 
@@ -21,6 +22,8 @@ export const tools = [
   { name: 'video_motion_patch', description: '以真实 revision 局部修改动效参数、整条属性轨或指定事件；保护锁定输入与同期人工变更，数组数据整体替换。', inputSchema: { type: 'object', required: ['base', 'clip', 'changes'], properties: { base: revision, clip: { type: 'string', minLength: 1, maxLength: 200, description: '影片中的真实页面片段 ID。' }, changes: motionChangesSchema }, additionalProperties: false } },
   { name: 'video_patch', description: '以真实基线修改影片；冲突时重读，保护同期人工编辑。操作沿用影片内核的 Op 契约。', inputSchema: { type: 'object', required: ['base', 'ops'], properties: { base: revision, ops: timelineOpsSchema }, additionalProperties: false } },
   { name: 'video_check', description: '抽取绑定影片的帧并检查确定性、字体、素材与音频；生成本地检查产物。', inputSchema: { type: 'object', properties: { range: { type: 'string', pattern: '^\\d+(\\.\\d+)?(-\\d+(\\.\\d+)?)?$', description: '可选秒数或起止秒数，如 2.5 或 0-3。' } }, additionalProperties: false } },
+  { name: 'video_scene_read', description: '按真实片段读取当前本地场景原字节 SHA/bytes、影片版本与共享引用；全文超预算明确省略，不是审片像素或文件系统原子快照。', inputSchema: SCENE_READ_SCHEMA },
+  { name: 'video_scene_revise', description: '以 strict film base、旧场景 SHA 和明确片段集合发布完整新源码，再只切这些 src；不覆盖不同内容、不解除人工锁。发布后冲突保留新源码并返回有限 recovery；断连时先重读，勿盲重试。', inputSchema: SCENE_REVISE_SCHEMA },
   { name: 'video_review', description: '按准确版本和时间点生成真实审片帧：current-project 为工程预览，export-job 为已完成视频输出的实际解码。返回来源、requestedTime/实际 PTS、图片路径与 SHA-256、同采样窗口 findings/coverage；支持只缩小 targetWidth 和独立 firstLast 组合图，尚不表示已看图；随后用 Read(path, expected_sha256) 读取必要帧。', inputSchema: reviewRequestSchema },
   { name: 'video_render', description: '提交固定本地输入快照的视频导出，立即返回任务回执；以 video_jobs 查询。', inputSchema: { ...videoExportOptionsSchema, properties: { ...videoExportOptionsSchema.properties, output: { type: 'string', minLength: 1, maxLength: 4000, description: '可选输出目录。目录相对本次工具进程工作目录解析；省略时使用应用默认导出目录。' } } } },
   { name: 'video_jobs', description: '读取绑定影片的持久导出记录、输入快照范围与实际输出。', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
@@ -45,6 +48,8 @@ export async function callTool(config, folder, name, args = {}) {
   if (name === 'video_motion_take') return client.motionTake(args.base, args.component);
   if (name === 'video_motion_patch') return client.motionPatch(args.base, args.clip, args.changes);
   if (name === 'video_patch') return client.patch(args.base, args.ops);
+  if (name === 'video_scene_read') return client.sceneRead(args);
+  if (name === 'video_scene_revise') return client.sceneRevise(args);
   if (name === 'video_review') return client.review(args);
   if (name === 'video_jobs') return client.jobs();
   if (name === 'video_render') { const { output, ...ask } = args; return client.render(ask, output); }
@@ -84,7 +89,8 @@ export function serveMcp(config, project, { input = process.stdin, output = proc
             const failedReceipt = ['video_render', 'video_retry'].includes(request.params?.name) && ['failed', 'cancelled', 'interrupted'].includes(receipt?.status);
             result({ content: [{ type: 'text', text }], ...(data?.ok === false || failedReceipt ? { isError: true } : {}) });
           } catch (error) {
-            const detail = { error: error.message, ...(error.status ? { status: error.status } : {}), ...(error.details?.rev ? { rev: error.details.rev } : {}) };
+            const sceneDetail = ['video_scene_read', 'video_scene_revise'].includes(request.params?.name) ? projectSceneSourceErrorReceipt(error.details) : null;
+            const detail = sceneDetail ? { ...sceneDetail, ...(error.status ? { status: error.status } : {}) } : { error: error.message, ...(error.status ? { status: error.status } : {}), ...(error.details?.rev ? { rev: error.details.rev } : {}) };
             result({ isError: true, content: [{ type: 'text', text: JSON.stringify(detail) }] });
           }
         } else reply({ jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Method not found' } });
