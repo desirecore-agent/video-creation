@@ -76,3 +76,31 @@ The complete film format and editor originate upstream. Integration verification
 Renaming an open project synchronizes its name, folder and file watchers while preserving edits and the director draft. Proposals already prepared for the previous folder need to be prepared again. The export tray labels the total delivery size and expands exact bytes for each video, subtitle or other output; API bytes remains the total and outputSizes records each output.
 
 MiMo preset TTS supports explicit voices and delivery instructions through the existing media service and managed get CLI. Keep credentials in Providers or the service environment, outside projects and export packages. Ordinary API and Token Plan endpoints and credential scopes are configured separately under their official terms; requests do not silently switch endpoints or repeat an unknown paid request. MiMo does not supply word timestamps, so subtitles must be aligned to the actual generated audio. See the [runtime contract](desirecore/RUNTIME.md).
+
+## Versioned frame review
+
+`review` / MCP `video_review` distinguishes current project previews from completed video exports. The director chooses the observation points and revision strategy freely.
+
+```sh
+node desirecore/cli.mjs review <project> --source export-job --job <job-id> --times 0,2.5 --last --max-edge 1280 --home <app-home>
+node desirecore/cli.mjs review <project> --source current-project --times 1,3 --last --home <app-home>
+```
+
+Use a real `done` video job ID returned by `jobs`. The receipt binds `reviewId`, `sourceKind`, original `filmRevision`, and each frame's `requestedTime`, `actualTime`, dimensions, independent PNG path, exact bytes and SHA-256. An export is copied to independent temporary storage and decoded, never re-rendered from the current project. Its revision remains the original input revision; its output digest is explicitly observed during this review. Numeric times use the first decoded video frame as this tool’s relative zero: `actualTime` is relative, `actualPTS` preserves the original timestamp, and `timeOriginPTS` records the origin. This does not claim a universal player clock or map range/clip exports back to global film time. `last` uses the actual final frame PTS. Current-project review freezes the existing static local dependency closure and seeks its browser preview. Its last state is duration minus 1ms, with `actualPTS:null`, rather than an encoded frame. Detected source changes fail explicitly.
+
+`observation: generated-not-viewed` means the images have been generated, not that the director has seen them. The director must use the platform's existing `Read(path, expected_sha256)` to read necessary PNGs and connect the visible evidence to the exact revision and times. Inclusion in a model request does not prove understanding. Frame reads check exact bytes and digest; missing or changed images never fall back to another image. Review leaves the film, human overrides and locks untouched; revisions still use the existing versioned editing tools.
+
+Each review is limited to six frames, 4 MiB per PNG and 12 MiB total. Closing the service rejects new reviews, aborts and awaits this instance’s own review resources and queue cleanup, and does not silently continue them in the background. Temporary full-video and project input copies are removed on success and failure. Frames and receipts remain under the app home's `reviews/<reviewId>/`, without automatic expiry or implicit reconstruction. Removing that exact directory makes old references unavailable. New export input manifests record each frozen copy’s SHA-256; historical manifests may contain only paths and byte sizes, without historical scene/resource hashes. Local digests do not freeze remote or unresolved dynamic dependencies, system fonts, or the browser environment. See [RUNTIME.md](desirecore/RUNTIME.md) for request and HTTP contracts.
+
+## Discoverable timeline editing contract
+
+Read the installed version’s timeline operation contract without reading app source, starting the service, or specifying a project/home:
+
+```sh
+node desirecore/cli.mjs patch --help
+node desirecore/cli.mjs patch --schema
+```
+
+The second command returns a versioned Draft-07 operation-array Schema shared with MCP `video_patch.ops`. Existing field, deletion, compatibility and final validation behavior remains in the kernel. Discovery grants no new permission and does not provide scene-source CAS. Inspect the project before editing, save the operation array as a project JSON file, and submit it with the actual revision as `--base`.
+
+To point an existing clip at an independently created scene copy, use `[{"op":"set","clip":"actual-id","field":"src","value":"tide-beacon-r2.html"}]`. This leaves unmentioned motion inputs, human DOM overrides, locks and source `time` intact. Inspect normally separates an HTML `#t` fragment into `time`; do not append a duplicate fragment when changing `src`. Preserve the actual inspected range. Reload and merge on conflict, rather than replacing the revision and blindly replaying. The installed `patch --schema` is the authoritative machine contract.

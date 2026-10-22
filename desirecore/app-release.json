@@ -51,8 +51,8 @@
     },
     {
       "path": "desirecore/RUNTIME.md",
-      "sha256": "47a8d8625443fd8653722ae494801d5be829130a9ffc4bf04986e20cc4ef5689",
-      "size": 16347,
+      "sha256": "3ea8c986d4099aafcd65384f6e99c7a54e4ea0d9bc53ef600ee460e65c849646",
+      "size": 23842,
       "role": "documentation"
     },
     {
@@ -63,14 +63,14 @@
     },
     {
       "path": "desirecore/cli.mjs",
-      "sha256": "104fa64800adcb0581d1a42254b87df33b540fccb17fd9900b85383ecb11d852",
-      "size": 12279,
+      "sha256": "8fffd2c00ea9fb724ad656cf0b717bd1f14d1d5e6777b914cc76690d71de2969",
+      "size": 14165,
       "role": "runtime"
     },
     {
       "path": "desirecore/client.mjs",
-      "sha256": "0fd03251db3f68d0b9aeb62e102eebd4325ffed44c4c6bee4220c612eec26042",
-      "size": 5195,
+      "sha256": "ef5dac490d7ac88fd2565ae3139272f5925312b1a03ab2b7144c4f4df564122f",
+      "size": 5374,
       "role": "runtime"
     },
     {
@@ -195,8 +195,8 @@
     },
     {
       "path": "desirecore/mcp.mjs",
-      "sha256": "636d3739b865250bc939ef1d37d3447a09258fb5153f75a5396dd1ba547c7301",
-      "size": 9073,
+      "sha256": "e531c0101bd290107df2eadfec997f420e90b0f83490a558e6a1d645800b2161",
+      "size": 9554,
       "role": "runtime"
     },
     {
@@ -315,8 +315,8 @@
     },
     {
       "path": "package.json",
-      "sha256": "a1379b6da103f6d4b2646ad251c38a195bfcaea5ed8bfd9417d26c3af786123c",
-      "size": 2779,
+      "sha256": "9a54fe922606ef629074ff26f7bc491702aeb4456bfb02fd5a400e5c5e0b8bc9",
+      "size": 2902,
       "role": "dependency"
     },
     {
@@ -668,6 +668,12 @@
       "role": "runtime"
     },
     {
+      "path": "packages/openfilm/src/review-frames.mjs",
+      "sha256": "a0bd349b6340e9381af70a2f31f2bc6a0e9e46825d67714091315edeaab17407",
+      "size": 10148,
+      "role": "runtime"
+    },
+    {
       "path": "packages/openfilm/src/seekable.mjs",
       "sha256": "fa3b91513d666ebd414fc6c4fc1798f3aad5c09c6be1e760ca3ae9d95be85b79",
       "size": 4992,
@@ -675,14 +681,14 @@
     },
     {
       "path": "packages/openfilm/src/shared.d.mts",
-      "sha256": "5d73cdbff6650b755a8925026743fc7e80036b2a30384cfe64735a0d684321de",
-      "size": 2687,
+      "sha256": "97bb80ef2c478618a19453b0169692e834f5d879dc402ea9aac525e4410c5f72",
+      "size": 2748,
       "role": "runtime"
     },
     {
       "path": "packages/openfilm/src/shared.mjs",
-      "sha256": "cc58ebb58fbd860f27ce683dbbb97f423483edd5550021ceed140be45cb9fbfb",
-      "size": 21235,
+      "sha256": "ea8d85671d1aa9fd54a6cabf125f2f017dc4f8a297b32b02e5e8ee58fded7d8f",
+      "size": 21901,
       "role": "runtime"
     },
     {
@@ -765,8 +771,8 @@
     },
     {
       "path": "packages/openfilm/studio/server/export-snapshot.mjs",
-      "sha256": "6dd4782a5a7cbbf9eaccfe9b640d4d124c89019567db8ca364d4cc50230e19ed",
-      "size": 4804,
+      "sha256": "955452340969eccc51582bb52e822e1ef659d0005b741cd24fba0357ac5c6dcc",
+      "size": 5244,
       "role": "runtime"
     },
     {
@@ -902,9 +908,15 @@
       "role": "runtime"
     },
     {
+      "path": "packages/openfilm/studio/server/op-schema.mjs",
+      "sha256": "bd09e59315d9b54aee4b247684830b724beb13fa8fa4ee673340134cbec40ff1",
+      "size": 9861,
+      "role": "runtime"
+    },
+    {
       "path": "packages/openfilm/studio/server/ops.mjs",
-      "sha256": "d745ef21588e450b90ec45d11ba457f7df32ed8dcf49963551e1c510f8607097",
-      "size": 23543,
+      "sha256": "66c834739bda8787025b956f98dcade7d45c9a388433fc1c8c062e4b270ba8bd",
+      "size": 23541,
       "role": "runtime"
     },
     {
@@ -1058,6 +1070,12 @@
       "role": "runtime"
     },
     {
+      "path": "packages/openfilm/studio/server/reviews.mjs",
+      "sha256": "822a1b372b7ce4463cc09cf743fb929b3aefe0ea3740b70e7840219f7abadbc0",
+      "size": 16247,
+      "role": "runtime"
+    },
+    {
       "path": "packages/openfilm/studio/server/saved.mjs",
       "sha256": "d3d2600aa6525a5f6387d76ec549e0ad1b1feb01951ec6d44f65e1a9d1c1f933",
       "size": 18431,
@@ -1065,8 +1083,8 @@
     },
     {
       "path": "packages/openfilm/studio/server/server.mjs",
-      "sha256": "d463097a7d42ffe96a3918d5cd65a2b302237bba1d49b3e618d1bb683a04b992",
-      "size": 74959,
+      "sha256": "d6066b1892194d9420352d805ad6ca8ed5b583b13841da6d634add7ee30711c2",
+      "size": 76238,
       "role": "runtime"
     },
     {
@@ -1142,9 +1160,9 @@
       "role": "runtime"
     },
     {
-      "path": "packages/openfilm/studio/ui/dist/assets/index-BKu4UdX8.js",
-      "sha256": "fb5d66c872377d851aeee59ac5aaa1088ce47304a7bb3a06b3672267c94a9139",
-      "size": 1834098,
+      "path": "packages/openfilm/studio/ui/dist/assets/index-B1Oz15hQ.js",
+      "sha256": "2736d4ce688f9eb4edfd303fa462aaa01f87b0f02052e974da0f7cbfd04bac9c",
+      "size": 1842005,
       "role": "ui"
     },
     {
@@ -1155,7 +1173,7 @@
     },
     {
       "path": "packages/openfilm/studio/ui/dist/index.html",
-      "sha256": "7979d5563d5541c4ab7305f857a18efaed8ac2c38ceb31c28f65f77f042d3405",
+      "sha256": "b13fb2acfa8e2d334c4488142db3256df18f289f975a3a1b7c390706e0145d14",
       "size": 1176,
       "role": "ui"
     },
@@ -1186,7 +1204,7 @@
   ],
   "source": {
     "kind": "worktree",
-    "sha256": "c010086b65d039411dff3d4f5366c1ede4aaacb3bd481cf081f762cac9319f7d"
+    "sha256": "41487002ec900940e2812c56cd47c11462154a3da455b8509c6c4fcec868e0c5"
   },
   "supportedPlatforms": [
     "darwin",
@@ -1219,5 +1237,5 @@
     "restoreInstructionsPath": "desirecore/RUNTIME.md"
   },
   "instructionsPath": "desirecore/RUNTIME.md",
-  "releaseDigest": "8ac566832a5295281e32721c9c25d085ef1c39ac7bb1a5a64c943a45e079b823"
+  "releaseDigest": "3562c38addb78c523b9349a2aa68cc1100a1f554af24007c645c55161896bb01"
 }

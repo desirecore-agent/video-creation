@@ -24,7 +24,7 @@ node desirecore/cli.mjs setup-runtime --home .dev/video-creation
 node desirecore/cli.mjs start --home .dev/video-creation --project examples/first-film
 ```
 
-应用正式入口是 `node desirecore/cli.mjs`。`start` 启动编辑器；`inspect` 读取项目和版本；`patch` 按版本提交编辑；`check` 检查画面；`render` 创建渲染任务；`jobs`、`retry`、`cancel` 管理渲染；`mcp --project <目录>` 提供视频导演的工具接口。用 `--help` 查看实际参数。媒体生成服务仍需用户配置，收费服务应先获得具体操作授权。
+应用正式入口是 `node desirecore/cli.mjs`。`start` 启动编辑器；`inspect` 读取项目和版本；`patch` 按版本提交编辑；`check` 检查画面；`review` 生成带准确来源、时间点和图片摘要的审片材料；`render` 创建渲染任务；`jobs`、`retry`、`cancel` 管理渲染；`mcp --project <目录>` 提供视频导演的工具接口。用 `--help` 查看实际参数。媒体生成服务仍需用户配置，收费服务应先获得具体操作授权。
 
 ```sh
 pnpm dev        # 构建并启动示例，使用独立 .dev/video-creation 数据
@@ -78,3 +78,31 @@ CLI 提供 `motion-catalog`、`motion-inspect`、`motion-install`、`motion-take
 重命名已打开的工程会同步名称、目录及文件监听，保留当前编辑和导演草稿；已准备的旧目录提案需要重新准备。导出托盘明确标注全部交付的总大小，并可展开视频、字幕等每项文件的准确字节；API回执的bytes仍为总计，outputSizes为逐项大小。
 
 媒体能力新增MiMo预置语音，支持明确选择音色与演绎风格；正式CLI通过get调用现有媒体服务。密钥由应用Providers或运行环境配置，不能放入工程和导出包。普通API与Token Plan端点、凭据使用范围分别按官方规则配置，不自动切换端点或重试未知付费请求。MiMo不返回词级时间戳，字幕须按生成后的真实音轨对齐。调用合同见[运行工具契约](desirecore/RUNTIME.md)。
+
+## 带版本和时间点的真实审片
+
+`review`／MCP `video_review` 明确区分当前工程预览与已完成的视频导出。导演自由选择观察点，不规定叙事、构件或修订路线。读取 `jobs` 返回的真实 `done` 视频任务 ID 后，例如：
+
+```sh
+node desirecore/cli.mjs review <项目> --source export-job --job <任务ID> --times 0,2.5 --last --max-edge 1280 --home <应用数据根>
+node desirecore/cli.mjs review <项目> --source current-project --times 1,3 --last --home <应用数据根>
+```
+
+回执包含 `reviewId`、`sourceKind`、原始 `filmRevision` 与每帧 `requestedTime`、`actualTime`、尺寸、独立 PNG 路径、准确字节和 SHA-256。真实视频从该任务的输出复制独立暂存后只解码，不重新渲染工程；旧输出始终归原输入版本，输出摘要明确是本次审片观察值。编码视频的数字时间以首个真实解码视频帧为零点，选择不早于请求时间的第一帧；`actualTime` 为此相对秒数，`actualPTS` 保留原始 PTS，`timeOriginPTS` 记录零点。此工具时间原点不等同于所有播放器时钟，也不提供 range/clip 输出到原 film 的全局映射；`last` 使用真实末帧 PTS。当前工程沿既有静态本地依赖快照求帧，末态为 duration 前 1ms，`actualPTS:null`，不能称为编码末帧。版本或已知来源在观察期间变化会明确失败。
+
+生成材料的 `observation: generated-not-viewed` 不是导演已看图。导演应再使用平台现有 `Read(path, expected_sha256)` 读取必要 PNG，将实际画面与准确版本、时间点一起作为修订依据；图像进入请求也不等于模型理解。读取帧会核对原字节和摘要，丢失或篡改不会以其他图片代替。审片不改影片、人工 overrides 或锁；修订仍走现有版本化编辑。
+
+每次最多六帧，每帧最多 4 MiB、总计 12 MiB。正式关闭服务会停止接收观察、结束并等待本实例审片资源及等待队列清理，不在后台暗中继续。完整暂存视频与工程输入在成功或失败后清理，只有帧和回执留在本应用数据根的 `reviews/<reviewId>/`；没有自动过期或隐式重建。清理精确审片目录后旧引用明确不可用。新导出输入清单逐项记录冻结副本的 SHA-256；历史清单可能只有路径与字节，没有场景/资源的历史摘要；远端或未解析动态依赖、系统字体与浏览器环境不能由本地摘要证明冻结。详细请求和 HTTP 读取合同见 [RUNTIME.md](desirecore/RUNTIME.md)。
+
+## 公开时间线修改合同
+
+无需读取应用材料源码、打开服务或指定工程/home，即可查询本版本支持的全部时间线操作：
+
+```sh
+node desirecore/cli.mjs patch --help
+node desirecore/cli.mjs patch --schema
+```
+
+后者只读输出版本化 Draft-07 操作数组 Schema，与 MCP `video_patch.ops` 同源。已有字段/删除/兼容宽值及最终校验归原内核；公开说明不授予新权限，也不是场景源码 CAS。正常修改先 `inspect`，再把 JSON 数组保存为工程内操作文件并用真实 `--base` 提交。
+
+仅切换已存在片段到导演创建的场景副本时，使用 `[{"op":"set","clip":"真实ID","field":"src","value":"tide-beacon-r2.html"}]`。该操作保留未指定的 `motion`、人工 DOM overrides、锁和 `time`。`inspect` 通常已把 HTML `#t` 分离为 `time`，只换 `src` 时不要重复拼接 `#t`；范围按实际返回值保留。冲突后重读合并，不换新 revision 盲重放。完整机器合同以当前安装版本 `patch --schema` 为准。

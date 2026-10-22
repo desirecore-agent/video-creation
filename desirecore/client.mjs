@@ -66,6 +66,8 @@ export async function projectClient(config, folder, options) {
       if (!Array.isArray(ops) || !ops.length || ops.length > 1000) throw new Error('patch 需要 1 到 1000 项明确操作。');
       return studio.call(`${base}/edit`, { base: revision, ops });
     },
+    review: (ask) => studio.call(`${base}/reviews`, ask, 'POST', { timeoutMs: 10 * 60_000 }),
+    reviewReceipt: (id) => studio.call(`${base}/reviews/${encodeURIComponent(id)}`),
     jobs: async () => (await studio.call(`${base}/exports?statusOnly=1`)).exports,
     render: async (ask = {}, folder) => (await studio.call(`${base}/exports`, { jobs: [{ kind: 'video', ...normalizeVideoExportOptions({ fps: config.renderFps ?? 30, quality: config.renderQuality ?? 'standard', ...ask }) }], ...(folder ? { folder: resolve(folder) } : {}) }, 'POST', { timeoutMs: config.prepareTimeoutMs ?? 15 * 60_000, unknownReceipt: true })).exports[0],
     retry: (id) => studio.call(`${base}/exports/${encodeURIComponent(id)}/retry`, {}, 'POST', { timeoutMs: config.prepareTimeoutMs ?? 15 * 60_000, unknownReceipt: true }),

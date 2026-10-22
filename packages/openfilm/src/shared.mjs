@@ -63,6 +63,7 @@ export function parseTarget(args) {
 
 /** Serve the film's folder, open it in Chromium, wait for window.film and `ready`. */
 export async function open(target, opts = {}) {
+  opts.signal?.throwIfAborted();
   const loc = locate(target, opts.root);
   /* an edit is read before anything opens: its problems, every one, at once */
   if (loc.isFilm) {
@@ -70,13 +71,24 @@ export async function open(target, opts = {}) {
     if (problems.length) throw new FrameError(problems.length === 1 ? problems[0] : `${FILM_FILE} has ${problems.length} problems:\n  ${problems.join('\n  ')}`);
   }
   const site = await serve(loc.root, { swap: opts.swap });
-  let browser;
-  try { browser = await launch(opts.launch); }
-  catch (e) { await site.close(); throw e; }
-  let film;
-  try { film = await FilmPage.open(browser, site.url, loc.entry, opts); }
-  catch (e) { await browser.close(); await site.close(); throw e; }
-  return { ...loc, site, browser, film, async close() { await browser.close(); await site.close(); } };
+  let browser, closing;
+  // 仅释放这个 open 调用拥有的浏览器和本地 site；无 signal 的旧调用保持同一返回合同。
+  const close = () => closing ??= (async () => { try { await browser?.close(); } finally { await site.close(); } })();
+  const aborted = () => { void close().catch(() => {}); };
+  try {
+    opts.signal?.throwIfAborted();
+    browser = await launch(opts.launch);
+    // launch 本身尚无可关闭句柄；其间取消后，必须清理刚返回的本次 browser，不能漏掉 listener 窗口。
+    opts.signal?.throwIfAborted();
+    opts.signal?.addEventListener('abort', aborted, { once: true });
+    const film = await FilmPage.open(browser, site.url, loc.entry, opts);
+    opts.signal?.throwIfAborted();
+    return { ...loc, site, browser, film, async close() { opts.signal?.removeEventListener('abort', aborted); await close(); } };
+  } catch (error) {
+    opts.signal?.removeEventListener('abort', aborted);
+    await close();
+    throw error;
+  }
 }
 
 /**

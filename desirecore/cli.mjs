@@ -9,6 +9,8 @@ import { spawn } from 'node:child_process';
 import { runtimeConfig, applyRuntimeEnvironment, runtimeIdentity, managedDocumentNavigation } from './config.mjs';
 import { projectClient } from './client.mjs';
 import { acquireApplicationLock } from './application-lock.mjs';
+import { timelineOpsSchema } from '../packages/openfilm/studio/server/op-schema.mjs';
+import { normalizeReviewRequest } from '../packages/openfilm/studio/server/reviews.mjs';
 import { normalizeVideoExportOptions } from '../packages/openfilm/studio/server/video-export-options.mjs';
 
 export const HELP = `视频创作 — 本地影片编辑与视频导演协作
@@ -24,7 +26,11 @@ node desirecore/cli.mjs <命令> [项目目录] [选项]
   motion-patch <项目> <片段ID> --base <revision> --ops <JSON文件>
                                                    按字段、属性轨和事件 ID 局部编辑
   patch <项目> --base <revision> --ops <JSON文件>     按基线提交结构化编辑
+  patch --schema                                  离线读取完整时间线 Op JSON Schema（不需项目/服务）
   check <项目> [时间或范围]                          抽帧并检查确定性与资源
+  review <项目> --source <current-project|export-job> [--job <任务ID>]
+    --times <0,2.5> | --count <1-6> [--last] [--max-edge <128-1920>]
+                                                   生成带版本、实际帧时间和 SHA-256 的审片 PNG
   get <项目> [媒体动词] --args <JSON文件>             复用已连接媒体服务；无动词时只读能力目录
     --via <provider> --model <model>                明确选择服务与模型；不从参数读取密钥
   render <项目> [--output <目录>] [--wait]           提交固定输入的视频导出
@@ -45,8 +51,10 @@ node desirecore/cli.mjs <命令> [项目目录] [选项]
 export function argumentsOf(args) {
   return parseArgs({ args, allowPositionals: true, options: {
     home: { type: 'string' }, project: { type: 'string' }, port: { type: 'string' },
+    schema: { type: 'boolean' },
     'no-browser': { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
     base: { type: 'string' }, ops: { type: 'string' }, output: { type: 'string' },
+    source: { type: 'string' }, job: { type: 'string' }, times: { type: 'string' }, count: { type: 'string' }, last: { type: 'boolean' }, 'max-edge': { type: 'string' },
     args: { type: 'string' }, via: { type: 'string' }, model: { type: 'string' },
     wait: { type: 'boolean' }, fps: { type: 'string' }, timeout: { type: 'string' },
     codec: { type: 'string' }, alpha: { type: 'boolean' }, quality: { type: 'string' },
@@ -74,6 +82,17 @@ export function renderOptionsOf(values) {
   if (values['no-hardware']) options.hardware = false;
   if (values['burn-subtitles']) options.burnSubtitles = true;
   return normalizeVideoExportOptions(options);
+}
+
+/** CLI 只转换语法，HTTP/MCP 与 CLI 共用审片领域校验。 */
+export function reviewOptionsOf(values) {
+  return normalizeReviewRequest({ source: values.source,
+    ...(values.job !== undefined ? { job: values.job } : {}),
+    ...(values.times !== undefined ? { times: values.times.split(',').map((value) => value.trim() ? Number(value) : NaN) } : {}),
+    ...(values.count !== undefined ? { count: Number(values.count) } : {}),
+    ...(values.last !== undefined ? { last: values.last } : {}),
+    ...(values['max-edge'] !== undefined ? { maxEdge: Number(values['max-edge']) } : {}),
+  });
 }
 
 export async function waitForJob(client, id, { timeoutMs = 30 * 60_000, intervalMs = 500 } = {}) {
@@ -126,6 +145,11 @@ export async function start(config, options = {}) {
 export async function command(args, output = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)) {
   const { values, positionals } = argumentsOf(args);
   const [name, folder, target] = positionals;
+  if (name === 'patch' && values.schema) return output(timelineOpsSchema);
+  if (name === 'patch' && values.help) {
+    process.stdout.write('patch <项目> --base <inspect真实revision> --ops <JSON数组文件>\n先运行 patch --schema 离线读取完整 Op/字段与例子，无需项目、服务或 home。只换 src 使用 set/clip/field/value；保留其他人工字段，原 #t 范围按 inspect 确认。\n');
+    return;
+  }
   if (values.help || !name) { process.stdout.write(`${HELP}\n`); return; }
   const config = runtimeConfig(values);
   applyRuntimeEnvironment(config);
@@ -135,7 +159,7 @@ export async function command(args, output = (value) => process.stdout.write(`${
     if (!values.project && !folder) throw new Error('MCP 必须绑定明确的 --project。');
     return (await import('./mcp.mjs')).serveMcp(config, resolve(values.project ?? folder));
   }
-  if (!['inspect', 'patch', 'check', 'get', 'render', 'jobs', 'retry', 'cancel', 'motion-catalog', 'motion-inspect', 'motion-install', 'motion-take', 'motion-patch'].includes(name)) throw new Error(`未知命令：${name}；运行 --help 查看用法。`);
+  if (!['inspect', 'patch', 'check', 'review', 'get', 'render', 'jobs', 'retry', 'cancel', 'motion-catalog', 'motion-inspect', 'motion-install', 'motion-take', 'motion-patch'].includes(name)) throw new Error(`未知命令：${name}；运行 --help 查看用法。`);
   const client = await projectClient(config, folder);
   if (name === 'inspect') return output(await client.inspect());
   if (name === 'get') {
@@ -163,6 +187,7 @@ export async function command(args, output = (value) => process.stdout.write(`${
     if (!values.ops) throw new Error('patch 需要 --ops JSON 文件。');
     return output(await client.patch(values.base, JSON.parse(readFileSync(resolve(values.ops), 'utf8'))));
   }
+  if (name === 'review') return output(await client.review(reviewOptionsOf(values)));
   if (name === 'check') {
     const { look } = await import('../packages/openfilm/src/look.mjs');
     const result = await look([client.project.path, ...(target ? [target] : [])], { count: 6 });

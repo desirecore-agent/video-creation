@@ -55,6 +55,7 @@ import { transitionPageRoutes } from './transition-pages.mjs';
 import { createAsks, getRoute, subtitleTranscriber, subtitleTranslator } from './get.mjs';
 import { LOCATION_KEYS, locations, usableFolder } from '../../src/locations.mjs';
 import { PRODUCT, MANAGED_UPDATE_MESSAGE } from '../../src/product.mjs';
+import { ReviewError, createReviews } from './reviews.mjs';
 import { catalogProjectMotion, inspectProjectMotion, installProjectMotionSdk, takeBuiltinMotion } from './motion-project.mjs';
 
 /** @typedef {import('./http.mjs').Req} Req @typedef {import('./http.mjs').Res} Res */
@@ -124,6 +125,7 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
   /** where each project's exports report their progress: the pages watching it */
   const exportRoots = new Map();
   const exports = createExports({ onChange: (job) => { const root = exportRoots.get(job.project); if (root) watchers.emit(root, { type: 'export', job }); } });
+  const reviews = createReviews({ jobs: (projectId) => exports.list(projectId) });
   /** films fetched from GitHub into the library (fetch-repo.mjs), each opened as a project when it lands */
   const fetches = createFetches({ library: libraryRoot, open: (folder) => openProject(folder) });
 
@@ -215,6 +217,7 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     if (parts[0] === 'quit' && parts.length === 1 && req.method === 'POST') {
       const { whenIdle = false } = /** @type {{ whenIdle?: boolean }} */ ((await readJson(req).catch(() => null)) ?? {});
       if (whenIdle && exports.busy()) return json(res, 409, { error: 'an export is running' });
+      if (whenIdle && reviews.busy()) return json(res, 409, { error: 'a frame review is running' });
       if (whenIdle && making) return json(res, 409, { error: 'media is being made' });
       /* not busy, but kept (423, not 409: the app asks its own Studio whether it is busy this way) */
       if (stays) return json(res, 423, { error: 'the host application keeps this Studio running' });
@@ -467,6 +470,15 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     /* a project whose folder is gone (moved, renamed or deleted outside Studio): taking it off the list is all there is */
     if (!existsSync(project.path) && !(!rest && req.method === 'DELETE')) {
       throw new HttpError(410, 'This project’s folder is not there any more: it was moved, renamed or deleted.', { code: 'missing' });
+    }
+    // 审片沿本项目原鉴权：只接受当前工程或真实完成任务，不开放任意文件路径。
+    if (rest === 'reviews' && req.method === 'POST') return json(res, 200, await reviews.create(project, await readJson(req)));
+    if (parts[2] === 'reviews' && parts.length === 4 && req.method === 'GET') return json(res, 200, await reviews.read(project, parts[3]));
+    if (parts[2] === 'reviews' && parts[4] === 'frames' && parts.length === 6 && req.method === 'GET') {
+      if (!/^\d+$/.test(parts[5])) throw new ReviewError('审片帧编号无效。', 400, 'invalid-request');
+      const { data, frame } = await reviews.frame(project, parts[3], Number(parts[5]), url.searchParams.get('expected_sha256') ?? undefined);
+      res.writeHead(200, { 'content-type': 'image/png', 'content-length': data.length, 'cache-control': 'no-store', etag: `"sha256-${frame.sha256}"` });
+      return res.end(data);
     }
     /* ── subtitles: the film's lines, the person's subtitle style, translation (see captions.mjs) ── */
     if (await captionRoutes(req, res, project.path, rest, { translate: subtitleTranslator, transcribe: await subtitleTranscriber() })) return;
@@ -851,10 +863,10 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     if (!ownHost(req, /** @type {import('node:net').AddressInfo} */ (editor.address()).port)) { json(res, 403, { error: 'not this address' }); return; }
     route(req, res).catch((/** @type {unknown} */ e) => {
       const status = e instanceof HttpError || e instanceof ProjectError || e instanceof FileError || e instanceof HistoryError || e instanceof MediaError || e instanceof ExportError
-        || e instanceof FetchError || e instanceof BrowseError ? e.status : 500;
+        || e instanceof FetchError || e instanceof BrowseError || e instanceof ReviewError ? e.status : 500;
       if (status === 500) console.error(e);
       if (res.headersSent) return res.end();
-      json(res, status, { error: e instanceof Error ? e.message : String(e), ...(e instanceof HttpError ? e.extra : {}),
+      json(res, status, { error: e instanceof Error ? e.message : String(e), ...(e instanceof HttpError ? e.extra : {}), ...(e instanceof ReviewError ? { code: e.code } : {}),
         ...((e instanceof ProjectError || e instanceof FetchError || e instanceof BrowseError) && e.code ? { code: e.code } : {}),
         ...(e instanceof HistoryError && e.code ? { code: e.code, ...('commits' in e ? { commits: e.commits } : {}) } : {}) });
     });
@@ -931,6 +943,7 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
   async function shutDown() {
     /* the file is ours unless a later Studio has written its own (with the same key: it is the machine's) */
     if (advertise && advertised()?.pid === process.pid) rmSync(runFile(), { force: true });
+    await reviews.close();
     exports.stopAll();
     fetches.stopAll();
     await closePageFrames();
