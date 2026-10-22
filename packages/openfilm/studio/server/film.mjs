@@ -197,8 +197,15 @@ export async function writeProjectFilm(root, value, before = '') {
 export async function editProjectFilm(root, base, ops) {
   if (!Array.isArray(ops) || !ops.length || ops.length > 1000 || ops.some((op) => !op || typeof op !== 'object' || typeof op.op !== 'string')) throw new EditError('an edit needs 1 to 1000 operation objects', 'invalid');
   const key = await projectKey(root);
-  return serial(key, async () => {
+  return serial(key, () => editProjectFilmCore(root, key, base, ops));
+}
+
+/** 队列内复用既有编辑核心；源码发布只提供严格 base 和提交前核验，不递归公开队列。
+ * @param {string} root @param {string} key @param {string | null} base @param {Op[]} ops
+ * @param {{ strict?: boolean, verify?: () => Promise<void> }} [options] */
+async function editProjectFilmCore(root, key, base, ops, options = {}) {
     const current = await readProjectFilm(root);
+    if (options.strict && current.rev !== base) throw new EditError('film.html changed before this source revision; reload before editing', 'conflict');
     if (ops.some((op) => op.op === 'motion' || op.op === 'motion-locks') && (typeof base !== 'string' || !/^[a-f0-9]{16}$/.test(base))) throw new EditError('动效编辑必须携带 inspect 返回的真实 revision。', 'invalid');
     /* a film.html that does not read is the agent's to fix: Studio never writes over it */
     if (!current.value && current.text.trim()) throw new EditError(current.problems.join('\n'), 'invalid');
@@ -212,11 +219,35 @@ export async function editProjectFilm(root, base, ops) {
     if (!doc) throw new EditError(problems.join('\n'), 'invalid');
     const sources = await checkedMotionSources(root, value);
     await checkMotionSourcesUnchanged(root, sources);
+    await options.verify?.();
     /* Detect writes from an ordinary editor while this edit was being prepared. This is an optimistic check,
        not an OS-level CAS: all cooperating writers should call this revision-aware API. */
     if ((await readProjectFilm(root)).rev !== current.rev) throw new EditError('film.html changed while preparing this edit; reload before editing', 'conflict');
     const written = await writeFilm(root, /** @type {FilmValue} */ (value), current.text);
     remember(key, written.rev, value);
     return { ...written, value, doc, rebased: base != null && base !== current.rev };
+}
+
+/** 仅供场景领域在同一 canonical 队列内准备/发布后提交点名 src；不暴露 HTTP 控制面。
+ * @param {string} root @param {string} base
+ * @param {(current: Awaited<ReturnType<typeof readProjectFilm>>) => Promise<{ops: Op[], verify: () => Promise<void>, verifyCommitted?: (written: {rev: string}) => Promise<void>}>} prepare */
+export async function withProjectFilmSourceEdit(root, base, prepare) {
+  const key = await projectKey(root);
+  return serial(key, async () => {
+    const current = await readProjectFilm(root);
+    if (!current.value || current.rev !== base) throw new EditError('film.html changed before this source revision; reload before editing', 'conflict');
+    const prepared = await prepare(current);
+    if (!prepared.ops.length || prepared.ops.some((op) => op.op !== 'set' || op.field !== 'src' || typeof op.value !== 'string')) throw new EditError('source revisions only replace explicitly selected src fields', 'invalid');
+    const next = applyOps(structuredClone(current.value), prepared.ops);
+    const restored = structuredClone(next);
+    for (const track of restored.tracks) for (const clip of track.clips) {
+      const before = current.value.tracks.flatMap((row) => row.clips).find((row) => row.id === clip.id);
+      if (before) clip.src = before.src;
+    }
+    if (!isDeepStrictEqual(restored, current.value)) throw new EditError('source revision changed a non-src film field', 'invalid');
+    const written = await editProjectFilmCore(root, key, base, prepared.ops, { strict: true, verify: prepared.verify });
+    // 提交后的来源核验也留在同队列，不能把随后合法合作编辑误报为本次失败。
+    await prepared.verifyCommitted?.(written);
+    return written;
   });
 }

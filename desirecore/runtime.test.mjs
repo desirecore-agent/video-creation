@@ -60,7 +60,10 @@ test('MCP初始化和工具目录无需运行应用且标准输出只有JSON-RPC
   const patch = replies[1].result.tools.find((tool) => tool.name === 'video_patch');
   assert.deepEqual(patch.inputSchema.required, ['base', 'ops']);
   assert.deepEqual(replies[1].result.tools.filter((tool) => tool.name.startsWith('video_motion_')).map((tool) => tool.name), ['video_motion_catalog', 'video_motion_inspect', 'video_motion_install', 'video_motion_take', 'video_motion_patch']);
-  assert.equal(replies[1].result.tools.length, 13);
+  assert.equal(replies[1].result.tools.length, 15);
+  assert.deepEqual(replies[1].result.tools.filter((tool) => tool.name.startsWith('video_scene_')).map((tool) => tool.name), ['video_scene_read', 'video_scene_revise']);
+  assert.deepEqual(replies[1].result.tools.find((tool) => tool.name === 'video_scene_read').inputSchema.required, ['clipId']);
+  assert.deepEqual(replies[1].result.tools.find((tool) => tool.name === 'video_scene_revise').inputSchema.required, ['base', 'sourcePath', 'expectedSourceSha256', 'clipIds', 'targetPath', 'content']);
   assert.deepEqual(replies[1].result.tools.find((tool) => tool.name === 'video_review').inputSchema.required, ['source']);
 });
 
