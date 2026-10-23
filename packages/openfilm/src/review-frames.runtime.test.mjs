@@ -7,9 +7,92 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createReviews } from '../studio/server/reviews.mjs';
 import { filmHtml } from './film-doc.mjs';
+import { observationGridPNG } from './review-derivatives.mjs';
+import { comparisonLayout, sequenceLayout } from './review-sequence.mjs';
+import { reviewContract } from '../studio/server/review-contract.mjs';
+import { Ajv } from 'ajv';
 
 const sha = (data) => createHash('sha256').update(data).digest('hex');
 const enabled = process.env.VIDEO_CREATION_REVIEW_RUNTIME === '1';
+
+test('T3 真实标签组合不覆盖原画且保留未缩放区域的RGBA像素', { skip: !enabled, timeout: 60_000 }, async () => {
+  const source = execFileSync('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'color=0x234567@0.5:s=160x90,format=rgba', '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', 'pipe:1']);
+  const decode = (png, filter) => execFileSync('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-f', 'image2pipe', '-i', 'pipe:0', ...(filter ? ['-vf', filter] : []), '-frames:v', '1', '-pix_fmt', 'rgba', '-f', 'rawvideo', 'pipe:1'], { input: png });
+  const original = decode(source); assert.equal(original[3], 127);
+  const sequence = Array.from({ length: 8 }, (_, i) => ({ width: 160, height: 90, actualTime: i / 3, requestedTime: i / 3 }));
+  for (const layout of [comparisonLayout({ width: 160, height: 90 }, [80, 160], 640), sequenceLayout(sequence, 1280)]) {
+    const combined = await observationGridPNG(layout.cells.map(() => source), layout), c = layout.cells.at(-1);
+    assert.equal(c.width, 160); assert.equal(c.height, 90);
+    assert.deepEqual(decode(combined, `crop=${c.width}:${c.height}:${c.x}:${c.y}`), original);
+  }
+});
+
+test('T3 真实VFR窗口量化全部帧并合成8格实际PTS，重复格不伪造不同帧', { skip: !enabled, timeout: 60_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'video-sequence-vfr-'));
+  try {
+    const out = join(root, 'vfr.mp4');
+    execFileSync('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=10:duration=1', '-vf', 'select=eq(n\\,0)+eq(n\\,1)+eq(n\\,4)+eq(n\\,9)', '-fps_mode', 'vfr', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', out], { timeout: 20_000 });
+    const original = sha(await readFile(out)), project = { id: 'vfr-sequence', path: root };
+    const job = { id: '123456abcdef', kind: 'video', status: 'done', out, outputs: [out], inputSnapshot: { filmRevision: 'a'.repeat(16), manifest: join(root, 'missing.json') } };
+    const reviews = createReviews({ root: join(root, 'reviews'), jobs: () => [job] });
+    const r = await reviews.create(project, { source: 'export-job', job: job.id, times: [0], maxEdge: 640, sequence: { start: 0, end: 1, count: 8 } });
+    assert.equal(r.version, 3); assert.equal(r.temporal.decodedFrames, 4); assert.equal(r.temporal.status, 'observed');
+    assert.equal(r.temporal.source.outputSha256, original); assert.equal(r.temporal.analysisRaster.width, 96);
+    const validateTemporal = new Ajv().compile(reviewContract.temporalSchema);
+    assert.ok(validateTemporal(r.temporal), JSON.stringify(validateTemporal.errors));
+    const peak = r.temporal.windows[0].peakAdjacentPair;
+    assert.ok(peak && peak.meanAbsoluteLumaDelta === r.temporal.windows[0].maxAbsoluteLumaDelta);
+    assert.equal(peak.to.sourceFrameIndex, peak.from.sourceFrameIndex + 1);
+    const [tickNumerator, tickDenominator] = peak.to.ptsTimeBase.split('/').map(Number);
+    assert.equal(peak.from.ptsTimeBase, peak.to.ptsTimeBase);
+    assert.equal(Number(peak.from.actualPTSTicks) * tickNumerator / tickDenominator, peak.from.actualTime);
+    assert.equal(Number(peak.to.actualPTSTicks) * tickNumerator / tickDenominator, peak.to.actualTime);
+    const a = r.artifacts[0]; assert.equal(a.derivedFrom.length, 8);
+    // 时间均匀的格子并不等于覆盖每一VFR帧；0.1秒帧仍由全帧活动分析计入。
+    assert.deepEqual(a.derivedFrom.map((x) => x.sourceFrameIndex), [0, 2, 2, 2, 3, 3, 3, 3]);
+    assert.equal(a.derivedFrom.at(-1).actualPTS, 0.9); assert.ok(a.derivedFrom.every((x) => x.actualPTSTicks && x.ptsTimeBase));
+    assert.equal(sha((await reviews.artifact(project, r.reviewId, 'sequence', a.sha256)).data), a.sha256);
+    assert.deepEqual((await readdir(join(root, 'reviews', r.reviewId))).sort(), ['artifact-sequence.png', 'frame-0.png', 'review.json']);
+    assert.equal(sha(await readFile(out)), original); await reviews.close();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('T3 真实工程序列只是离散seek，保留人工DOM和锁且不借编码全帧结论', { skip: !enabled, timeout: 90_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'video-sequence-project-'));
+  try {
+    const project = { id: 'project-sequence', path: join(root, 'project') }; await mkdir(project.path);
+    const scene = '<body style="margin:0;background:#123;color:white"><div id="title" style="font-size:24px">原文字</div><script>window.film={duration:1,width:320,height:180,frame(t){document.getElementById("title").style.opacity=t}}</script>';
+    const film = filmHtml({ stage: { w: 320, h: 180 }, tracks: [{ locked: true, clips: [{ id: 'scene', src: 'scene.html', at: 0, duration: 1, overrides: [{ at: '#title', text: '人工定稿' }] }] }] });
+    await writeFile(join(project.path, 'film.html'), film); await writeFile(join(project.path, 'scene.html'), scene);
+    const reviews = createReviews({ root: join(root, 'reviews') });
+    const r = await reviews.create(project, { source: 'current-project', times: [0.5], maxEdge: 640, sequence: { start: 0, end: 1, count: 8 } });
+    assert.equal(r.temporal.status, 'partial'); assert.equal(r.temporal.observedSamples, 8); assert.equal(r.temporal.decodedFrames, undefined);
+    assert.ok(r.artifacts[0].derivedFrom.every((s) => s.actualPTS === null && s.timeBasis === 'project-seek'));
+    assert.equal(r.artifacts[0].derivedFrom.at(-1).actualTime, 0.999);
+    assert.equal(sha((await reviews.artifact(project, r.reviewId, 'sequence', r.artifacts[0].sha256)).data), r.artifacts[0].sha256);
+    assert.equal(await readFile(join(project.path, 'film.html'), 'utf8'), film); assert.equal(await readFile(join(project.path, 'scene.html'), 'utf8'), scene);
+    await reviews.close();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('T3 真实多尺寸PNG来自同一捕获，投影按每格实际宽度且SVG仍unknown', { skip: !enabled, timeout: 90_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'video-comparison-'));
+  try {
+    const project = { id: 'size-compare', path: join(root, 'project') }; await mkdir(project.path);
+    const scene = '<body style="margin:0;background:#123;color:white"><div id="title" style="font-size:24px">人工标题</div><svg viewBox="0 0 320 100" width="160" height="50"><text id="svg-title" x="10" y="30" fill="white" style="font-size:24px">SVG</text></svg><script>window.film={duration:1,width:320,height:180,frame(t){}}</script>';
+    const film = filmHtml({ stage: { w: 320, h: 180 }, tracks: [{ locked: true, clips: [{ id: 'scene', src: 'scene.html', at: 0, duration: 1 }] }] });
+    await writeFile(join(project.path, 'film.html'), film); await writeFile(join(project.path, 'scene.html'), scene);
+    const reviews = createReviews({ root: join(root, 'reviews') });
+    const r = await reviews.create(project, { source: 'current-project', times: [0.5], targetWidth: 64, compareWidths: [80, 160, 320], maxEdge: 640 });
+    const a = r.artifacts[0]; assert.deepEqual(a.layout.cells.map((x) => x.width), [80, 160, 320]);
+    const title = a.textProjections.find((x) => x.selector === '#title'), svg = a.textProjections.find((x) => x.selector === '#svg-title');
+    assert.deepEqual(title.sizes.map((x) => x.targetFontSizePx), [6, 12, 24]);
+    assert.ok(svg.sizes.every((x) => x.targetFontSizePx === null)); assert.notEqual(a.derivedFrom[0].captureSha256, r.frames[0].sha256);
+    assert.equal(sha((await reviews.artifact(project, r.reviewId, 'size-comparison', a.sha256)).data), a.sha256);
+    assert.equal(await readFile(join(project.path, 'film.html'), 'utf8'), film); assert.equal(await readFile(join(project.path, 'scene.html'), 'utf8'), scene);
+    await reviews.close();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test('真实 VFR 视频按 PTS 选择指定时间与末帧，原任务版本不跟随当前工程', { skip: !enabled, timeout: 60_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'video-review-encoded-'));

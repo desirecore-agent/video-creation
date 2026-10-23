@@ -28,7 +28,7 @@ test('受管 HTTP/CLI/MCP 发现同一审片合同，帧下载沿原鉴权并核
     const headers = { 'x-studio-key': studio.key, 'content-type': 'application/json' };
     assert.equal((await fetch(`${studio.origin}/api/review-schema`)).status, 401);
     const contract = await (await fetch(`${studio.origin}/api/review-schema`, { headers })).json();
-    assert.equal(contract.contractVersion, 2); assert.ok(contract.requestSchema.properties.firstLast);
+    assert.equal(contract.contractVersion, 3); assert.ok(contract.requestSchema.properties.firstLast);
     let offline; await command(['review', '--schema'], (value) => { offline = value; });
     assert.deepEqual(contract, offline);
     assert.equal((await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"source":"current-project","times":[0]}' })).status, 401);
@@ -48,6 +48,18 @@ test('受管 HTTP/CLI/MCP 发现同一审片合同，帧下载沿原鉴权并核
     const artifact = await fetch(`${base}/${reviewId}/artifacts/first-last?expected_sha256=${sha256}`, { headers });
     assert.equal(artifact.status, 200); assert.equal(artifact.headers.get('etag'), `"sha256-${sha256}"`);
     assert.deepEqual(Buffer.from(await artifact.arrayBuffer()), png);
+    for (const artifactId of ['sequence', 'size-comparison']) {
+      const path = join(dir, `artifact-${artifactId}.png`); await writeFile(path, png);
+      manifest.version = 3; manifest.artifacts = [{ artifactId, path, bytes: png.length, width: 1, height: 1, sha256 }];
+      await writeFile(join(dir, 'review.json'), JSON.stringify(manifest));
+      assert.equal((await fetch(`${base}/${reviewId}/artifacts/${artifactId}`)).status, 401);
+      const actual = await fetch(`${base}/${reviewId}/artifacts/${artifactId}?expected_sha256=${sha256}`, { headers });
+      assert.equal(actual.status, 200); assert.deepEqual(Buffer.from(await actual.arrayBuffer()), png);
+      assert.equal((await fetch(`${base}/${reviewId}/artifacts/${artifactId}?expected_sha256=${'a'.repeat(64)}`, { headers })).status, 409);
+      await writeFile(path, 'changed'); assert.equal((await fetch(`${base}/${reviewId}/artifacts/${artifactId}`, { headers })).status, 409);
+    }
+    manifest.artifacts = [{ artifactId: 'first-last', path: artifactFile, bytes: png.length, width: 1, height: 1, sha256 }];
+    await writeFile(join(dir, 'review.json'), JSON.stringify(manifest));
     assert.equal((await fetch(`${base}/${reviewId}/artifacts/not-a-path`, { headers })).status, 404);
     await writeFile(artifactFile, 'changed artifact');
     assert.equal((await fetch(`${base}/${reviewId}/artifacts/first-last`, { headers })).status, 409);

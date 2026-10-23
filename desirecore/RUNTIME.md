@@ -127,7 +127,7 @@ CLI 示例：`node desirecore/cli.mjs render <项目> --codec vp9 --alpha --fps 
 
 ## 带来源的审片材料
 
-正式入口是 `review <项目> --source current-project|export-job`、MCP `video_review` 和原鉴权下的 `POST /api/projects/:id/reviews`。HTTP/MCP 共用 `studio/server/review-contract.mjs` 的 Draft-07 `reviewRequestSchema`。CLI `review --schema` 在 home/服务发现前只读返回 `contractVersion:2`、requestSchema/findingSchema/coverageSchema/artifactSchema；原鉴权下 `GET /api/review-schema` 返回同一合同：
+正式入口是 `review <项目> --source current-project|export-job`、MCP `video_review` 和原鉴权下的 `POST /api/projects/:id/reviews`。HTTP/MCP 共用 `studio/server/review-contract.mjs` 的 Draft-07 `reviewRequestSchema`。CLI `review --schema` 在 home/服务发现前只读返回 `contractVersion:3`、requestSchema/findingSchema/coverageSchema/artifactSchema；原鉴权下 `GET /api/review-schema` 返回同一合同：
 
 ```json
 {"source":"export-job","job":"真实12位十六进制任务ID","times":[0,2.5],"last":true,"maxEdge":1280}
@@ -208,3 +208,20 @@ revise 参数文件包含完整对象，不能把大段源码作为单个 OS arg
 字节预算分别计算：read 原文件至多 4 MiB；完整 read 回执的实际 `JSON.stringify` UTF-8 至多 480 KiB，否则 `source.textIncluded:false` / `omissionReason:complete-source-exceeds-receipt-budget`，保留完整摘要和有限元数据，绝不截断正文伪装全文。revise `content` 实际 UTF-8 至多 256 KiB，完整领域 JSON 输入至多 768 KiB；CLI 参数文件也只读取实际上限加一字节再决定是否解析。HTTP 仍先执行既有 4 MiB 请求体检查；MCP 仍是整请求行 1 MiB 在 parse 前检查、工具内部 `JSON.stringify(data)` 512 KiB 在调用后检查。后者不是完整 JSON-RPC 响应上限：实际 id、wrapper、第二层转义及末尾换行会增加 wire 字节。本功能不新增完整 RPC cap、不扩大全局预算、不分块或静默省略输入。
 
 成功 `outcome:completed` 包含 `publication:{path,sha256,bytes,disposition}`、新 `filmRevision` 和明确变更映射。新源发布与影片切换不是两文件事务，也不是 OS CAS；同进程队列只协调合作写者，外部写者及最后围栏后的窗口仍存在。若发布后切换失败或未取得完整成功回执，已发布路径保留，错误 `sceneSourceError:true / kind:recovery` 的有限 `recovery` 包含 publication、可观察 filmRevision（无法读取为 null）、selectedMappings、mappingsComplete 与 `action:fresh-inspect-before-retry`。只清理本请求私有 temp，不按推测归属删除公开版本。CLI 对这些领域错误输出有限 JSON 到 stderr，409 返回 exit3；MCP 保持 `isError:true` 并保留同源有限字段，不透传任意 error.details、全文或请求。客户端断开/超时不证明服务端取消；先 fresh inspect/scene-read，检查保留路径与当前映射，再自主决定，不能盲重试或承诺 exactly-once。旧 `patch`/一般文件写入没有新增此源码前置条件，调用者需明确选择该领域入口。
+
+## v3新增时间窗与尺寸观察合同
+
+`review --schema` v3 沿同一CLI／MCP／鉴权HTTP公开两个可选观察方式，不修改作品或人工锁：
+
+```sh
+node desirecore/cli.mjs review <项目> --source export-job --job <done任务ID> --times 0 --sequence-start 0 --sequence-end 8 --sequence-count 16 --max-edge 1280 --home <数据根>
+node desirecore/cli.mjs review <项目> --source current-project --times 5 --compare-widths 180,360,720 --compare-frame 0 --max-edge 1280 --home <数据根>
+```
+
+`sequence:{start,end,count}`选择半开窗口，长度0.001–30秒、8–24格。编码窗口最多1800实际帧：低分辨率灰度活动分析覆盖全部所选实际帧，contact格只是按时间选择的少量帧；VFR可以重复引用，真实PTS、整数时间基及每格摘要保留。`temporal.windows`记录活动值、实际覆盖和`peakAdjacentPair`前后帧的整数PTS/时间基；最大差平局取首对，按后帧归请求起点的秒桶，可能跨桶。不评分、不判冻结/节奏合格。工程来源仅离散seek，明确`partial`，不冒充编码全帧或连续播放。
+
+`compareWidths`的2–3个唯一宽度64–4096从同一target缩小前捕获派生，`compareFrame`为本回执timed index，默认0。竖排对照的每格请求／实际尺寸和限制分列，不放大、不假装响应式重排。DOM字号投影按该格实际宽度，复杂映射保持null；encoded没有当前DOM。捕获摘要与已经缩小的公开frame摘要分开。
+
+firstLast、sequence、compareWidths一次只选一种artifact。仍最多6张timed frame加1张artifact、每PNG4MiB／总12MiB；整图maxEdge可能再缩小每格。整图优先保留格子面积、最多留一个透明空格，不能把空格当黑帧。序列标签在独立带显示格号和3位小数实际秒数，尺寸标签为请求>实际px；源像素不被覆盖。极小格会完整简化或省略标签并在metadata标明，不能据此猜时点；完整时间与整数PTS以layout.cells/derivedFrom为准。实际看图使用artifact自身path和SHA。旧请求／v1、v2回执仍可读。窗口、来源或预算不成立明确失败，不偷偷降采样或改作品。自由场景、原源和人工锁保持；这些观察不是美学、字形对比度、音频或所有OS播放的认证。
+
+`artifacts/sequence` 与 `artifacts/size-comparison` 的GET沿原项目鉴权、固定文件身份、PNG尺寸、SHA和ETag检查；失败不重造。旧首尾路径不变。sequence的私有捕获图与解码中间文件在回执发布后精确清理，只留正式timed帧、单artifact和review.json。关闭沿原AbortSignal终止此实例自有FFmpeg/FilmPage及等待队列。
