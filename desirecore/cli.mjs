@@ -35,6 +35,8 @@ node desirecore/cli.mjs <命令> [项目目录] [选项]
   review <项目> --source <current-project|export-job> [--job <任务ID>]
     --times <0,2.5> | --count <1-6> [--last] [--max-edge <128-1920>]
     [--target-width <64-4096>] [--first-last]
+    [--sequence-start <秒> --sequence-end <秒> --sequence-count <8-24>]
+    [--compare-widths <180,360,720> --compare-frame <本回执index>]
                                                    生成带版本、实际帧时间和 SHA-256 的审片 PNG 与结构化测量
   review --schema                                 离线发现同源请求、finding 和组合图 Schema
   get <项目> [媒体动词] --args <JSON文件>             复用已连接媒体服务；无动词时只读能力目录
@@ -61,6 +63,7 @@ export function argumentsOf(args) {
     'no-browser': { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
     base: { type: 'string' }, ops: { type: 'string' }, output: { type: 'string' },
     source: { type: 'string' }, job: { type: 'string' }, times: { type: 'string' }, count: { type: 'string' }, last: { type: 'boolean' }, 'max-edge': { type: 'string' }, 'target-width': { type: 'string' }, 'first-last': { type: 'boolean' },
+    'sequence-start': { type: 'string' }, 'sequence-end': { type: 'string' }, 'sequence-count': { type: 'string' }, 'compare-widths': { type: 'string' }, 'compare-frame': { type: 'string' },
     args: { type: 'string' }, via: { type: 'string' }, model: { type: 'string' },
     wait: { type: 'boolean' }, fps: { type: 'string' }, timeout: { type: 'string' },
     codec: { type: 'string' }, alpha: { type: 'boolean' }, quality: { type: 'string' },
@@ -100,6 +103,11 @@ export function reviewOptionsOf(values) {
     ...(values['max-edge'] !== undefined ? { maxEdge: Number(values['max-edge']) } : {}),
     ...(values['target-width'] !== undefined ? { targetWidth: Number(values['target-width']) } : {}),
     ...(values['first-last'] !== undefined ? { firstLast: values['first-last'] } : {}),
+    ...(['sequence-start', 'sequence-end', 'sequence-count'].some((key) => values[key] !== undefined) ? { sequence: {
+      start: Number(values['sequence-start']), end: Number(values['sequence-end']), count: Number(values['sequence-count']),
+    } } : {}),
+    ...(values['compare-widths'] !== undefined ? { compareWidths: values['compare-widths'].split(',').map((n) => n.trim() ? Number(n) : NaN) } : {}),
+    ...(values['compare-frame'] !== undefined ? { compareFrame: Number(values['compare-frame']) } : {}),
   });
 }
 

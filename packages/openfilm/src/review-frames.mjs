@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { open, kill } from './shared.mjs';
+import { sequencePoints, projectSequencePoints, lumaActivity, SEQUENCE_MAX_FRAMES } from './review-sequence.mjs';
 
 export const REVIEW_MAX_FRAMES = 6;
 export const REVIEW_MAX_FRAME_BYTES = 4 * 1024 * 1024;
@@ -82,7 +83,23 @@ export async function reviewProjectFrames(root, dir, request, stage, { signal } 
       findings.push(...measured.findings); coverage.push(...measured.coverage);
       frames.push({ ...time, ...dimensions, sourceWidth: stage.w, sourceHeight: stage.h, captureSha256: createHash('sha256').update(png).digest('hex'), captureBytes: png.length, file });
     }
-    return { duration, frames, findings, coverage, lastFramePolicy: 'project-duration-minus-0.001s' };
+    let sequence;
+    if (request.sequence) {
+      const samples = [];
+      for (const [i, point] of projectSequencePoints(duration, request.sequence).entries()) {
+        signal?.throwIfAborted();
+        await session.film.seek(point.actualTime);
+        const png = await session.film.capture({ format: 'png' });
+        if (png.length > REVIEW_MAX_FRAME_BYTES) throw new Error('序列观察图超过4MiB预算。');
+        const file = join(dir, `sequence-${i}.png`);
+        await writeFile(file, png, { flag: 'wx', mode: 0o600 });
+        samples.push({ ...point, actualPTS: null, timeBasis: 'project-seek', ...pngSize(png), file,
+          captureSha256: createHash('sha256').update(png).digest('hex'), captureBytes: png.length });
+      }
+      sequence = { frames: samples, temporal: { status: 'partial', method: 'discrete-project-seeks', requestedWindow: request.sequence,
+        observedSamples: samples.length, limitations: ['工程预览只做离散seek；不能据此宣称区间每帧、连续播放或音频已检查。'] } };
+    }
+    return { duration, frames, findings, coverage, ...(sequence ? { sequence, sequenceFiles: sequence.frames.map((s) => s.file) } : {}), lastFramePolicy: 'project-duration-minus-0.001s' };
   } finally { await session.close(); }
 }
 
@@ -113,7 +130,8 @@ export async function reviewEncodedFrames(file, dir, request, { signal } = {}) {
   if (!last) throw new Error('视频没有可解码帧。');
   // 容器 duration 在 VFR/B 帧媒体中可能短于末帧 PTS，不能据此拒绝真实存在的画面。
   const { points, firstPTS } = selectReviewFrames(timestamps, request);
-  const indices = [...new Set(points.map((p) => p.index))].sort((a, b) => a - b);
+  const sequenceSelection = request.sequence ? sequencePoints(timestamps, request.sequence) : null;
+  const indices = [...new Set([...points, ...(sequenceSelection?.points ?? [])].map((p) => p.index))].sort((a, b) => a - b);
   const filter = `select=${indices.map((n) => `eq(n\\,${n})`).join('+')},scale=w='min(iw,${request.maxEdge})':h='min(ih,${request.maxEdge})':force_original_aspect_ratio=decrease,showinfo`;
   const decoded = await runReviewProcess('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'info', '-copyts', '-i', file, '-map', '0:v:0', '-vf', filter, '-fps_mode', 'passthrough', '-frames:v', String(indices.length), '-start_number', '0', join(dir, 'decoded-%d.png')], { signal });
   // showinfo 的 pts_time 使用低精度显示，长时间戳只能核整数 pts 与对应 time_base。
@@ -130,7 +148,36 @@ export async function reviewEncodedFrames(file, dir, request, { signal } = {}) {
     await writeFile(out, png, { flag: 'wx', mode: 0o600 });
     frames.push({ requestedTime: point.requestedTime, actualTime: relativePTS(point.pts, firstPTS), actualPTS: point.pts, actualPTSTicks: ticks[point.index], ptsTimeBase: timeBase, frameIndex: point.index, timeBasis: 'encoded-pts', ...pngSize(png), sourceWidth: stream.width, sourceHeight: stream.height, captureSha256: createHash('sha256').update(png).digest('hex'), captureBytes: png.length, file: out });
   }
-  return { duration: Number.isFinite(duration) && duration > 0 ? duration : null, durationOrigin: 'container-format-metadata', timeOrigin: 'first-decoded-video-frame', timeOriginPTS: firstPTS, encodedRange: { firstPTS, lastPTS: last.pts }, frames, decodedFiles: indices.map((_, i) => join(dir, `decoded-${i}.png`)), lastFramePolicy: 'last-decoded-video-frame-pts' };
+  let sequence;
+  if (sequenceSelection) {
+    const samples = [];
+    for (const [i, point] of sequenceSelection.points.entries()) {
+      const slot = indices.indexOf(point.index);
+      if (!equalPTSTicks(ticks[point.index], timeBase, observed[slot], decodedBase)) throw new Error('序列观察图实际PTS不符。');
+      const png = await readFile(join(dir, `decoded-${slot}.png`)), file = join(dir, `sequence-${i}.png`);
+      if (png.length > REVIEW_MAX_FRAME_BYTES) throw new Error('序列观察图超过4MiB预算。');
+      await writeFile(file, png, { flag: 'wx', mode: 0o600 });
+      samples.push({ requestedTime: point.requestedTime, actualTime: point.actualTime, actualPTS: point.pts,
+        actualPTSTicks: ticks[point.index], ptsTimeBase: timeBase, frameIndex: point.index, timeBasis: 'encoded-pts', ...pngSize(png), file,
+        captureSha256: createHash('sha256').update(png).digest('hex'), captureBytes: png.length });
+    }
+    const eligible = sequenceSelection.eligible, firstIndex = eligible[0].index, lastIndex = eligible.at(-1).index;
+    const factor = Math.min(1, 96 / Math.max(stream.width, stream.height));
+    const dimensions = { width: Math.max(1, Math.floor(stream.width * factor)), height: Math.max(1, Math.floor(stream.height * factor)) };
+    const gray = await runReviewProcess('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'info', '-threads', '1', '-copyts', '-i', file, '-map', '0:v:0', '-vf',
+      `select=between(n\\,${firstIndex}\\,${lastIndex}),scale=${dimensions.width}:${dimensions.height},format=gray,showinfo`,
+      '-fps_mode', 'passthrough', '-frames:v', String(eligible.length), '-f', 'rawvideo', 'pipe:1'],
+    { binary: true, maxBytes: SEQUENCE_MAX_FRAMES * 96 * 96, signal });
+    const grayBase = /config in time_base:\s*(\d+\/\d+)/.exec(gray.stderr)?.[1];
+    const grayTicks = [...gray.stderr.matchAll(/\bn:\s*\d+\s+pts:\s*(-?\d+)\s+pts_time:/g)].map((m) => m[1]);
+    if (grayTicks.length !== eligible.length || eligible.some((p, i) => !equalPTSTicks(ticks[p.index], timeBase, grayTicks[i], grayBase))) throw new Error('逐帧灰度分析的实际PTS与探测不符。');
+    sequence = { frames: samples, temporal: { status: 'observed', requestedWindow: request.sequence, timeBasis: 'encoded-pts',
+      timeOriginPTS: firstPTS, firstActualPTSTicks: ticks[firstIndex], lastActualPTSTicks: ticks[lastIndex], ptsTimeBase: timeBase,
+      analysisBytes: gray.stdout.length, analysisSha256: createHash('sha256').update(gray.stdout).digest('hex'),
+      ...lumaActivity(gray.stdout, dimensions, eligible, request.sequence) } };
+  }
+  return { duration: Number.isFinite(duration) && duration > 0 ? duration : null, durationOrigin: 'container-format-metadata', timeOrigin: 'first-decoded-video-frame', timeOriginPTS: firstPTS, encodedRange: { firstPTS, lastPTS: last.pts }, frames,
+    ...(sequence ? { sequence, sequenceFiles: sequence.frames.map((s) => s.file) } : {}), decodedFiles: indices.map((_, i) => join(dir, `decoded-${i}.png`)), lastFramePolicy: 'last-decoded-video-frame-pts' };
 }
 
 function requestedPoints(request, duration, lastTime) {

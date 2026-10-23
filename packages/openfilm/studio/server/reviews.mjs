@@ -11,7 +11,8 @@ import { snapshotFilm } from './export-snapshot.mjs';
 import { filmClosure, folderView } from './closure.mjs';
 import { readProjectFilm } from './film.mjs';
 import { reviewRequestSchema } from './review-contract.mjs';
-import { reviewPresentation, downscaleReviewPNG, firstLastLayout, firstLastReviewPNG } from '../../src/review-derivatives.mjs';
+import { reviewPresentation, downscaleReviewPNG, firstLastLayout, firstLastReviewPNG, observationGridPNG } from '../../src/review-derivatives.mjs';
+import { sequenceWindow, sequenceLayout, comparisonLayout } from '../../src/review-sequence.mjs';
 export { reviewRequestSchema, reviewContract } from './review-contract.mjs';
 
 const ajv = new Ajv({ allErrors: true });
@@ -24,6 +25,9 @@ export function normalizeReviewRequest(value) {
   if (!validate(value)) throw new ReviewError(`审片参数无效：${ajv.errorsText(validate.errors)}`, 400, 'invalid-request');
   if ((value.source === 'export-job') !== Boolean(value.job)) throw new ReviewError('只有 export-job 需要且必须提供 job。', 400, 'invalid-request');
   if (value.times && value.count !== undefined) throw new ReviewError('times 与 count 不能同时提供。', 400, 'invalid-request');
+  if ([Boolean(value.firstLast), Boolean(value.sequence), Boolean(value.compareWidths)].filter(Boolean).length > 1) throw new ReviewError('firstLast、sequence和compareWidths一次只能选择一种制品。', 400, 'invalid-request');
+  if (value.compareFrame !== undefined && !value.compareWidths) throw new ReviewError('compareFrame需要compareWidths。', 400, 'invalid-request');
+  if (value.sequence) { try { sequenceWindow(value.sequence); } catch (e) { throw new ReviewError(e.message, 400, 'invalid-request'); } }
   const request = { ...value, maxEdge: value.maxEdge ?? 1280 };
   if (request.firstLast) {
     if (request.times) request.times = request.times.includes(0) ? [...request.times] : [0, ...request.times];
@@ -32,6 +36,7 @@ export function normalizeReviewRequest(value) {
   }
   if (!request.times && !request.count && !request.last) request.count = 4;
   if ((request.times?.length ?? request.count ?? 0) + Number(Boolean(request.last)) > REVIEW_MAX_FRAMES) throw new ReviewError('times/count 与 last 合计最多六帧。', 400, 'over-budget');
+  if (request.compareWidths && (request.compareFrame ?? 0) >= (request.times?.length ?? request.count ?? 0) + Number(Boolean(request.last))) throw new ReviewError('compareFrame不是本次实际timed frame index。', 400, 'invalid-request');
   return request;
 }
 
@@ -109,8 +114,8 @@ async function rewriteReviewPNG(file, data, captured, signal) {
   } finally { await handle.close(); }
 }
 
-/** @param {{ root?: string, jobs?: (projectId: string) => import('./exports.mjs').ExportJob[], drawProject?: typeof reviewProjectFrames, decodeVideo?: typeof reviewEncodedFrames, resizePNG?: typeof downscaleReviewPNG, composePNG?: typeof firstLastReviewPNG, newId?: () => string }} [options] */
-export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, drawProject = reviewProjectFrames, decodeVideo = reviewEncodedFrames, resizePNG = downscaleReviewPNG, composePNG = firstLastReviewPNG, newId = () => randomBytes(12).toString('hex') } = {}) {
+/** @param {{ root?: string, jobs?: (projectId: string) => import('./exports.mjs').ExportJob[], drawProject?: typeof reviewProjectFrames, decodeVideo?: typeof reviewEncodedFrames, resizePNG?: typeof downscaleReviewPNG, composePNG?: typeof firstLastReviewPNG, composeGrid?: typeof observationGridPNG, newId?: () => string }} [options] */
+export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, drawProject = reviewProjectFrames, decodeVideo = reviewEncodedFrames, resizePNG = downscaleReviewPNG, composePNG = firstLastReviewPNG, composeGrid = observationGridPNG, newId = () => randomBytes(12).toString('hex') } = {}) {
   let tail = Promise.resolve(), closed = false, pending = 0;
   const active = new Set();
   const stopped = () => new ReviewError('审片已停止，此服务不再接收新审片。', 409, 'review-stopped');
@@ -122,7 +127,7 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
     let receipt;
     try { receipt = JSON.parse(await readFile(join(directory(id), 'review.json'), 'utf8')); }
     catch (e) { if (e instanceof ReviewError) throw e; throw new ReviewError('找不到可读取的审片回执。', 404, 'missing-review'); }
-    if (receipt.reviewId !== id || receipt.projectId !== project.id || ![1, 2].includes(receipt.version) || !Array.isArray(receipt.frames) || receipt.frames.length < 1 || receipt.frames.length > REVIEW_MAX_FRAMES) throw new ReviewError('审片回执与项目或材料不匹配。', 409, 'receipt-mismatch');
+    if (receipt.reviewId !== id || receipt.projectId !== project.id || ![1, 2, 3].includes(receipt.version) || !Array.isArray(receipt.frames) || receipt.frames.length < 1 || receipt.frames.length > REVIEW_MAX_FRAMES) throw new ReviewError('审片回执与项目或材料不匹配。', 409, 'receipt-mismatch');
     return receipt;
   };
   const exactPNG = async (id, declared, file, expectedSha256, missingCode) => {
@@ -145,8 +150,8 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
     async artifact(project, id, artifactId, expectedSha256) {
       const receipt = await read(project, id);
       const declared = receipt.artifacts?.find((item) => item.artifactId === artifactId);
-      if (artifactId !== 'first-last' || !declared) throw new ReviewError('没有此审片制品。', 404, 'missing-artifact');
-      return exactPNG(id, declared, join(directory(id), 'artifact-first-last.png'), expectedSha256, 'missing-artifact');
+      if (!['first-last', 'sequence', 'size-comparison'].includes(artifactId) || !declared) throw new ReviewError('没有此审片制品。', 404, 'missing-artifact');
+      return exactPNG(id, declared, join(directory(id), `artifact-${artifactId}.png`), expectedSha256, 'missing-artifact');
     },
     create(project, ask) {
       if (closed) return Promise.reject(stopped());
@@ -208,17 +213,18 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
         result = await drawProject(frozen, dir, request, film.doc.stage, { signal });
         if (!sameDigest(snapshot, await localInputs(project.path, signal)) || (await readProjectFilm(project.path)).rev !== filmRevision) throw new ReviewError('工程在审片期间变化，请按当前版本重新审片。', 409, 'stale');
       }
-      cleanup.push(...(result.decodedFiles ?? []));
+      cleanup.push(...(result.decodedFiles ?? []), ...(result.sequenceFiles ?? []));
       const expectedCount = (request.times?.length ?? request.count ?? 0) + Number(Boolean(request.last));
       if (result.frames.length !== expectedCount) throw new ReviewError('实际审片帧数与请求不一致。');
       let total = 0;
-      const frames = [], buffers = [];
+      const frames = [], buffers = [], captures = [];
       for (const [index, item] of result.frames.entries()) {
         if (item.file !== join(dir, `frame-${index}.png`)) throw new ReviewError('审片图片路径与本次身份不符。');
         const captured = await readReviewPNG(item.file, signal);
         if (captured.sha256 !== item.captureSha256 || captured.bytes !== item.captureBytes) throw new ReviewError('捕获后的 PNG 字节变化，不能派生成功材料。', 409, 'stale');
         if (captured.width !== item.width || captured.height !== item.height || Math.max(item.width, item.height) > request.maxEdge) throw new ReviewError('审片 PNG 实际尺寸与回执不符。');
         const presentation = reviewPresentation(captured, request, { width: item.sourceWidth ?? item.width, height: item.sourceHeight ?? item.height });
+        captures.push(captured);
         const png = await resizePNG(captured.data, presentation, { signal });
         const digest = pngDigest(png); total += digest.bytes;
         if (png !== captured.data) await rewriteReviewPNG(item.file, png, captured, signal);
@@ -243,6 +249,46 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
             timeBasis: frame.timeBasis, ...(frame.actualPTSTicks !== undefined ? { actualPTSTicks: frame.actualPTSTicks, ptsTimeBase: frame.ptsTimeBase } : {}) })),
           layout: { ...layout, maxEdge: request.maxEdge }, limitations: ['只组合本次两个真实帧，不代表连续过程、音频或整体审美；透明补边不属于原画面。'] });
       }
+      if (request.sequence || request.compareWidths) {
+        let layout, images, derivedFrom, textProjections = [];
+        const artifactId = request.sequence ? 'sequence' : 'size-comparison';
+        if (request.sequence) {
+          const samples = result.sequence?.frames;
+          if (samples?.length !== request.sequence.count) throw new ReviewError('序列观察图数与请求不一致。');
+          images = [];
+          for (const [i, item] of samples.entries()) {
+            if (item.file !== join(dir, `sequence-${i}.png`)) throw new ReviewError('序列图片路径与本次身份不符。');
+            const capture = await readReviewPNG(item.file, signal);
+            if (capture.sha256 !== item.captureSha256 || capture.bytes !== item.captureBytes || capture.width !== item.width || capture.height !== item.height || Math.max(capture.width, capture.height) > request.maxEdge) throw new ReviewError('序列捕获字节或尺寸变化。', 409, 'stale');
+            images.push(capture.data);
+          }
+          layout = sequenceLayout(samples, request.maxEdge);
+          derivedFrom = samples.map((s, i) => ({ sequenceIndex: i, ...(s.frameIndex !== undefined ? { sourceFrameIndex: s.frameIndex } : {}),
+            requestedTime: s.requestedTime, actualTime: s.actualTime, actualPTS: s.actualPTS, timeBasis: s.timeBasis,
+            ...(s.actualPTSTicks !== undefined ? { actualPTSTicks: s.actualPTSTicks, ptsTimeBase: s.ptsTimeBase } : {}), sha256: s.captureSha256, bytes: s.captureBytes }));
+        } else {
+          const index = request.compareFrame ?? 0, capture = captures[index], frame = frames[index];
+          layout = comparisonLayout(capture, request.compareWidths, request.maxEdge);
+          images = request.compareWidths.map(() => capture.data);
+          derivedFrom = [{ frameIndex: index, actualTime: frame.actualTime, actualPTS: frame.actualPTS, timeBasis: frame.timeBasis,
+            captureSha256: capture.sha256, captureBytes: capture.bytes, captureWidth: capture.width, captureHeight: capture.height,
+            publishedFrameSha256: frame.sha256, publishedFrameBytes: frame.bytes, method: 'same-captured-buffer-before-target-resize' }];
+          textProjections = (result.findings ?? []).filter((f) => f.code === 'dom-text-size' && f.time?.actualTime === frame.actualTime).map((f) => ({ selector: f.selector, text: f.measurement.text,
+            source: f.source, actualTime: frame.actualTime, method: 'same-seek-axis-aligned-font-projection',
+            sizes: layout.cells.map((cell) => ({ requestedWidth: cell.requestedWidth, actualWidth: cell.width,
+              targetFontSizePx: f.measurement.targetFontSizePx == null || !['fontSizeCssPx', 'localScaleY', 'outerScaleY', 'stageWidthCssPx'].every((key) => Number.isFinite(f.measurement[key]) && f.measurement[key] > 0)
+                ? null : f.measurement.fontSizeCssPx * f.measurement.localScaleY * f.measurement.outerScaleY * cell.width / f.measurement.stageWidthCssPx })) }));
+        }
+        const png = await composeGrid(images, layout, { signal });
+        const digest = pngDigest(png); total += digest.bytes;
+        if (total > REVIEW_MAX_TOTAL_BYTES) throw new ReviewError('PNG与观察组合图总计超过12MiB预算。', 422, 'over-budget');
+        const file = join(dir, `artifact-${artifactId}.png`);
+        await writeFile(file, png, { flag: 'wx', mode: 0o600 });
+        artifacts.push({ artifactId, kind: request.sequence ? 'sequence-contact-sheet' : 'size-comparison', timeBasis: 'composite-not-timed-frame',
+          width: layout.width, height: layout.height, path: file, ...digest, mimeType: 'image/png', url: `/api/projects/${encodeURIComponent(project.id)}/reviews/${reviewId}/artifacts/${artifactId}`,
+          derivedFrom, layout: { ...layout, maxEdge: request.maxEdge }, ...(request.compareWidths ? { textProjections } : {}),
+          limitations: ['格子时间/尺寸以layout.cells为准，图内没有烧录时间或宽度标签；透明空白不是源画面。', '离散总览或尺寸投影不证明连续播放、声音、逐字可读性或整体审美；encoded不附当前DOM。'] });
+      }
       // 派生读取固定 buffer；发布前再核落盘结果，期间替换不能留下成功回执。
       for (const item of [...frames, ...artifacts]) {
         const final = await readReviewPNG(item.path, signal);
@@ -253,9 +299,10 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
       const limitations = ['编码帧不能提供 DOM 字号、裁切选择器或复杂背景对比度事实；没有 finding 不表示通过。'];
       const findings = request.source === 'export-job' ? [{ code: 'dom-analysis', severity: 'info', status: 'unknown', time: null, source: { kind: 'export-job' }, selector: null, bounds: null, measurement: {}, evidence: [], limitations }] : result.findings ?? [];
       const coverage = request.source === 'export-job' ? [{ code: 'dom-analysis', status: 'unknown', time: null, source: { kind: 'export-job' }, details: { measured: false, reason: 'encoded-output-has-no-current-dom' }, limitations }] : result.coverage ?? [];
-      const receipt = { version: 2, reviewId, sourceKind: request.source, projectId: project.id, filmRevision, createdAt: new Date().toISOString(), request, source,
+      const temporal = result.sequence ? { ...result.sequence.temporal, source: { kind: request.source, reviewId, filmRevision, ...(source.output ? { outputSha256: source.output.sha256 } : { inputSha256: source.inputs.sha256 }) } } : null;
+      const receipt = { version: request.sequence || request.compareWidths ? 3 : 2, reviewId, sourceKind: request.source, projectId: project.id, filmRevision, createdAt: new Date().toISOString(), request, source,
         duration: result.duration, durationOrigin: result.durationOrigin ?? 'project-duration', timeOrigin: result.timeOrigin ?? 'project-timeline', timeOriginPTS: result.timeOriginPTS ?? null, ...(result.encodedRange ? { encodedRange: result.encodedRange } : {}), lastFramePolicy: result.lastFramePolicy,
-        frames, artifacts, findings: findings.map(bind), coverage: coverage.map(bind), totalFrameBytes: frames.reduce((n, frame) => n + frame.bytes, 0), totalImageBytes: total,
+        frames, artifacts, ...(temporal ? { temporal } : {}), findings: findings.map(bind), coverage: coverage.map(bind), totalFrameBytes: frames.reduce((n, frame) => n + frame.bytes, 0), totalImageBytes: total,
         observation: 'generated-not-viewed', observationNote: '回执只证明生成和测量。导演应通过 Read(path, expected_sha256) 实际读取必要图片；图片进入请求不证明模型理解。DOM 与 PNG 是同一求帧采样窗口，不是像素与 DOM 原子快照。' };
       signal.throwIfAborted();
       await writeFile(join(dir, 'review.json'), `${JSON.stringify(receipt, null, 2)}\n`, { flag: 'wx', mode: 0o600 });

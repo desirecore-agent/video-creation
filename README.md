@@ -135,3 +135,18 @@ node desirecore/cli.mjs scene-revise <project> --args <revision.json> --home <ap
 Raw reads are bounded to 4 MiB. Full text is returned only when the complete serialized read receipt fits 480 KiB; otherwise `textIncluded:false` and an explicit omission reason accompany complete source bytes/SHA and finite metadata. New content is at most 256 KiB in UTF-8 and the domain JSON input at most 768 KiB. Pass it as a JSON file, avoiding OS argument-size limits. Existing HTTP request and MCP budgets remain: 4 MiB HTTP body, 1 MiB MCP request line, and 512 KiB **inner tool-data JSON**. Double escaping, the actual request id, wrappers and newline can make the complete MCP response larger; there is no new whole-RPC cap.
 
 A completed private file is published with no-replace semantics before the film switch. These two resources are not a filesystem transaction or OS CAS. If the subsequent switch fails, the published source remains and finite error `recovery` includes its path/SHA/bytes and observable current film revision/mappings. CLI retains these fields on stderr with exit3 for409; MCP retains them with `isError:true`. A timeout does not prove cancellation. Re-read and inspect before another decision; do not blindly retry or delete a published path as rollback. Legacy `patch` and general file writes do not acquire this new source precondition. See [RUNTIME.md](desirecore/RUNTIME.md) for the authoritative boundary details.
+
+## Time-window overview and same-capture size comparison
+
+`review --schema` v3 exposes optional observations through the same CLI, MCP and authenticated HTTP, without editing the film or human locks:
+
+```sh
+node desirecore/cli.mjs review <project> --source export-job --job <done-job-id> --times 0 --sequence-start 0 --sequence-end 8 --sequence-count 16 --max-edge 1280 --home <data-root>
+node desirecore/cli.mjs review <project> --source current-project --times 5 --compare-widths 180,360,720 --compare-frame 0 --max-edge 1280 --home <data-root>
+```
+
+`sequence:{start,end,count}` selects a half-open 0.001–30-second window and 8–24 contact cells. An encoded window is limited to 1,800 actual frames. Low-resolution luma activity measures every selected decoded frame; contact cells are separate sparse time samples and may honestly reference the same VFR frame. Actual PTS, integer time bases and capture digests are retained. `temporal.windows` reports activity and actual coverage without a quality score or freeze/pace verdict. Current-project sequences are discrete seeks, explicitly `partial`, not encoded full-frame or continuous-playback proof.
+
+`compareWidths` requests 2–3 distinct widths (64–4096) from the same capture before target resizing; `compareFrame` is this receipt's timed-frame index, default zero. Vertical cells report requested and actual sizes and caps, without upscaling or pretending to reflow the layout. DOM font projections use each actual cell width; complex mappings remain null and encoded outputs borrow no current DOM. The raw capture digest is distinct from a published downsized frame's digest.
+
+Choose only one artifact mode: firstLast, sequence or compareWidths. The existing six timed frames plus one artifact, 4 MiB per PNG and 12 MiB total remain. The whole-sheet maxEdge can reduce cell sizes. Labels are not burned into pixels: use layout.cells for exact times/widths and Read the artifact using its own path/SHA. Old requests and v1/v2 receipts remain readable. Invalid windows, sources and budgets fail explicitly instead of silently dropping frames or changing the film. Original scenes, sources and human locks remain free; these facts do not certify aesthetics, glyph contrast, audio or all-platform playback.

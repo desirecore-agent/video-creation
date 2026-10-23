@@ -39,3 +39,23 @@ export async function firstLastReviewPNG(first, last, layout, { signal } = {}) {
   if (actual.width !== layout.width || actual.height !== layout.height) throw new Error('首尾组合图的实际布局不符。');
   return stdout;
 }
+
+/** 格子顺序与回执完全一致；固定buffer输入，不在子进程中重新读工程或旧路径。 */
+export async function observationGridPNG(buffers, layout, { signal } = {}) {
+  let args, inputs;
+  if (layout.columns) {
+    const cell = layout.cells[0];
+    args = ['-f', 'image2pipe', '-i', 'pipe:3', '-vf', `scale=${cell.width}:${cell.height}:flags=lanczos,format=rgba,tile=${layout.columns}x${layout.rows}:nb_frames=${buffers.length}:color=black@0`];
+    inputs = [Buffer.concat(buffers)];
+  } else {
+    args = buffers.flatMap((_, i) => ['-f', 'image2pipe', '-i', `pipe:${i + 3}`]);
+    const parts = layout.cells.map((cell, i) => `[${i}:v]scale=${cell.width}:${cell.height}:flags=lanczos,format=rgba[c${i}]`);
+    parts.push(`${layout.cells.map((_, i) => `[c${i}]`).join('')}xstack=inputs=${buffers.length}:layout=${layout.cells.map((c) => `${c.x}_${c.y}`).join('|')}:fill=black@0[out]`);
+    args.push('-filter_complex', parts.join(';'), '-map', '[out]'); inputs = buffers;
+  }
+  const { stdout } = await runReviewProcess('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', ...args,
+    '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', 'pipe:1'], { binary: true, inputs, maxBytes: REVIEW_MAX_FRAME_BYTES, signal });
+  const size = pngSize(stdout);
+  if (size.width !== layout.width || size.height !== layout.height) throw new Error('观察组合图实际尺寸与布局不符。');
+  return stdout;
+}

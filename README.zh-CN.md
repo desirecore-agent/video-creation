@@ -137,3 +137,18 @@ node desirecore/cli.mjs scene-revise <项目> --args <revision.json> --home <应
 原文件读取至多 4 MiB。完整序列化 read 回执不超过 480 KiB 才返回全文，否则明确 `textIncluded:false` 与省略原因，同时保留完整 bytes/SHA 和有限元数据。新 content 实际 UTF-8 至多 256 KiB，领域 JSON 输入至多 768 KiB；通过 JSON 文件传入，避免 OS 单参数尺寸限制。原全局预算保持：HTTP 请求体 4 MiB、MCP 请求行 1 MiB、**内部工具数据 JSON** 512 KiB。二次转义、真实 request id、wrapper 和换行会增大完整 MCP 响应；本功能未新增整 RPC 上限。
 
 完整私有文件先以 no-replace 语义发布，再切换影片；两资源不是文件系统事务或 OS CAS。后续切换失败时保留已发布源码，有限错误 `recovery` 包含其 path/SHA/bytes 及可观察的当前影片版本/映射。CLI 通过 stderr 保留这些字段，409 返回 exit3；MCP 保持 `isError:true`。超时不证明取消，先重读和检查再决定，不盲重试或按推测归属删除已发布路径。旧 `patch` 和一般文件写入不会获得这项新源码前置条件。准确边界见 [RUNTIME.md](desirecore/RUNTIME.md)。
+
+## 时间窗总览与同源多尺寸对照
+
+`review --schema` v3 沿同一CLI／MCP／鉴权HTTP公开两个可选观察方式，不修改作品或人工锁：
+
+```sh
+node desirecore/cli.mjs review <项目> --source export-job --job <done任务ID> --times 0 --sequence-start 0 --sequence-end 8 --sequence-count 16 --max-edge 1280 --home <数据根>
+node desirecore/cli.mjs review <项目> --source current-project --times 5 --compare-widths 180,360,720 --compare-frame 0 --max-edge 1280 --home <数据根>
+```
+
+`sequence:{start,end,count}`选择半开窗口，长度0.001–30秒、8–24格。编码窗口最多1800实际帧：低分辨率灰度活动分析覆盖全部所选实际帧，contact格只是按时间选择的少量帧；VFR可以重复引用，真实PTS、整数时间基及每格摘要保留。`temporal.windows`记录活动值和实际覆盖，不评分、不判冻结/节奏合格。工程来源仅离散seek，明确`partial`，不冒充编码全帧或连续播放。
+
+`compareWidths`的2–3个唯一宽度64–4096从同一target缩小前捕获派生，`compareFrame`为本回执timed index，默认0。竖排对照的每格请求／实际尺寸和限制分列，不放大、不假装响应式重排。DOM字号投影按该格实际宽度，复杂映射保持null；encoded没有当前DOM。捕获摘要与已经缩小的公开frame摘要分开。
+
+firstLast、sequence、compareWidths一次只选一种artifact。仍最多6张timed frame加1张artifact、每PNG4MiB／总12MiB；整图maxEdge可能再缩小每格。图内不烧录标签，以layout.cells定位时点／宽度，实际看图使用artifact自身path和SHA。旧请求／v1、v2回执仍可读。窗口、来源或预算不成立明确失败，不偷偷降采样或改作品。自由场景、原源和人工锁保持；这些观察不是美学、字形对比度、音频或所有OS播放的认证。
