@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { deflateSync } from 'node:zlib';
+import { deflateSync, inflateSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { sequenceWindow, sequencePoints, projectSequencePoints, lumaActivity, sequenceLayout, comparisonLayout } from './review-sequence.mjs';
 import { createReviews, normalizeReviewRequest } from '../studio/server/reviews.mjs';
@@ -11,6 +11,7 @@ import { reviewContract } from '../studio/server/review-contract.mjs';
 import { reviewOptionsOf } from '../../../desirecore/cli.mjs';
 import { filmHtml } from './film-doc.mjs';
 import { Ajv } from 'ajv';
+import { reviewLabelsPNG, cellLabel } from './review-labels.mjs';
 
 const hash = (b) => createHash('sha256').update(b).digest('hex');
 // 真实最小PNG，避免以只改尺寸头的坏编码充当组合输出。
@@ -49,11 +50,18 @@ test('T3 VFR和非零PTS按相对半开时间窗选择，重复观察点诚实�
 });
 
 test('T3 全选灰度事实保留真实间隔，不将相同像素和缺失相邻对打成失败或美学分', () => {
-  const ask = { start: 0, end: 3, count: 8 }, pts = [{ time: 0 }, { time: 0.4 }, { time: 1.7 }];
+  const ask = { start: 0, end: 3, count: 8 }, pts = [0, 0.4, 1.7].map((time, index) => ({ time, index: index + 5, actualPTSTicks: String(time * 10), ptsTimeBase: '1/10' }));
   const value = lumaActivity(Buffer.from([0, 0, 0, 0, 255, 255]), { width: 2, height: 1 }, pts, ask);
   assert.equal(value.decodedFrames, 3); assert.equal(value.identicalAdjacentPairs, 1);
   assert.equal(value.windows[0].meanAbsoluteLumaDelta, 0); assert.equal(value.windows[1].maxAbsoluteLumaDelta, 1);
   assert.equal(value.windows[1].maximumFrameGapSeconds, 1.2999999999999998);
+  assert.deepEqual(value.windows[1].peakAdjacentPair, { meanAbsoluteLumaDelta: 1,
+    from: { sourceFrameIndex: 6, actualTime: 0.4, actualPTSTicks: '4', ptsTimeBase: '1/10' },
+    to: { sourceFrameIndex: 7, actualTime: 1.7, actualPTSTicks: '17', ptsTimeBase: '1/10' } });
+  assert.equal(value.windows[0].peakAdjacentPair.to.actualTime, 0.4);
+  const tied = lumaActivity(Buffer.from([0, 0, 0]), { width: 1, height: 1 }, [0, 0.1, 0.2].map((time, index) => ({ time, index })), ask);
+  assert.equal(tied.windows[0].peakAdjacentPair.to.sourceFrameIndex, 1);
+  assert.equal(lumaActivity(Buffer.from([0]), { width: 1, height: 1 }, [pts[0]], ask).windows[0].peakAdjacentPair, null);
   assert.equal('qualityScore' in value, false); assert.equal('failed' in value, false);
   assert.throws(() => lumaActivity(Buffer.alloc(1), { width: 2, height: 1 }, pts, ask), /帧数/);
 });
@@ -67,6 +75,32 @@ test('T3 同源尺寸布局不放大并明确整图cap，序列每格有时点�
   const s = sequenceLayout(Array.from({ length: 24 }, (_, i) => ({ width: 320, height: 180, actualTime: i / 3, requestedTime: i / 3, actualPTS: i / 3, timeBasis: 'encoded-pts' })), 640);
   assert.ok(s.width <= 640 && s.height <= 640); assert.equal(s.cells.length, 24); assert.equal(s.cells[23].actualTime, 23 / 3);
   assert.throws(() => sequenceLayout([{ width: 320, height: 180 }, { width: 160, height: 160 }], 640), /尺寸/);
+});
+
+test('T3 总览利用可用空间并最多留一空格，标签不侵入内容或截出半个时间', () => {
+  const samples = (n) => Array.from({ length: n }, (_, i) => ({ width: 1280, height: 720, actualTime: i / 3, requestedTime: i / 3, actualPTS: i / 3, timeBasis: 'encoded-pts' }));
+  for (const n of [16, 24]) {
+    const layout = sequenceLayout(samples(n), 1280);
+    assert.equal(layout.columns, 4); assert.ok(layout.cells.every((c) => c.width >= 320));
+    assert.ok(layout.columns * layout.rows - n <= 1); assert.ok(layout.width <= 1280 && layout.height <= 1280);
+    assert.ok(layout.cells.every((c) => c.label.y + c.label.height === c.y && c.label.fullLabelRendered));
+  }
+  const small = sequenceLayout(samples(24), 128); assert.ok(small.width <= 128 && small.height <= 128);
+  assert.ok(small.cells.some((c) => !c.label.fullLabelRendered));
+  const label = cellLabel('0 0.333s', '0', 0, 0, 12, 9);
+  assert.equal(label.renderedText, '0'); assert.equal(label.fullLabelRendered, false);
+});
+
+test('T3 标签PNG只在专用带有像素，原画区域的覆盖层保持全透明', () => {
+  const layout = comparisonLayout({ width: 160, height: 90 }, [80, 160], 640), image = reviewLabelsPNG(layout);
+  const idat = []; let offset = 8;
+  while (offset < image.length) { const n = image.readUInt32BE(offset), tag = image.toString('ascii', offset + 4, offset + 8); if (tag === 'IDAT') idat.push(image.subarray(offset + 8, offset + 8 + n)); offset += n + 12; }
+  const raw = inflateSync(Buffer.concat(idat)), stride = layout.width * 4 + 1;
+  for (const c of layout.cells) {
+    assert.ok(c.label.fullLabelRendered);
+    for (let y = c.y; y < c.y + c.height; y++) for (let x = c.x; x < c.x + c.width; x++) assert.equal(raw[y * stride + 1 + x * 4 + 3], 0);
+    assert.equal(raw[c.label.y * stride + 1 + c.label.x * 4 + 3], 255);
+  }
 });
 
 async function fixture(run) {

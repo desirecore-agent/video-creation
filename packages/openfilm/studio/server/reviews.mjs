@@ -287,7 +287,7 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
         artifacts.push({ artifactId, kind: request.sequence ? 'sequence-contact-sheet' : 'size-comparison', timeBasis: 'composite-not-timed-frame',
           width: layout.width, height: layout.height, path: file, ...digest, mimeType: 'image/png', url: `/api/projects/${encodeURIComponent(project.id)}/reviews/${reviewId}/artifacts/${artifactId}`,
           derivedFrom, layout: { ...layout, maxEdge: request.maxEdge }, ...(request.compareWidths ? { textProjections } : {}),
-          limitations: ['格子时间/尺寸以layout.cells为准，图内没有烧录时间或宽度标签；透明空白不是源画面。', '离散总览或尺寸投影不证明连续播放、声音、逐字可读性或整体审美；encoded不附当前DOM。'] });
+          limitations: ['独立标签带不是源画面；秒数标签舍入三位小数，完整时间/整数PTS和尺寸以layout.cells及derivedFrom为准。小格可能简化/省略标签，透明空白不是视频黑帧。', '离散总览或尺寸投影不证明连续播放、声音、逐字可读性或整体审美；encoded不附当前DOM。'] });
       }
       // 派生读取固定 buffer；发布前再核落盘结果，期间替换不能留下成功回执。
       for (const item of [...frames, ...artifacts]) {

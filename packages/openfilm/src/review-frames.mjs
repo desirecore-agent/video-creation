@@ -174,7 +174,7 @@ export async function reviewEncodedFrames(file, dir, request, { signal } = {}) {
     sequence = { frames: samples, temporal: { status: 'observed', requestedWindow: request.sequence, timeBasis: 'encoded-pts',
       timeOriginPTS: firstPTS, firstActualPTSTicks: ticks[firstIndex], lastActualPTSTicks: ticks[lastIndex], ptsTimeBase: timeBase,
       analysisBytes: gray.stdout.length, analysisSha256: createHash('sha256').update(gray.stdout).digest('hex'),
-      ...lumaActivity(gray.stdout, dimensions, eligible, request.sequence) } };
+      ...lumaActivity(gray.stdout, dimensions, eligible.map((p) => ({ ...p, actualPTSTicks: ticks[p.index], ptsTimeBase: timeBase })), request.sequence) } };
   }
   return { duration: Number.isFinite(duration) && duration > 0 ? duration : null, durationOrigin: 'container-format-metadata', timeOrigin: 'first-decoded-video-frame', timeOriginPTS: firstPTS, encodedRange: { firstPTS, lastPTS: last.pts }, frames,
     ...(sequence ? { sequence, sequenceFiles: sequence.frames.map((s) => s.file) } : {}), decodedFiles: indices.map((_, i) => join(dir, `decoded-${i}.png`)), lastFramePolicy: 'last-decoded-video-frame-pts' };

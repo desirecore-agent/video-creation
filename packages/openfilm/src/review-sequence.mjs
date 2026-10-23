@@ -1,4 +1,5 @@
 /** 有界时间窗及活动事实；不评分、不按阈值替导演选择节奏或剪片。 */
+import { cellLabel, labelBandHeight } from './review-labels.mjs';
 export const SEQUENCE_MAX_SECONDS = 30;
 export const SEQUENCE_MAX_FRAMES = 1800;
 export const SEQUENCE_MAX_SAMPLES = 24;
@@ -41,31 +42,44 @@ export function lumaActivity(bytes, dimensions, eligible, ask) {
   for (let i = 0; i < eligible.length; i++) {
     const bucket = Math.floor(eligible[i].time - ask.start), frame = bytes.subarray(i * frameBytes, (i + 1) * frameBytes);
     let w = windows.get(bucket);
-    if (!w) { w = { firstActualTime: eligible[i].time, lastActualTime: eligible[i].time, frames: 0, adjacentPairs: 0, meanAbsoluteLumaDelta: null, maxAbsoluteLumaDelta: null, maximumFrameGapSeconds: null, sum: 0 }; windows.set(bucket, w); }
+    if (!w) { w = { firstActualTime: eligible[i].time, lastActualTime: eligible[i].time, frames: 0, adjacentPairs: 0, meanAbsoluteLumaDelta: null, maxAbsoluteLumaDelta: null, peakAdjacentPair: null, maximumFrameGapSeconds: null, sum: 0 }; windows.set(bucket, w); }
     w.frames++; w.lastActualTime = eligible[i].time;
     if (i === 0) continue;
     const previous = bytes.subarray((i - 1) * frameBytes, i * frameBytes);
     let total = 0; for (let k = 0; k < frameBytes; k++) total += Math.abs(frame[k] - previous[k]);
     const delta = total / (frameBytes * 255);
     if (delta === 0) identicalAdjacentPairs++;
+    // 相邻对归后帧的秒桶，平局保留首对；定位零变化也不自动判定画面冻结。
+    if (w.maxAbsoluteLumaDelta === null || delta > w.maxAbsoluteLumaDelta) {
+      const locate = (p) => ({ sourceFrameIndex: p.index, actualTime: p.time, actualPTSTicks: p.actualPTSTicks, ptsTimeBase: p.ptsTimeBase });
+      w.peakAdjacentPair = { meanAbsoluteLumaDelta: delta, from: locate(eligible[i - 1]), to: locate(eligible[i]) };
+    }
     w.sum += delta; w.adjacentPairs++; w.maxAbsoluteLumaDelta = Math.max(w.maxAbsoluteLumaDelta ?? 0, delta);
     w.maximumFrameGapSeconds = Math.max(w.maximumFrameGapSeconds ?? 0, eligible[i].time - eligible[i - 1].time);
   }
   return { method: 'all-selected-decoded-frames-downscaled-gray8', analysisRaster: dimensions, decodedFrames: eligible.length,
     firstActualTime: eligible[0].time, lastActualTime: eligible.at(-1).time, identicalAdjacentPairs,
     windows: [...windows.values()].map(({ sum, ...w }) => ({ ...w, meanAbsoluteLumaDelta: w.adjacentPairs ? sum / w.adjacentPairs : null })),
-    limitations: ['灰度栅格的逐帧差不是物体速度、语义节奏、审美或闪烁安全认证；没有活动也可能是有意停留。', '只覆盖明确时间窗内的实际帧；最后实际PTS不代表容器尾部或音频时长。'] };
+    limitations: ['灰度栅格的逐帧差不是物体速度、语义节奏、审美或闪烁安全认证；没有活动也可能是有意停留。', '相邻对按后帧进入相对请求起点的秒桶，可能跨桶边界；peakAdjacentPair取该桶最大差的首对，不是事件或美学峰值。', '只覆盖明确时间窗内的实际帧；最后实际PTS不代表容器尾部或音频时长。'] };
 }
 
 /** 每格像素坐标明确；整图 cap 可能使观察格小于调用者期望。 */
 export function sequenceLayout(samples, maxEdge) {
   if (!samples.length || samples.some((s) => s.width !== samples[0].width || s.height !== samples[0].height)) throw new Error('序列捕获尺寸发生变化，不能按固定格子冒充等比缩放。');
-  const columns = Math.min(6, Math.ceil(Math.sqrt(samples.length * samples[0].width / samples[0].height)));
-  const rows = Math.ceil(samples.length / columns);
-  const scale = Math.min(1, 360 / samples[0].width, maxEdge / (samples[0].width * columns), maxEdge / (samples[0].height * rows));
-  const width = Math.max(1, Math.floor(samples[0].width * scale)), height = Math.max(1, Math.floor(samples[0].height * scale));
-  return { coordinateSpace: 'artifact-pixels', width: width * columns, height: height * rows, columns, rows,
-    cells: samples.map((s, i) => ({ sequenceIndex: i, x: i % columns * width, y: Math.floor(i / columns) * height, width, height,
+  const band = labelBandHeight(maxEdge), candidates = [];
+  for (let columns = 1; columns <= Math.min(6, samples.length); columns++) {
+    const rows = Math.ceil(samples.length / columns), empty = columns * rows - samples.length;
+    if (empty > 1 || maxEdge <= rows * band) continue;
+    const scale = Math.min(1, 360 / samples[0].width, maxEdge / (samples[0].width * columns), (maxEdge - rows * band) / (samples[0].height * rows));
+    const width = Math.floor(samples[0].width * scale), height = Math.floor(samples[0].height * scale);
+    if (width > 0 && height > 0) candidates.push({ columns, rows, width, height, empty });
+  }
+  candidates.sort((a, b) => b.width * b.height - a.width * a.height || a.empty - b.empty || a.columns - b.columns);
+  if (!candidates.length) throw new Error('整图上限不足以容纳序列内容及标签带。');
+  const { columns, rows, width, height } = candidates[0];
+  return { coordinateSpace: 'artifact-pixels', width: width * columns, height: (height + band) * rows, columns, rows, labelBandHeight: band, labelTimeDecimals: 3,
+    cells: samples.map((s, i) => ({ sequenceIndex: i, x: i % columns * width, y: Math.floor(i / columns) * (height + band) + band, width, height,
+      label: cellLabel(`${i} ${s.actualTime.toFixed(3)}s`, String(i), i % columns * width, Math.floor(i / columns) * (height + band), width, band),
       sourceWidth: s.width, sourceHeight: s.height, scale: width / s.width, requestedTime: s.requestedTime, actualTime: s.actualTime,
       actualPTS: s.actualPTS, timeBasis: s.timeBasis })) };
 }
@@ -73,13 +87,15 @@ export function sequenceLayout(samples, maxEdge) {
 /** 多尺寸从同一原捕获派生；竖排保留真实格子宽度，整图不足时再次明确缩小。 */
 export function comparisonLayout(capture, widths, maxEdge) {
   const desired = widths.map((requestedWidth) => ({ requestedWidth, width: Math.min(requestedWidth, capture.width), height: Math.max(1, Math.floor(capture.height * Math.min(requestedWidth, capture.width) / capture.width)) }));
-  const scale = Math.min(1, maxEdge / Math.max(...desired.map((c) => c.width)), maxEdge / desired.reduce((n, c) => n + c.height, 0));
+  const band = labelBandHeight(maxEdge);
+  const scale = Math.min(1, maxEdge / Math.max(...desired.map((c) => c.width)), (maxEdge - band * desired.length) / desired.reduce((n, c) => n + c.height, 0));
   let y = 0;
   const cells = desired.map((c) => {
     const width = Math.max(1, Math.floor(c.width * scale)), height = Math.max(1, Math.floor(c.height * scale));
-    const cell = { requestedWidth: c.requestedWidth, x: 0, y, width, height, sourceWidth: capture.width, sourceHeight: capture.height,
+    const cell = { requestedWidth: c.requestedWidth, x: 0, y: y + band, width, height, sourceWidth: capture.width, sourceHeight: capture.height,
+      label: cellLabel(`${c.requestedWidth}>${width}px`, String(width), 0, y, width, band),
       scale: width / capture.width, limitedBy: [...(c.requestedWidth > capture.width ? ['captured-source-no-upscale'] : []), ...(scale < 1 ? ['artifact-max-edge'] : [])] };
-    y += height; return cell;
+    y += height + band; return cell;
   });
-  return { coordinateSpace: 'artifact-pixels', width: Math.max(...cells.map((c) => c.width)), height: y, cells };
+  return { coordinateSpace: 'artifact-pixels', width: Math.max(...cells.map((c) => c.width)), height: y, labelBandHeight: band, cells };
 }

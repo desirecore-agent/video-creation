@@ -147,8 +147,8 @@ node desirecore/cli.mjs review <项目> --source export-job --job <done任务ID>
 node desirecore/cli.mjs review <项目> --source current-project --times 5 --compare-widths 180,360,720 --compare-frame 0 --max-edge 1280 --home <数据根>
 ```
 
-`sequence:{start,end,count}`选择半开窗口，长度0.001–30秒、8–24格。编码窗口最多1800实际帧：低分辨率灰度活动分析覆盖全部所选实际帧，contact格只是按时间选择的少量帧；VFR可以重复引用，真实PTS、整数时间基及每格摘要保留。`temporal.windows`记录活动值和实际覆盖，不评分、不判冻结/节奏合格。工程来源仅离散seek，明确`partial`，不冒充编码全帧或连续播放。
+`sequence:{start,end,count}`选择半开窗口，长度0.001–30秒、8–24格。编码窗口最多1800实际帧：低分辨率灰度活动分析覆盖全部所选实际帧，contact格只是按时间选择的少量帧；VFR可以重复引用，真实PTS、整数时间基及每格摘要保留。`temporal.windows`记录活动值、实际覆盖和`peakAdjacentPair`前后帧的整数PTS/时间基；最大差平局取首对，按后帧归请求起点的秒桶，可能跨桶。不评分、不判冻结/节奏合格。工程来源仅离散seek，明确`partial`，不冒充编码全帧或连续播放。
 
 `compareWidths`的2–3个唯一宽度64–4096从同一target缩小前捕获派生，`compareFrame`为本回执timed index，默认0。竖排对照的每格请求／实际尺寸和限制分列，不放大、不假装响应式重排。DOM字号投影按该格实际宽度，复杂映射保持null；encoded没有当前DOM。捕获摘要与已经缩小的公开frame摘要分开。
 
-firstLast、sequence、compareWidths一次只选一种artifact。仍最多6张timed frame加1张artifact、每PNG4MiB／总12MiB；整图maxEdge可能再缩小每格。图内不烧录标签，以layout.cells定位时点／宽度，实际看图使用artifact自身path和SHA。旧请求／v1、v2回执仍可读。窗口、来源或预算不成立明确失败，不偷偷降采样或改作品。自由场景、原源和人工锁保持；这些观察不是美学、字形对比度、音频或所有OS播放的认证。
+firstLast、sequence、compareWidths一次只选一种artifact。仍最多6张timed frame加1张artifact、每PNG4MiB／总12MiB；整图maxEdge可能再缩小每格。整图优先保留格子面积、最多留一个透明空格，不能把空格当黑帧。序列标签在独立带显示格号和3位小数实际秒数，尺寸标签为请求>实际px；源像素不被覆盖。极小格会完整简化或省略标签并在metadata标明，不能据此猜时点；完整时间与整数PTS以layout.cells/derivedFrom为准。实际看图使用artifact自身path和SHA。旧请求／v1、v2回执仍可读。窗口、来源或预算不成立明确失败，不偷偷降采样或改作品。自由场景、原源和人工锁保持；这些观察不是美学、字形对比度、音频或所有OS播放的认证。

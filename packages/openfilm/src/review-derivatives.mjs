@@ -1,5 +1,6 @@
 /** 只从已核验的本次 PNG buffer 派生，不重新渲染或打开原工程路径。 */
 import { pngSize, runReviewProcess, REVIEW_MAX_FRAME_BYTES } from './review-frames.mjs';
+import { reviewLabelsPNG } from './review-labels.mjs';
 
 /** 只缩小；maxEdge 是整图上限，targetWidth 不能突破源像素和该上限。 */
 export function reviewPresentation(dimensions, request, source = dimensions) {
@@ -45,13 +46,16 @@ export async function observationGridPNG(buffers, layout, { signal } = {}) {
   let args, inputs;
   if (layout.columns) {
     const cell = layout.cells[0];
-    args = ['-f', 'image2pipe', '-i', 'pipe:3', '-vf', `scale=${cell.width}:${cell.height}:flags=lanczos,format=rgba,tile=${layout.columns}x${layout.rows}:nb_frames=${buffers.length}:color=black@0`];
-    inputs = [Buffer.concat(buffers)];
+    args = ['-f', 'image2pipe', '-i', 'pipe:3', '-f', 'image2pipe', '-i', 'pipe:4', '-filter_complex',
+      `[0:v]scale=${cell.width}:${cell.height}:flags=lanczos,format=rgba,pad=${cell.width}:${cell.height + layout.labelBandHeight}:0:${layout.labelBandHeight}:color=black@0,tile=${layout.columns}x${layout.rows}:nb_frames=${buffers.length}:color=black@0[grid];[grid][1:v]overlay=0:0:format=rgb,format=rgba[out]`, '-map', '[out]'];
+    inputs = [Buffer.concat(buffers), reviewLabelsPNG(layout)];
   } else {
-    args = buffers.flatMap((_, i) => ['-f', 'image2pipe', '-i', `pipe:${i + 3}`]);
-    const parts = layout.cells.map((cell, i) => `[${i}:v]scale=${cell.width}:${cell.height}:flags=lanczos,format=rgba[c${i}]`);
-    parts.push(`${layout.cells.map((_, i) => `[c${i}]`).join('')}xstack=inputs=${buffers.length}:layout=${layout.cells.map((c) => `${c.x}_${c.y}`).join('|')}:fill=black@0[out]`);
-    args.push('-filter_complex', parts.join(';'), '-map', '[out]'); inputs = buffers;
+    inputs = [...buffers, reviewLabelsPNG(layout)];
+    args = inputs.flatMap((_, i) => ['-f', 'image2pipe', '-i', `pipe:${i + 3}`]);
+    const parts = layout.cells.map((cell, i) => `[${i}:v]scale=${cell.width}:${cell.height}:flags=lanczos,format=rgba,pad=${cell.width}:${cell.height + layout.labelBandHeight}:0:${layout.labelBandHeight}:color=black@0[c${i}]`);
+    parts.push(`${layout.cells.map((_, i) => `[c${i}]`).join('')}xstack=inputs=${buffers.length}:layout=${layout.cells.map((c) => `${c.x}_${c.y - layout.labelBandHeight}`).join('|')}:fill=black@0[grid]`);
+    parts.push(`[grid][${buffers.length}:v]overlay=0:0:format=rgb,format=rgba[out]`);
+    args.push('-filter_complex', parts.join(';'), '-map', '[out]');
   }
   const { stdout } = await runReviewProcess('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', ...args,
     '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', 'pipe:1'], { binary: true, inputs, maxBytes: REVIEW_MAX_FRAME_BYTES, signal });

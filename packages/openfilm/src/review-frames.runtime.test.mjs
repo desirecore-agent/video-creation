@@ -7,9 +7,25 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createReviews } from '../studio/server/reviews.mjs';
 import { filmHtml } from './film-doc.mjs';
+import { observationGridPNG } from './review-derivatives.mjs';
+import { comparisonLayout, sequenceLayout } from './review-sequence.mjs';
+import { reviewContract } from '../studio/server/review-contract.mjs';
+import { Ajv } from 'ajv';
 
 const sha = (data) => createHash('sha256').update(data).digest('hex');
 const enabled = process.env.VIDEO_CREATION_REVIEW_RUNTIME === '1';
+
+test('T3 真实标签组合不覆盖原画且保留未缩放区域的RGBA像素', { skip: !enabled, timeout: 60_000 }, async () => {
+  const source = execFileSync('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'color=0x234567@0.5:s=160x90,format=rgba', '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', 'pipe:1']);
+  const decode = (png, filter) => execFileSync('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-f', 'image2pipe', '-i', 'pipe:0', ...(filter ? ['-vf', filter] : []), '-frames:v', '1', '-pix_fmt', 'rgba', '-f', 'rawvideo', 'pipe:1'], { input: png });
+  const original = decode(source); assert.equal(original[3], 127);
+  const sequence = Array.from({ length: 8 }, (_, i) => ({ width: 160, height: 90, actualTime: i / 3, requestedTime: i / 3 }));
+  for (const layout of [comparisonLayout({ width: 160, height: 90 }, [80, 160], 640), sequenceLayout(sequence, 1280)]) {
+    const combined = await observationGridPNG(layout.cells.map(() => source), layout), c = layout.cells.at(-1);
+    assert.equal(c.width, 160); assert.equal(c.height, 90);
+    assert.deepEqual(decode(combined, `crop=${c.width}:${c.height}:${c.x}:${c.y}`), original);
+  }
+});
 
 test('T3 真实VFR窗口量化全部帧并合成8格实际PTS，重复格不伪造不同帧', { skip: !enabled, timeout: 60_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'video-sequence-vfr-'));
@@ -22,6 +38,15 @@ test('T3 真实VFR窗口量化全部帧并合成8格实际PTS，重复格不伪�
     const r = await reviews.create(project, { source: 'export-job', job: job.id, times: [0], maxEdge: 640, sequence: { start: 0, end: 1, count: 8 } });
     assert.equal(r.version, 3); assert.equal(r.temporal.decodedFrames, 4); assert.equal(r.temporal.status, 'observed');
     assert.equal(r.temporal.source.outputSha256, original); assert.equal(r.temporal.analysisRaster.width, 96);
+    const validateTemporal = new Ajv().compile(reviewContract.temporalSchema);
+    assert.ok(validateTemporal(r.temporal), JSON.stringify(validateTemporal.errors));
+    const peak = r.temporal.windows[0].peakAdjacentPair;
+    assert.ok(peak && peak.meanAbsoluteLumaDelta === r.temporal.windows[0].maxAbsoluteLumaDelta);
+    assert.equal(peak.to.sourceFrameIndex, peak.from.sourceFrameIndex + 1);
+    const [tickNumerator, tickDenominator] = peak.to.ptsTimeBase.split('/').map(Number);
+    assert.equal(peak.from.ptsTimeBase, peak.to.ptsTimeBase);
+    assert.equal(Number(peak.from.actualPTSTicks) * tickNumerator / tickDenominator, peak.from.actualTime);
+    assert.equal(Number(peak.to.actualPTSTicks) * tickNumerator / tickDenominator, peak.to.actualTime);
     const a = r.artifacts[0]; assert.equal(a.derivedFrom.length, 8);
     // 时间均匀的格子并不等于覆盖每一VFR帧；0.1秒帧仍由全帧活动分析计入。
     assert.deepEqual(a.derivedFrom.map((x) => x.sourceFrameIndex), [0, 2, 2, 2, 3, 3, 3, 3]);
