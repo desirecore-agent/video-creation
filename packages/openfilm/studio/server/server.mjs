@@ -1086,9 +1086,10 @@ function systemBrowser(/** @type {string} */ url) {
 /**
  * A picture or a video from this computer, a range answered as one (a preview is seeked in); none: 404.
  * @param {import('node:http').IncomingMessage} req @param {import('node:http').ServerResponse} res @param {string | null | undefined} file
+ * @param {{keep?: boolean, verified?: {handle: import('node:fs/promises').FileHandle, size: number, mtimeMs: number, etag: string} | null}} [options] 已核验媒体复用同一文件描述符；文件路径仍用于确定格式。
  */
 function sendMedia(req, res, file, { keep = false, verified = null } = {}) {
-  if (!verified && (!file || !existsSync(file) || !statSync(file).isFile())) throw new HttpError(404, 'no such file');
+  if (!file || (!verified && (!existsSync(file) || !statSync(file).isFile()))) throw new HttpError(404, 'no such file');
   const { size, mtimeMs } = verified ?? statSync(file);
   /* `keep`: a picture that changes only with its file (a skill's cover, an example's poster) is kept by the browser
      an hour, and then only asked whether it changed */
