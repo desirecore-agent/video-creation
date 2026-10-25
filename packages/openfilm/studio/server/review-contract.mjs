@@ -1,11 +1,19 @@
 /** CLI 离线发现、HTTP 和 MCP 使用同一份公开审片合同。 */
 import { REVIEW_MAX_FRAMES } from '../../src/review-frames.mjs';
 import { reviewFindingSchema, reviewCoverageSchema } from '../../src/review-findings.mjs';
+import { reviewIntentSchema } from './review-facts.mjs';
+const reviewFrameReference = { type: 'object', additionalProperties: false, required: ['reviewId', 'frameIndex'], description: '同一项目已生成的timed frame，不引用任意路径或递归对照。', properties: {
+  reviewId: { type: 'string', pattern: '^[a-f0-9]{24}$', description: '本项目既有reviewId。' },
+  frameIndex: { type: 'integer', minimum: 0, maximum: 5, description: '该回执的frames下标，不是原视频帧编号。' },
+  expectedSha256: { type: 'string', pattern: '^[a-f0-9]{64}$', description: '可选的调用者期望图片摘要；不符即拒绝。' },
+} };
 export const reviewRequestSchema = {
   $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', additionalProperties: false, required: ['source'],
   description: '只读审片请求。生成材料不等于看图，不限制导演自主创作或人工锁。',
+  allOf: [{ if: { properties: { source: { const: 'review-pair' } }, required: ['source'] }, then: { required: ['before', 'after'], properties: { job: false, times: false, last: false, count: false, firstLast: false, sequence: false, compareWidths: false, compareFrame: false } }, else: { properties: { before: false, after: false } } }],
   properties: {
-    source: { enum: ['current-project', 'export-job'], description: 'current-project 是冻结本地工程的浏览器预览；export-job 只解码此工程完成的视频输出，不附当前 DOM 事实。' },
+    source: { enum: ['current-project', 'export-job', 'review-pair'], description: 'current-project为冻结工程预览；export-job解码完成视频；review-pair仅组合before/after已有帧，不再渲染。' },
+    before: reviewFrameReference, after: reviewFrameReference,
     job: { type: 'string', pattern: '^[a-f0-9]{12}$', description: 'export-job 必须指定 video_jobs 返回的 done 视频任务 ID，不接受任意路径。' },
     times: { type: 'array', minItems: 1, maxItems: REVIEW_MAX_FRAMES, uniqueItems: true, items: { type: 'number', minimum: 0, maximum: 86400 }, description: '明确秒数。编码视频以首个实际视频帧为相对零点，取不早于请求的第一帧，另报原始 PTS/整数时间基；不是原 film 的 range 时间。与 count 互斥。' },
     last: { type: 'boolean', description: '增加真实编码末帧；工程预览是 duration 前 1ms 末态，不能混称。' },
@@ -42,8 +50,8 @@ const observationArtifactSchema = {
   description: '同一次审片的序列或尺寸对照图。独立标签带只标元数据，不覆盖源画面；完整时钟/尺寸在layout.cells中，不得当作单一时点。',
   required: ['artifactId', 'kind', 'timeBasis', 'derivedFrom', 'layout', 'path', 'bytes', 'sha256', 'width', 'height'],
   allOf: [
-    { if: { properties: { artifactId: { const: 'sequence' } } }, then: { properties: { kind: { const: 'sequence-contact-sheet' }, derivedFrom: { minItems: 8 }, layout: { properties: { cells: { minItems: 8 } } } } } },
-    { if: { properties: { artifactId: { const: 'size-comparison' } } }, then: { properties: { kind: { const: 'size-comparison' }, derivedFrom: { maxItems: 1 }, layout: { properties: { cells: { maxItems: 3 } } } } } },
+    { if: { properties: { artifactId: { const: 'sequence' } } }, then: { properties: { kind: { const: 'sequence-contact-sheet' }, derivedFrom: { type: 'array', minItems: 8 }, layout: { type: 'object', properties: { cells: { type: 'array', minItems: 8 } } } } } },
+    { if: { properties: { artifactId: { const: 'size-comparison' } } }, then: { properties: { kind: { const: 'size-comparison' }, derivedFrom: { type: 'array', maxItems: 1 }, layout: { type: 'object', properties: { cells: { type: 'array', maxItems: 3 } } } } } },
   ],
   properties: {
     artifactId: { enum: ['sequence', 'size-comparison'], description: '封闭制品标识，GET只读取对应固定文件。' },
@@ -86,7 +94,14 @@ const observationArtifactSchema = {
     limitations: { type: 'array', items: { type: 'string' }, description: '离散观察、缩放、未知测量及声音/语义限制。' },
   },
 };
-export const reviewArtifactSchema = { $schema: 'http://json-schema.org/draft-07/schema#', description: '一个请求最多一张首尾、序列或尺寸对照制品。', oneOf: [firstLastArtifactSchema, observationArtifactSchema] };
+const revisionComparisonSchema = { $schema: observationArtifactSchema.$schema, type: 'object', required: observationArtifactSchema.required, description: '两份已有timed frame的独立前后对照；时间与版本逐侧报告，不承诺语义对齐。', properties: {
+  ...observationArtifactSchema.properties,
+  artifactId: { const: 'revision-comparison', description: '本次单独的前后对照PNG。' }, kind: { const: 'revision-comparison', description: '按调用者选择的两帧，不自动评价修改质量。' },
+  derivedFrom: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'object', additionalProperties: true }, description: '每侧的原review、film版本、实际时点、图片SHA、尺寸及原source。' },
+  presentation: { type: 'object', additionalProperties: true, description: '请求观看宽度、两侧共同实际宽度和只缩小的共同尺寸策略；不把较小旧图放大。' },
+  differences: { type: 'object', additionalProperties: true, description: '可证明的输入集合和已捕获参数/overrides/锁字段摘要差异；缺失明确unknown，非修改者身份或质量判断。' },
+} };
+export const reviewArtifactSchema = { $schema: 'http://json-schema.org/draft-07/schema#', description: '一个请求最多一张首尾、序列、尺寸或版本对照制品。', oneOf: [firstLastArtifactSchema, observationArtifactSchema, revisionComparisonSchema] };
 const temporalFrameLocator = { type: 'object', additionalProperties: false, required: ['sourceFrameIndex', 'actualTime', 'actualPTSTicks', 'ptsTimeBase'], description: '已经逐帧核过整数PTS的编码帧定位，不是稀疏contact格号。', properties: {
   sourceFrameIndex: { type: 'integer', minimum: 0, description: '原视频全部已探测帧中的零起点下标。' },
   actualTime: number('相对原视频第一实际帧的秒数；不是绝对PTS。'),
@@ -106,4 +121,21 @@ export const reviewTemporalSchema = { $schema: 'http://json-schema.org/draft-07/
   } } },
   limitations: { type: 'array', items: { type: 'string' }, description: '低分辨率、非语义/非声音/仅明确窗口等边界。' },
 }, additionalProperties: true };
-export const reviewContract = { contractVersion: 3, requestSchema: reviewRequestSchema, findingSchema: reviewFindingSchema, coverageSchema: reviewCoverageSchema, artifactSchema: reviewArtifactSchema, temporalSchema: reviewTemporalSchema };
+export const reviewSourceFactsSchema = {
+  $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', required: ['status'],
+  description: '从同一冻结film提取的意图与工程字段摘要。observed是数据采样，不证明任意代码的视觉语义或修改者身份。',
+  properties: {
+    status: { enum: ['observed', 'unknown'], description: '可解析且在预算内才记录，否则unknown并给reason，不从live补造。' },
+    version: { const: 1, description: '已捕获事实格式。' }, filmSha256: { type: 'string', description: '事实所属完整film原字节SHA256。' },
+    reason: { type: 'string', description: '不可提取的具体边界。' },
+    intents: { type: 'array', description: '按clipId关联的作者标注；observed表示JSON符合intentSchema，不是DOM或可读性通过。', items: { type: 'object', properties: {
+      clipId: { type: 'string', description: '稳定片段ID。' }, status: { enum: ['observed', 'invalid'], description: '标注解析结果。' }, value: reviewIntentSchema,
+      reason: { type: 'string', description: '标注无效原因，原作品仍可播放。' },
+    } } },
+    clips: { type: 'array', maxItems: 1000, description: '每片段的src及params、locks、DOM overrides、其他布局/时间字段的规范JSON摘要；不创建第二套锁。', items: { type: 'object', additionalProperties: true } },
+    tracks: { type: 'array', description: '按轨道位置记录已有开关/锁字段摘要。', items: { type: 'object', additionalProperties: true } },
+    limitations: { type: 'array', items: { type: 'string' }, description: '数据摘要与视觉判断的边界。' },
+  },
+};
+export const reviewContract = { contractVersion: 4, requestSchema: reviewRequestSchema, intentSchema: reviewIntentSchema, sourceFactsSchema: reviewSourceFactsSchema, findingSchema: reviewFindingSchema, coverageSchema: reviewCoverageSchema, artifactSchema: reviewArtifactSchema, temporalSchema: reviewTemporalSchema,
+  navigation: { description: '项目审片入口可查看近期材料、放大已有图并按点播放原成片。回工程只在冻结输入仍匹配且映射可证明时启用。', intentAttribute: 'clip.attrs.data-review-intent' } };

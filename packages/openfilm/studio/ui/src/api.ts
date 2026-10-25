@@ -1,3 +1,4 @@
+import type { ReviewRecord, ReviewSummary, ReviewTarget } from '@/lib/reviews';
 /**
  * Studio's API, as the editor calls it (studio/server/server.mjs). Same origin, so the launch key travels as the
  * cookie `/open` set; writes are refused from any other origin.
@@ -118,6 +119,10 @@ export const api = {
   rename: (id: string, name: string) => call<{ project: Project }>(p(id), { method: 'PATCH', json: { name } }).then((r) => r.project),
   forget: (id: string) => call<object>(p(id), { method: 'DELETE' }),
   film: (id: string) => call<ProjectFilm>(p(id)),
+  reviews: (id: string, offset = 0) => call<{ reviews: ReviewSummary[]; limited: boolean; unavailable: number; nextOffset: number | null }>(`${p(id)}/reviews?offset=${offset}`),
+  reviewRead: (id: string, review: string) => call<ReviewRecord>(`${p(id)}/reviews/${encodeURIComponent(review)}`).then((r) => ({ ...r, artifacts: r.artifacts ?? [] })),
+  reviewCreate: (id: string, ask: Record<string, unknown>) => call<ReviewRecord>(`${p(id)}/reviews`, { method: 'POST', json: ask }),
+  reviewTarget: (id: string, review: string, kind: string, index: number, verify = false) => call<ReviewTarget>(`${p(id)}/reviews/${encodeURIComponent(review)}/target?kind=${encodeURIComponent(kind)}&index=${index}&verify=${verify ? 1 : 0}`),
   /** the person opened it here: the one `openfilm open` alone comes back to */
   opened: (id: string) => call<{ project: Project }>(`${p(id)}/opened`, { method: 'POST' }),
   edit: (id: string, base: string | null, ops: Op[]) => call<{ text: string; rev: string; value: Film; doc: Film; rebased: boolean }>(`${p(id)}/edit`, { method: 'POST', json: { base, ops } }),

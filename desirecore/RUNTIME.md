@@ -211,7 +211,7 @@ revise 参数文件包含完整对象，不能把大段源码作为单个 OS arg
 
 ## v3新增时间窗与尺寸观察合同
 
-`review --schema` v3 沿同一CLI／MCP／鉴权HTTP公开两个可选观察方式，不修改作品或人工锁：
+`review --schema`（v3起）沿同一CLI／MCP／鉴权HTTP公开两个可选观察方式，不修改作品或人工锁：
 
 ```sh
 node desirecore/cli.mjs review <项目> --source export-job --job <done任务ID> --times 0 --sequence-start 0 --sequence-end 8 --sequence-count 16 --max-edge 1280 --home <数据根>
@@ -225,3 +225,23 @@ node desirecore/cli.mjs review <项目> --source current-project --times 5 --com
 firstLast、sequence、compareWidths一次只选一种artifact。仍最多6张timed frame加1张artifact、每PNG4MiB／总12MiB；整图maxEdge可能再缩小每格。整图优先保留格子面积、最多留一个透明空格，不能把空格当黑帧。序列标签在独立带显示格号和3位小数实际秒数，尺寸标签为请求>实际px；源像素不被覆盖。极小格会完整简化或省略标签并在metadata标明，不能据此猜时点；完整时间与整数PTS以layout.cells/derivedFrom为准。实际看图使用artifact自身path和SHA。旧请求／v1、v2回执仍可读。窗口、来源或预算不成立明确失败，不偷偷降采样或改作品。自由场景、原源和人工锁保持；这些观察不是美学、字形对比度、音频或所有OS播放的认证。
 
 `artifacts/sequence` 与 `artifacts/size-comparison` 的GET沿原项目鉴权、固定文件身份、PNG尺寸、SHA和ETag检查；失败不重造。旧首尾路径不变。sequence的私有捕获图与解码中间文件在回执发布后精确清理，只留正式timed帧、单artifact和review.json。关闭沿原AbortSignal终止此实例自有FFmpeg/FilmPage及等待队列。
+
+## 观看意图、同版本定位与修订对照
+
+review --schema 的合同v4新增可选信息角色与review-pair，旧捕获请求及v1/v2/v3回执继续可读。片段已有attrs可存data-review-intent JSON，例如：
+
+```json
+{"targetWidths":[180,360],"text":[{"role":"essential","selector":"#title","description":"保持主题可辨"},{"role":"supporting","description":"背景说明可依交付用途取舍"}],"note":"只调整未锁区域，保留人工标题与配色"}
+```
+
+标注至多32KiB，唯一Draft-07 intentSchema说明目标宽度、essential/supporting/decorative角色及说明；selector可省略以支持Canvas/WebGL。它不驱动排版或最低字号规则，原motion/overrides/track锁继续各自归属；无标注仍正常，非法标注明确invalid，不从缺失推断可丢弃。新review的sourceFacts来自同一冻结film，记录意图及参数/锁/DOM/其他布局时间字段的规范JSON摘要；并不证明任意新代码仍消费这些值或识别修改者。
+
+编辑器顶部“审片”打开来源工程内的临时大视图，底下工程保持挂载，关闭回原入口并保留阅读选择。可分页查看近期材料，点击总览格或timed frame、放大已有像素、播放仍按摘要核验匹配的历史成片。PNG自身摘要与尺寸不因显示放大改变。工程定位在明确点击时等待已有保存队列，再校验film及静态输入摘要、本地保存状态和当前选择；变化/缺失时保留历史材料而不跳错。
+
+新普通整片/线性range导出会随提交快照记录outputTimeToFilmTime，clip等未证明出口及旧任务保持null，不回填历史。编码自动定位使用整数PTS和首帧ticks，避免小数舍入跨帧；旧材料缺整数起点或浏览器非零起点语义未证明时，只看原图/手动播放，不自动猜时点。媒体打开时在同一文件描述符上核摘要并处理Range；它不是对后续外部写者的文件系统快照保证，后续打开会重核。
+
+```sh
+node desirecore/cli.mjs review <项目> --source review-pair --before-review <已有reviewId> --before-frame 0 --after-review <已有reviewId> --after-frame 0 --target-width 360 --home <数据根>
+```
+
+同一review / video_review /鉴权HTTP接受before/after已有timed frame引用，不新建MCP工具、Store、任务或第三次渲染。返回v4对照回执（frames为空、单revision-comparison artifact），每侧保留独立源/版本/实际时点/原图SHA及尺寸。两边只缩小到共同实际宽度，标签0=before/1=after；相同数字秒数不证明语义对齐。differences只比较已有输入集合与已捕获数据字段；旧资料缺失为unknown，集合移出不表示删除原文件，数据相同不证明画面等价，像素不同也不自动判优。素材/回执在组合期间变化则失败并只清理本次自有目录。

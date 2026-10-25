@@ -471,10 +471,17 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     const project = await projectById(parts[1]);
     const rest = parts.slice(2).join('/');
     /* a project whose folder is gone (moved, renamed or deleted outside Studio): taking it off the list is all there is */
-    if (!existsSync(project.path) && !(!rest && req.method === 'DELETE')) {
+    if (!existsSync(project.path) && parts[2] !== 'reviews' && !(!rest && req.method === 'DELETE')) {
       throw new HttpError(410, 'This project’s folder is not there any more: it was moved, renamed or deleted.', { code: 'missing' });
     }
     // 审片沿本项目原鉴权：只接受当前工程或真实完成任务，不开放任意文件路径。
+    if (rest === 'reviews' && req.method === 'GET') return json(res, 200, await reviews.list(project, Number(url.searchParams.get('offset') ?? 0)));
+    if (parts[2] === 'reviews' && parts.length === 5 && parts[4] === 'target' && req.method === 'GET') return json(res, 200, await reviews.target(project, parts[3], url.searchParams.get('kind') ?? 'frame', Number(url.searchParams.get('index') ?? 0), url.searchParams.get('verify') === '1'));
+    if (parts[2] === 'reviews' && parts.length === 5 && parts[4] === 'video' && req.method === 'GET') {
+      const media = await reviews.video(project, parts[3], url.searchParams.get('expected_sha256'));
+      try { return sendMedia(req, res, media.file, { verified: media }); }
+      catch (error) { await media.handle.close(); throw error; }
+    }
     if (rest === 'reviews' && req.method === 'POST') return json(res, 200, await reviews.create(project, await readJson(req)));
     if (parts[2] === 'reviews' && parts.length === 4 && req.method === 'GET') return json(res, 200, await reviews.read(project, parts[3]));
     if (parts[2] === 'reviews' && parts[4] === 'frames' && parts.length === 6 && req.method === 'GET') {
@@ -1079,10 +1086,11 @@ function systemBrowser(/** @type {string} */ url) {
 /**
  * A picture or a video from this computer, a range answered as one (a preview is seeked in); none: 404.
  * @param {import('node:http').IncomingMessage} req @param {import('node:http').ServerResponse} res @param {string | null | undefined} file
+ * @param {{keep?: boolean, verified?: {handle: import('node:fs/promises').FileHandle, size: number, mtimeMs: number, etag: string} | null}} [options] 已核验媒体复用同一文件描述符；文件路径仍用于确定格式。
  */
-function sendMedia(req, res, file, { keep = false } = {}) {
-  if (!file || !existsSync(file) || !statSync(file).isFile()) throw new HttpError(404, 'no such file');
-  const { size, mtimeMs } = statSync(file);
+function sendMedia(req, res, file, { keep = false, verified = null } = {}) {
+  if (!file || (!verified && (!existsSync(file) || !statSync(file).isFile()))) throw new HttpError(404, 'no such file');
+  const { size, mtimeMs } = verified ?? statSync(file);
   /* `keep`: a picture that changes only with its file (a skill's cover, an example's poster) is kept by the browser
      an hour, and then only asked whether it changed */
   const tag = `"${size.toString(36)}-${Math.round(mtimeMs).toString(36)}"`;
@@ -1095,7 +1103,11 @@ function sendMedia(req, res, file, { keep = false } = {}) {
   }[extname(file).toLowerCase()] ?? 'application/octet-stream';
   const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
   const [from, to] = range ? [range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2])), range[2] && range[1] ? Math.min(size - 1, Number(range[2])) : size - 1] : [0, size - 1];
-  res.writeHead(range ? 206 : 200, { 'content-type': type, 'content-length': to - from + 1, 'accept-ranges': 'bytes', ...kept, ...(range ? { 'content-range': `bytes ${from}-${to}/${size}` } : {}) });
-  createReadStream(file, { start: from, end: to }).pipe(res);
+  if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || from >= size || to < from) { void verified?.handle.close().catch(() => {}); res.writeHead(416, { 'content-range': `bytes */${size}` }); res.end(); return; }
+  res.writeHead(range ? 206 : 200, { ...(verified ? { etag: `"${verified.etag}"`, 'cache-control': 'no-store' } : {}), 'content-type': type, 'content-length': to - from + 1, 'accept-ranges': 'bytes', ...kept, ...(range ? { 'content-range': `bytes ${from}-${to}/${size}` } : {}) });
+  const stream = verified ? verified.handle.createReadStream({ start: from, end: to }) : createReadStream(file, { start: from, end: to });
+  stream.on('error', (error) => res.destroy(error));
+  res.on('close', () => stream.destroy());
+  stream.pipe(res);
   return undefined;
 }

@@ -202,6 +202,6 @@ export function useFilm(projectId: string, initial: FilmState | null, onChange: 
 
   return {
     film: state?.value ?? null, rev: state?.rev ?? null, error, broken, edit, record, undo, redo, rollbackTo, forget, steps,
-    canUndo: steps.done.length > 0, canRedo: steps.undone.length > 0, settled: () => queue.current,
+    canUndo: steps.done.length > 0, canRedo: steps.undone.length > 0, settled: () => queue.current, isSettled: () => pending.current === 0,
   };
 }

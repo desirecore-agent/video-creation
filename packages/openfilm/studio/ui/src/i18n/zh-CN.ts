@@ -6,6 +6,58 @@ const FILES = typeof navigator !== 'undefined' && /^win/i.test(navigator.platfor
   : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? '访达' : '文件管理器';
 
 export const zhCN: Words = {
+  review: {
+    overview: '返回总览',
+    "pairNote": "两侧是分别选择的观察点，不自动对齐内容或判定修改优劣。",
+    "field": {"sourcePath": "场景引用", "paramsSha256": "参数", "locksSha256": "参数锁", "overridesSha256": "人工DOM改动", "visualFieldsSha256": "布局和时间等字段", "flags": "轨道开关与锁"},
+    "inputChange": {"input-added": "输入增加", "input-removed": "不再用于此版", "input-changed": "输入变化"},
+  "open": "审片",
+  "title": "审片材料",
+  "close": "关闭",
+  "material": "材料",
+  "choose": "选择一份材料",
+  "refresh": "刷新",
+  "recentOnly": "当前列出近期材料；较早记录可继续加载，不可读取的材料不会作为通过。",
+  "older": "加载较早材料",
+  "empty": "还没有审片材料。可让导演按需要生成画面或时间窗总览。",
+  "pair": "修订前后对照",
+  "independentVersions": "两侧版本独立记录",
+  "artifact": "审片制品，点击观察格可定位",
+  "point": "观察点",
+  "selectedPoint": "所选观察点",
+  "fit": "适应宽度",
+  "zoom": "放大图片",
+  "zoomNote": "放大已有像素便于查看；标注的尺寸仍是源图实际尺寸。",
+  "locateEngineering": "定位当前工程",
+  "engineeringChanged": "工程输入、选择或未保存内容已变化，未跳转。请使用匹配版本的材料。",
+  "mappingUnknown": "该材料没有可证明的工程时间映射，当前只查看历史画面。",
+  "outputPlayback": "播放该历史成片，来源在打开时按摘要核验。",
+  "mediaChanged": "成片来源已变化或不可播放，未换用当前工程。",
+  "mediaOriginUnknown": "此成片的浏览器时间起点尚未证明，保留原图定位，不自动设置播放时点。",
+  "imageChanged": "该审片图片已变化或不可读取。",
+  "intent": "观看意图（标注）",
+  "intentInvalid": "标注无法按合同读取，未据此推断角色。",
+  "noIntent": "该版本没有已记录的观看意图；未标注不等于可省略。",
+  "differences": "已捕获的数据差异",
+  "fileChanges": "输入集合变化",
+  "preservedChanges": "参数、DOM和锁相关字段变化",
+  "unknown": "未知（缺少对应版本数据）",
+  "differencesNote": "集合移出不表示删除了原文件；字段变化不说明修改者身份或画面质量提升。",
+  "before": "修订前的观察点",
+  "after": "修订后的观察点",
+  "makePair": "生成对照",
+  "working": "处理中…",
+  "role": {
+    "essential": "必要信息",
+    "supporting": "辅助信息",
+    "decorative": "装饰信息"
+  },
+  "source": {
+    "current-project": "工程预览",
+    "export-job": "编码成片",
+    "review-pair": "前后对照"
+  }
+},
   motion: {
     newRow: '新数据行草稿',
     saveRow: '保存数据行',

@@ -28,7 +28,7 @@ test('受管 HTTP/CLI/MCP 发现同一审片合同，帧下载沿原鉴权并核
     const headers = { 'x-studio-key': studio.key, 'content-type': 'application/json' };
     assert.equal((await fetch(`${studio.origin}/api/review-schema`)).status, 401);
     const contract = await (await fetch(`${studio.origin}/api/review-schema`, { headers })).json();
-    assert.equal(contract.contractVersion, 3); assert.ok(contract.requestSchema.properties.firstLast);
+    assert.equal(contract.contractVersion, 4); assert.ok(contract.requestSchema.properties.firstLast);
     let offline; await command(['review', '--schema'], (value) => { offline = value; });
     assert.deepEqual(contract, offline);
     assert.equal((await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"source":"current-project","times":[0]}' })).status, 401);

@@ -138,7 +138,7 @@ A completed private file is published with no-replace semantics before the film 
 
 ## Time-window overview and same-capture size comparison
 
-`review --schema` v3 exposes optional observations through the same CLI, MCP and authenticated HTTP, without editing the film or human locks:
+`review --schema` v3+ exposes optional observations through the same CLI, MCP and authenticated HTTP, without editing the film or human locks:
 
 ```sh
 node desirecore/cli.mjs review <project> --source export-job --job <done-job-id> --times 0 --sequence-start 0 --sequence-end 8 --sequence-count 16 --max-edge 1280 --home <data-root>
@@ -150,3 +150,15 @@ node desirecore/cli.mjs review <project> --source current-project --times 5 --co
 `compareWidths` requests 2–3 distinct widths (64–4096) from the same capture before target resizing; `compareFrame` is this receipt's timed-frame index, default zero. Vertical cells report requested and actual sizes and caps, without upscaling or pretending to reflow the layout. DOM font projections use each actual cell width; complex mappings remain null and encoded outputs borrow no current DOM. The raw capture digest is distinct from a published downsized frame's digest.
 
 Choose only one artifact mode: firstLast, sequence or compareWidths. The existing six timed frames plus one artifact, 4 MiB per PNG and 12 MiB total remain. The whole-sheet maxEdge can reduce cell sizes. The sheet maximizes cell area with at most one transparent empty slot, which is not a black source frame. Separate label bands show the cell index and actual seconds rounded to three decimals, or requested>actual px; source pixels remain unobscured. Tiny cells simplify or omit whole labels with explicit metadata. Use layout.cells/derivedFrom for full times and integer PTS. Read the artifact using its own path/SHA. Old requests and v1/v2 receipts remain readable. Invalid windows, sources and budgets fail explicitly instead of silently dropping frames or changing the film. Original scenes, sources and human locks remain free; these facts do not certify aesthetics, glyph contrast, audio or all-platform playback.
+
+## Viewing intent, version-bound navigation and revision comparison
+
+review --schema v4 extends the same review / video_review with optional information roles, viewing widths and notes in the clip's attrs.data-review-intent. Annotations do not drive layout; human parameters, DOM overrides and locks remain intact. Unannotated films continue to work.
+
+The editor's Review view browses existing materials, selects cells, enlarges existing images and plays historical outputs. Locating the project rechecks its inputs, save state and proven time mapping. New whole-film/linear-range exports can record a mapping; missing legacy mappings are not guessed. Capture requests and v1/v2/v3 receipts remain compatible.
+
+```sh
+node desirecore/cli.mjs review <project> --source review-pair --before-review <existing-review-id> --before-frame 0 --after-review <existing-review-id> --after-frame 0 --target-width 360 --home <data-root>
+```
+
+Comparisons reuse two existing timed PNGs without another render. Each side retains its own source/version/time/digest/actual size. Only proven input and captured-field differences are reported; absent facts remain unknown. There is no automatic semantic alignment, quality verdict, source deletion or unlocking. The single Schema and [RUNTIME.md](desirecore/RUNTIME.md) define fields, budgets and source boundaries.
