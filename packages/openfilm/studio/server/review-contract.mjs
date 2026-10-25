@@ -137,5 +137,13 @@ export const reviewSourceFactsSchema = {
     limitations: { type: 'array', items: { type: 'string' }, description: '数据摘要与视觉判断的边界。' },
   },
 };
-export const reviewContract = { contractVersion: 4, requestSchema: reviewRequestSchema, intentSchema: reviewIntentSchema, sourceFactsSchema: reviewSourceFactsSchema, findingSchema: reviewFindingSchema, coverageSchema: reviewCoverageSchema, artifactSchema: reviewArtifactSchema, temporalSchema: reviewTemporalSchema,
+export const reviewCLIOptionsSchema = {
+  $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', additionalProperties: false,
+  description: '仅本地CLI选项，不是HTTP/MCP捕获参数，不授予目录权限。省略时原行为不变。',
+  properties: {
+    read: { type: 'string', pattern: '^[a-f0-9]{24}$', description: '--read：读取已有review，不重新捕获；不可同时给source/job/采样或组合参数。' },
+    copyTo: { type: 'string', minLength: 1, maxLength: 4096, description: '--copy-to：调用者选择的已授权、已存在目录。把核SHA的PNG保存到其review-ID子目录，供既有Read使用；相同副本复用，冲突不覆盖。' },
+  },
+};
+export const reviewContract = { contractVersion: 4, requestSchema: reviewRequestSchema, cliOptionsSchema: reviewCLIOptionsSchema, intentSchema: reviewIntentSchema, sourceFactsSchema: reviewSourceFactsSchema, findingSchema: reviewFindingSchema, coverageSchema: reviewCoverageSchema, artifactSchema: reviewArtifactSchema, temporalSchema: reviewTemporalSchema,
   navigation: { description: '项目审片入口可查看近期材料、放大已有图并按点播放原成片。回工程只在冻结输入仍匹配且映射可证明时启用。', intentAttribute: 'clip.attrs.data-review-intent' } };

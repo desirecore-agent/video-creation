@@ -13,6 +13,7 @@ import { sceneSourceContract, projectSceneSourceErrorReceipt, SCENE_SOURCE_LIMIT
 import { timelineOpsSchema } from '../packages/openfilm/studio/server/op-schema.mjs';
 import { normalizeReviewRequest, reviewContract } from '../packages/openfilm/studio/server/reviews.mjs';
 import { normalizeVideoExportOptions } from '../packages/openfilm/studio/server/video-export-options.mjs';
+import { reviewLocalOptionsOf, reviewCopyRoot, copyReviewImages } from './review-local.mjs';
 
 export const HELP = `视频创作 — 本地影片编辑与视频导演协作
 
@@ -40,6 +41,8 @@ node desirecore/cli.mjs <命令> [项目目录] [选项]
     或 --source review-pair --before-review <ID> --after-review <ID> [--before-frame 0 --after-frame 0]
                                                    生成带版本、实际帧时间和 SHA-256 的审片 PNG 与结构化测量
   review --schema                                 离线发现同源请求、finding 和组合图 Schema
+  review <项目> --read <已有reviewId>              读取原回执，不重新捕获
+    [--copy-to <已授权目录>]                        可用于捕获或已有回执，把核SHA的PNG存入本地供Read读取
   get <项目> [媒体动词] --args <JSON文件>             复用已连接媒体服务；无动词时只读能力目录
     --via <provider> --model <model>                明确选择服务与模型；不从参数读取密钥
   render <项目> [--output <目录>] [--wait]           提交固定输入的视频导出
@@ -61,6 +64,7 @@ export function argumentsOf(args) {
   return parseArgs({ args, allowPositionals: true, options: {
     home: { type: 'string' }, project: { type: 'string' }, port: { type: 'string' },
     schema: { type: 'boolean' },
+    read: { type: 'string' }, 'copy-to': { type: 'string' },
     'no-browser': { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
     base: { type: 'string' }, ops: { type: 'string' }, output: { type: 'string' },
     source: { type: 'string' }, job: { type: 'string' }, times: { type: 'string' }, count: { type: 'string' }, last: { type: 'boolean' }, 'max-edge': { type: 'string' }, 'target-width': { type: 'string' }, 'first-last': { type: 'boolean' },
@@ -186,6 +190,8 @@ export async function command(args, output = (value) => process.stdout.write(`${
     return;
   }
   if (values.help || !name) { process.stdout.write(`${HELP}\n`); return; }
+  const reviewLocal = name === 'review' ? reviewLocalOptionsOf(values) : {};
+  const copyRoot = reviewLocal.copyTo ? await reviewCopyRoot(reviewLocal.copyTo) : null;
   const config = runtimeConfig(values);
   applyRuntimeEnvironment(config);
   if (name === 'setup-runtime') return output(await (await import('./setup-runtime.mjs')).setupRuntime(config));
@@ -230,7 +236,15 @@ export async function command(args, output = (value) => process.stdout.write(`${
     if (!values.ops) throw new Error('patch 需要 --ops JSON 文件。');
     return output(await client.patch(values.base, JSON.parse(readFileSync(resolve(values.ops), 'utf8'))));
   }
-  if (name === 'review') return output(await client.review(reviewOptionsOf(values)));
+  if (name === 'review') {
+    const receipt = reviewLocal.read ? await client.reviewReceipt(reviewLocal.read) : await client.review(reviewOptionsOf(values));
+    if (!copyRoot) return output(receipt);
+    try { return output({ ...receipt, localCopies: await copyReviewImages(client, receipt, copyRoot) }); }
+    catch (e) {
+      output({ ...receipt, localCopies: { status: 'failed', error: e.message } });
+      throw new Error(`本地副本未完成；原review ${receipt.reviewId}保留。请用--read读取该ID恢复，不要重复捕获。`, { cause: e });
+    }
+  }
   if (name === 'check') {
     const { look } = await import('../packages/openfilm/src/look.mjs');
     const result = await look([client.project.path, ...(target ? [target] : [])], { count: 6, ...(values['target-width'] !== undefined ? { targetWidth: Number(values['target-width']) } : {}) });
