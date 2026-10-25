@@ -1131,8 +1131,8 @@
     },
     {
       "path": "packages/openfilm/studio/server/server.mjs",
-      "sha256": "24842dfd7d7c0cedbc14f50d0ee004d2505089c24573c62cd3e7709fcfe3884a",
-      "size": 78906,
+      "sha256": "de060cd9baf7c9d74035b7a41134b8144a5b0b1172ebd2f54deb3b3f185db07d",
+      "size": 79141,
       "role": "runtime"
     },
     {
@@ -1252,7 +1252,7 @@
   ],
   "source": {
     "kind": "worktree",
-    "sha256": "b0107a14143a9c607f675dbe35f49b983b304bd6ae664e7bcdab627bd15652f3"
+    "sha256": "aecdcfb62a30cd91387d6ff8996a9cf6a2455b8faba8ffed1c11c25ac8012884"
   },
   "supportedPlatforms": [
     "darwin",
@@ -1285,5 +1285,5 @@
     "restoreInstructionsPath": "desirecore/RUNTIME.md"
   },
   "instructionsPath": "desirecore/RUNTIME.md",
-  "releaseDigest": "a9f94df4d82ef642cf6cb132bcb6d7a67650d915e8467fed5701973c7c088e05"
+  "releaseDigest": "06260ff1ccc33693f1fb18602565b7270c9b2cad076e72865c2e58d0fac6497f"
 }
