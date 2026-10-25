@@ -5,7 +5,7 @@ import { api } from '@/api';
 import { useT } from '@/i18n';
 import { pointsOf, reviewImage, type ReviewRecord, type ReviewSummary, type ReviewTarget, type ReviewPoint } from '@/lib/reviews';
 
-export type ReviewSelection = { reviewId: string; pointKey: string; before?: string; after?: string; scrollTop?: number } | null;
+export type ReviewSelection = { reviewId: string; pointKey: string; before?: string; after?: string; scrollTop?: number; zoom?: boolean } | null;
 export function ReviewDialog({ projectId, selection, onSelection, onClose, onEngineering, onMediaPlay }: {
   projectId: string; selection: ReviewSelection; onSelection: (s: ReviewSelection) => void; onClose: () => void;
   onEngineering: (point: ReviewPoint, isCurrent: () => boolean) => Promise<void>; onMediaPlay: (media: HTMLVideoElement) => void;
@@ -18,11 +18,11 @@ export function ReviewDialog({ projectId, selection, onSelection, onClose, onEng
   const [nextOffset, setNextOffset] = React.useState<number | null>(null);
   const [list, setList] = React.useState<ReviewSummary[]>([]), [record, setRecord] = React.useState<ReviewRecord | null>(null);
   const [pointKey, setPointKey] = React.useState(selection?.pointKey ?? ''), [target, setTarget] = React.useState<ReviewTarget | null>(null);
-  const [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false), [zoom, setZoom] = React.useState(false);
+  const [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false), [zoom, setZoom] = React.useState(selection?.zoom ?? false);
   const [before, setBefore] = React.useState(selection?.before ?? ''), [after, setAfter] = React.useState(selection?.after ?? '');
   const [listNotice, setListNotice] = React.useState(false);
   const initialSelection = React.useRef(selection);
-  const finishClose = () => { onSelection({ reviewId: record?.reviewId ?? selection?.reviewId ?? '', pointKey, before, after, scrollTop: overview.current?.scrollTop ?? 0 }); onClose(); };
+  const finishClose = () => { onSelection({ reviewId: record?.reviewId ?? selection?.reviewId ?? '', pointKey, before, after, scrollTop: overview.current?.scrollTop ?? 0, zoom }); onClose(); };
   close.current = finishClose;
   React.useLayoutEffect(() => { if (record?.reviewId === initialSelection.current?.reviewId && overview.current) overview.current.scrollTop = initialSelection.current?.scrollTop ?? 0; }, [record?.reviewId]);
   const sourceName = (kind: string) => t(`review.source.${kind}`);
@@ -68,7 +68,7 @@ export function ReviewDialog({ projectId, selection, onSelection, onClose, onEng
       await loadList(); if (ticket !== generation.current) return; setRecord(r); const key = pointsOf(r)[0]?.key ?? ''; setPointKey(key); onSelection({ reviewId: r.reviewId, pointKey: key });
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
-  const options = list.flatMap((r) => r.frames.map((f) => ({ value: `${r.reviewId}:${f.index}`, label: `${sourceName(r.sourceKind)} · ${r.filmRevision?.slice(0, 8)} · ${f.actualTime.toFixed(3)}s` })));
+  const options = list.flatMap((r) => r.frames.map((f) => ({ value: `${r.reviewId}:${f.index}`, label: `${sourceName(r.sourceKind)} · ${r.filmRevision?.slice(0, 8)} · ${f.actualTime.toFixed(3)}s · ${r.reviewId.slice(0, 8)}` })));
   const BTN = 'rounded-md border border-[var(--border)] px-3 py-1.5 text-[13px] hover:bg-[var(--bg-hover)] disabled:opacity-40';
   return createPortal(<div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-3" onPointerDown={(e) => { if (e.target === e.currentTarget) finishClose(); }}>
     <div ref={root} role="dialog" aria-modal="true" aria-label={t('review.title')} className="flex max-h-[92vh] w-[min(1280px,96vw)] min-w-0 flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] shadow-xl">
