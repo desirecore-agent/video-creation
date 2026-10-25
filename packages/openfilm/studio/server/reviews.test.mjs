@@ -199,7 +199,7 @@ test('firstLast规范补首尾且仍受六帧预算，CLI及MCP发现同源P1合
   const { reviewContract, reviewRequestSchema } = await import('./review-contract.mjs');
   const { command } = await import('../../../../desirecore/cli.mjs');
   let contract; await command(['review', '--schema'], (value) => { contract = value; });
-  assert.equal(contract, reviewContract); assert.equal(contract.contractVersion, 3);
+  assert.equal(contract, reviewContract); assert.equal(contract.contractVersion, 4);
   assert.equal(tools.find((tool) => tool.name === 'video_review').inputSchema, reviewRequestSchema);
   assert.deepEqual(reviewOptionsOf({ source: 'current-project', 'first-last': true, 'target-width': '390' }), { source: 'current-project', firstLast: true, targetWidth: 390, times: [0], last: true, maxEdge: 1280 });
   assert.deepEqual(normalizeReviewRequest({ source: 'current-project', times: [0.25], firstLast: true }).times, [0, 0.25]);
@@ -278,7 +278,7 @@ test('公开review Schema离线发现不创建home或项目，也不读取无效
   const { command } = await import('../../../../desirecore/cli.mjs');
   const home = join(root, 'must-not-create'); let schema;
   await command(['review', '--schema', '--home', home], (value) => { schema = value; });
-  assert.equal(schema.contractVersion, 3); assert.equal(schema.requestSchema.properties.source.enum[1], 'export-job');
+  assert.equal(schema.contractVersion, 4); assert.equal(schema.requestSchema.properties.source.enum[1], 'export-job');
   await assert.rejects(stat(home));
 }));
 

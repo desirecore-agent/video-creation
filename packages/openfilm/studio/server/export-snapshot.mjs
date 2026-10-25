@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { filmClosure, folderView } from './closure.mjs';
 import { FILM_FILE } from '../../src/film-doc.mjs';
+import { reviewFacts } from './review-facts.mjs';
 
 export const exportRuntimeSchema = {
   $schema: 'http://json-schema.org/draft-07/schema#',
@@ -40,7 +41,7 @@ export async function snapshotFilm(root, dir, { signal, maxFiles = 10000, maxByt
   if (bytes > maxBytes) throw new Error(`Render input needs ${bytes} bytes; the snapshot limit is ${maxBytes}.`);
   /** @type {Map<string, string>} */
   const stamps = new Map();
-  /** @type {{ version: number, createdAt: number, source: string, filmRevision: string, bytes: number, files: { path: string, bytes: number, sha256: string }[], limitations: string[] }} */
+  /** @type {{ version: number, createdAt: number, source: string, filmRevision: string, bytes: number, files: { path: string, bytes: number, sha256: string }[], limitations: string[], reviewFacts?: ReturnType<typeof reviewFacts> }} */
   const manifest = { version: 1, createdAt: Date.now(), source: root, filmRevision: '', bytes, files: [],
     limitations: ['Only local inputs resolved by OpenFilm filmClosure are frozen. Dynamically constructed paths must name their dependencies in page code; remote resources are not snapshotted.'] };
   try {
@@ -69,7 +70,10 @@ export async function snapshotFilm(root, dir, { signal, maxFiles = 10000, maxByt
       aborted(signal);
       if (stamp(await stat(join(root, ...name.split('/')))) !== before) throw new Error(`Render input changed while snapshotting: ${name}. Retry after saving the project.`);
     }
-    manifest.filmRevision = createHash('sha256').update(await readFile(join(dir, FILM_FILE))).digest('hex').slice(0, 16);
+    const filmBytes = await readFile(join(dir, FILM_FILE));
+    manifest.filmRevision = createHash('sha256').update(filmBytes).digest('hex').slice(0, 16);
+    // 与已冻结输入一起记录，不在将来的审片中借live工程补造旧事实。
+    manifest.reviewFacts = reviewFacts(filmBytes);
     await writeFile(join(dirname(dir), 'input-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
     return manifest;
   } catch (error) {

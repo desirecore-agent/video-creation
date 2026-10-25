@@ -1,6 +1,6 @@
 /** 带来源的只读审片。派生材料属于应用数据根，影片、人工锁和导出记录均不改写。 */
 import { constants, createReadStream } from 'node:fs';
-import { chmod, copyFile, mkdir, readFile, lstat, open as openFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, lstat, open as openFile, rm, readdir, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { addAbortSignal } from 'node:stream';
@@ -12,6 +12,8 @@ import { filmClosure, folderView } from './closure.mjs';
 import { readProjectFilm } from './film.mjs';
 import { reviewRequestSchema } from './review-contract.mjs';
 import { reviewPresentation, downscaleReviewPNG, firstLastLayout, firstLastReviewPNG, observationGridPNG } from '../../src/review-derivatives.mjs';
+import { cellLabel, labelBandHeight } from '../../src/review-labels.mjs';
+import { reviewFacts, reviewFactsDigest, compareReviewFacts } from './review-facts.mjs';
 import { sequenceWindow, sequenceLayout, comparisonLayout } from '../../src/review-sequence.mjs';
 export { reviewRequestSchema, reviewContract } from './review-contract.mjs';
 
@@ -23,6 +25,11 @@ export class ReviewError extends Error {
 }
 export function normalizeReviewRequest(value) {
   if (!validate(value)) throw new ReviewError(`审片参数无效：${ajv.errorsText(validate.errors)}`, 400, 'invalid-request');
+  if (value.source === 'review-pair') {
+    if (!value.before || !value.after || Object.keys(value).some((key) => !['source', 'before', 'after', 'maxEdge', 'targetWidth'].includes(key))) throw new ReviewError('review-pair只接受before/after已有帧与观看尺寸。', 400, 'invalid-request');
+    return { ...value, maxEdge: value.maxEdge ?? 1280 };
+  }
+  if (value.before || value.after) throw new ReviewError('before/after只用于review-pair。', 400, 'invalid-request');
   if ((value.source === 'export-job') !== Boolean(value.job)) throw new ReviewError('只有 export-job 需要且必须提供 job。', 400, 'invalid-request');
   if (value.times && value.count !== undefined) throw new ReviewError('times 与 count 不能同时提供。', 400, 'invalid-request');
   if ([Boolean(value.firstLast), Boolean(value.sequence), Boolean(value.compareWidths)].filter(Boolean).length > 1) throw new ReviewError('firstLast、sequence和compareWidths一次只能选择一种制品。', 400, 'invalid-request');
@@ -62,6 +69,14 @@ async function localInputs(root, signal) {
     files.push({ path: name, ...digest });
   }
   return { files, bytes, sha256: createHash('sha256').update(JSON.stringify(files)).digest('hex') };
+}
+/** 编码定位用整数时间基，不能把已舍入的秒数推到帧边界之前。旧材料缺数据则未知。 */
+function encodedPointSeconds(receipt, point) {
+  if (!/^-?[0-9]+$/.test(receipt.timeOriginPTSTicks ?? '') || !/^-?[0-9]+$/.test(point.actualPTSTicks ?? '') || !/^[0-9]+\/[0-9]+$/.test(point.ptsTimeBase ?? '')) return null;
+  const [num, den] = point.ptsTimeBase.split('/').map(Number);
+  if (!(num > 0 && den > 0)) return null;
+  const seconds = Number(BigInt(point.actualPTSTicks) - BigInt(receipt.timeOriginPTSTicks)) * num / den;
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
 }
 const sameDigest = (a, b) => a.bytes === b.bytes && a.sha256 === b.sha256;
 
@@ -127,7 +142,7 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
     let receipt;
     try { receipt = JSON.parse(await readFile(join(directory(id), 'review.json'), 'utf8')); }
     catch (e) { if (e instanceof ReviewError) throw e; throw new ReviewError('找不到可读取的审片回执。', 404, 'missing-review'); }
-    if (receipt.reviewId !== id || receipt.projectId !== project.id || ![1, 2, 3].includes(receipt.version) || !Array.isArray(receipt.frames) || receipt.frames.length < 1 || receipt.frames.length > REVIEW_MAX_FRAMES) throw new ReviewError('审片回执与项目或材料不匹配。', 409, 'receipt-mismatch');
+    if (receipt.reviewId !== id || receipt.projectId !== project.id || ![1, 2, 3, 4].includes(receipt.version) || !Array.isArray(receipt.frames) || receipt.frames.length < (receipt.version === 4 && receipt.sourceKind === 'review-pair' ? 0 : 1) || receipt.frames.length > REVIEW_MAX_FRAMES) throw new ReviewError('审片回执与项目或材料不匹配。', 409, 'receipt-mismatch');
     return receipt;
   };
   const exactPNG = async (id, declared, file, expectedSha256, missingCode) => {
@@ -140,6 +155,58 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
   };
   return {
     read,
+    async list(project, offset = 0) {
+      if (!Number.isInteger(offset) || offset < 0 || offset > 10000) throw new ReviewError('材料分页参数无效。', 400, 'invalid-request');
+      let entries;
+      try { entries = await readdir(root, { withFileTypes: true }); } catch (e) { if (e.code === 'ENOENT') return { reviews: [], limited: false, unavailable: 0, nextOffset: null }; throw e; }
+      const ids = entries.filter((e) => e.isDirectory() && /^[a-f0-9]{24}$/.test(e.name));
+      const dated = await Promise.all(ids.map(async (e) => ({ id: e.name, at: (await stat(directory(e.name))).birthtimeMs })));
+      const summaries = []; let unavailable = 0;
+      for (const row of dated.sort((a, b) => b.at - a.at).slice(offset, offset + 50)) {
+        try {
+          const r = await read(project, row.id);
+          summaries.push({ reviewId: r.reviewId, createdAt: r.createdAt, sourceKind: r.sourceKind, filmRevision: r.filmRevision, frames: r.frames.map((f) => ({ index: f.index, actualTime: f.actualTime })), artifactKinds: (r.artifacts ?? []).map((a) => a.kind) });
+        } catch (e) { if (e.code !== 'receipt-mismatch') unavailable++; }
+      }
+      return { reviews: summaries.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))), limited: offset + 50 < ids.length, unavailable, nextOffset: offset + 50 < ids.length ? offset + 50 : null };
+    },
+    async target(project, id, kind, index, verifyEngineering = false) {
+      const r = await read(project, id);
+      const point = kind === 'frame' ? r.frames[index] : kind === 'sequence' ? r.artifacts?.find((a) => a.artifactId === 'sequence')?.derivedFrom[index] : null;
+      if (!Number.isInteger(index) || index < 0 || !point || !Number.isFinite(point.actualTime)) throw new ReviewError('没有此审片观察点。', 404, 'missing-frame');
+      const mapping = r.sourceKind === 'current-project' ? { start: 0, rate: 1, filmRevision: r.filmRevision }
+        : r.source?.output?.outputTimeToFilmTime;
+      const seconds = r.sourceKind === 'current-project' ? point.actualTime : encodedPointSeconds(r, point);
+      const mapped = seconds !== null && mapping && (r.sourceKind === 'current-project' || (mapping.version === 1 && mapping.kind === 'linear-film-time')) && mapping.rate === 1 && mapping.start >= 0 && mapping.filmRevision === r.filmRevision;
+      let engineering = { status: mapped ? 'requires-source-check' : 'unavailable', reason: mapped ? 'verify-current-inputs-before-seek' : 'time-mapping-unavailable' };
+      if (mapped && verifyEngineering) {
+        try {
+          const current = await localInputs(project.path), film = await readProjectFilm(project.path), expected = r.source.inputs?.files;
+          const rows = Array.isArray(expected) && expected.every((f) => /^[a-f0-9]{64}$/.test(f.sha256)) ? [...expected].map(({ path, bytes, sha256 }) => ({ path, bytes, sha256 })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) : null;
+          const oldDigest = rows ? createHash('sha256').update(JSON.stringify(rows)).digest('hex') : null;
+          engineering = film.rev === r.filmRevision && oldDigest === current.sha256
+            ? { status: 'verified-at-check', timeMs: (mapping.start + seconds) * 1000, filmRevision: film.rev, inputSha256: current.sha256 }
+            : { status: 'unavailable', reason: 'current-inputs-changed' };
+        } catch { engineering = { status: 'unavailable', reason: 'current-inputs-unavailable' }; }
+      }
+      return { reviewId: id, filmRevision: r.filmRevision, sourceKind: r.sourceKind, point,
+        playback: r.sourceKind === 'export-job' ? { status: 'verify-at-media-open', url: `/api/projects/${encodeURIComponent(project.id)}/reviews/${id}/video?expected_sha256=${r.source.output.sha256}`, canLocate: seconds !== null && r.timeOriginPTSTicks === '0', time: seconds !== null && r.timeOriginPTSTicks === '0' ? seconds : null, limitation: seconds !== null && r.timeOriginPTSTicks === '0' ? null : 'media-origin-not-proven' } : null,
+        engineering, limitations: ['历史图片始终归其捕获版本；工程定位前重新校验当前静态输入，本地未保存内容另由编辑器检查。', '播放来源在打开时核验摘要；外部写者之后的修改不属于文件系统快照或事务保证。'] };
+    },
+    async video(project, id, expectedSha256) {
+      const r = await read(project, id), source = r.source?.output;
+      const job = jobs?.(project.id)?.find((j) => j.id === r.source?.jobId);
+      if (r.sourceKind !== 'export-job' || !source || expectedSha256 !== source.sha256 || job?.status !== 'done' || job.out !== source.path || !job.outputs.includes(source.path)) throw new ReviewError('历史成片引用与完成任务不符。', 409, 'stale');
+      const handle = await openFile(source.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      try {
+        const before = await handle.stat();
+        if (!before.isFile() || before.size !== source.bytes || before.size > 2 * 1024 ** 3) throw new ReviewError('历史成片已变化。', 409, 'stale');
+        const hash = createHash('sha256');
+        for await (const chunk of handle.createReadStream({ start: 0, autoClose: false })) hash.update(chunk);
+        if (hash.digest('hex') !== source.sha256 || stamp(before) !== stamp(await handle.stat()) || stamp(before) !== stamp(await lstat(source.path))) throw new ReviewError('历史成片字节已变化。', 409, 'stale');
+        return { file: source.path, handle, size: before.size, mtimeMs: before.mtimeMs, etag: source.sha256 };
+      } catch (error) { await handle.close(); throw error; }
+    },
     busy: () => pending > 0,
     async close() { closed = true; for (const controller of active) controller.abort(); await tail; },
     async frame(project, id, index, expectedSha256) {
@@ -150,7 +217,7 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
     async artifact(project, id, artifactId, expectedSha256) {
       const receipt = await read(project, id);
       const declared = receipt.artifacts?.find((item) => item.artifactId === artifactId);
-      if (!['first-last', 'sequence', 'size-comparison'].includes(artifactId) || !declared) throw new ReviewError('没有此审片制品。', 404, 'missing-artifact');
+      if (!['first-last', 'sequence', 'size-comparison', 'revision-comparison'].includes(artifactId) || !declared) throw new ReviewError('没有此审片制品。', 404, 'missing-artifact');
       return exactPNG(id, declared, join(directory(id), `artifact-${artifactId}.png`), expectedSha256, 'missing-artifact');
     },
     create(project, ask) {
@@ -168,6 +235,39 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
     },
   };
 
+  async function pair(project, request, reviewId, dir, signal) {
+    const references = [request.before, request.after], captures = [], derivedFrom = [], originals = [];
+    for (const [side, ref] of references.entries()) {
+      signal.throwIfAborted();
+      const r = await read(project, ref.reviewId), f = r.frames[ref.frameIndex];
+      if (!f || !Number.isFinite(f.actualTime) || r.sourceKind === 'review-pair') throw new ReviewError('前后对照必须引用已有timed frame。', 400, 'invalid-request');
+      const observed = await exactPNG(ref.reviewId, f, join(directory(ref.reviewId), `frame-${ref.frameIndex}.png`), ref.expectedSha256, 'missing-frame');
+      captures.push(observed.data); originals.push(r);
+      derivedFrom.push({ side: side === 0 ? 'before' : 'after', reviewId: r.reviewId, frameIndex: ref.frameIndex, filmRevision: r.filmRevision, sourceKind: r.sourceKind, source: { kind: r.source.kind, jobId: r.source.jobId, output: r.source.output ? { sha256: r.source.output.sha256, bytes: r.source.output.bytes, digestOrigin: r.source.output.digestOrigin, outputTimeToFilmTime: r.source.output.outputTimeToFilmTime } : undefined, inputs: { filmRevision: r.source.inputs?.filmRevision, sha256: r.source.inputs?.sha256, digestOrigin: r.source.inputs?.digestOrigin }, consistency: r.source.consistency }, actualTime: f.actualTime, actualPTS: f.actualPTS, actualPTSTicks: f.actualPTSTicks, ptsTimeBase: f.ptsTimeBase, timeBasis: f.timeBasis, sha256: f.sha256, bytes: f.bytes, width: f.width, height: f.height });
+    }
+    const band = labelBandHeight(request.maxEdge), target = Math.min(request.targetWidth ?? Infinity, ...derivedFrom.map((f) => f.width), Math.floor(request.maxEdge / 2));
+    const factor = Math.min(1, (request.maxEdge - band) / Math.max(...derivedFrom.map((f) => f.height * target / f.width))), width = Math.max(1, Math.floor(target * factor));
+    const cells = derivedFrom.map((f, i) => ({ x: i * width, y: band, width, height: Math.max(1, Math.floor(f.height * width / f.width)), sourceWidth: f.width, sourceHeight: f.height, scale: width / f.width, actualTime: f.actualTime, actualPTS: f.actualPTS, timeBasis: f.timeBasis,
+      label: cellLabel(`${i} ${f.actualTime.toFixed(3)}s`, String(i), i * width, 0, width, band) }));
+    const layout = { coordinateSpace: 'artifact-pixels', width: width * 2, height: Math.max(...cells.map((c) => c.height)) + band, maxEdge: request.maxEdge, labelBandHeight: band, cells };
+    const png = await composeGrid(captures, layout, { signal }), digest = pngDigest(png), file = join(dir, 'artifact-revision-comparison.png');
+    const actual = pngSize(png); if (actual.width !== layout.width || actual.height !== layout.height) throw new ReviewError('前后对照图尺寸不符。');
+    await writeFile(file, png, { flag: 'wx', mode: 0o600 });
+    const published = await readReviewPNG(file, signal);
+    if (!sameDigest(published, digest) || published.width !== layout.width || published.height !== layout.height) throw new ReviewError('组合后PNG已变化。', 409, 'stale');
+    // 组合结束再次核原图片，不以读过一次的旧摘要掩盖并发改写。
+    for (const [i, ref] of references.entries()) {
+      await exactPNG(ref.reviewId, originals[i].frames[ref.frameIndex], join(directory(ref.reviewId), `frame-${ref.frameIndex}.png`), derivedFrom[i].sha256, 'missing-frame');
+      if (JSON.stringify(await read(project, ref.reviewId)) !== JSON.stringify(originals[i])) throw new ReviewError('组合期间来源回执变化。', 409, 'stale');
+    }
+    const artifact = { artifactId: 'revision-comparison', kind: 'revision-comparison', timeBasis: 'composite-not-timed-frame', path: file, ...digest, mimeType: 'image/png', url: `/api/projects/${encodeURIComponent(project.id)}/reviews/${reviewId}/artifacts/revision-comparison`, width: layout.width, height: layout.height, derivedFrom, layout, presentation: { requestedTargetWidth: request.targetWidth ?? null, actualCommonWidth: width, policy: 'smallest-existing-frame-and-artifact-cap-no-upscale' }, differences: compareReviewFacts(...originals), limitations: ['0=before、1=after；两侧时点由调用者选择，仅数值相同不证明语义对齐。', '复用已有PNG，只缩小，不重新渲染、自动判优或修改任何源。'] };
+    const receipt = { version: 4, reviewId, projectId: project.id, sourceKind: 'review-pair', filmRevision: null, createdAt: new Date().toISOString(), request, source: { kind: 'review-pair', before: references[0], after: references[1] }, frames: [], artifacts: [artifact], findings: [], coverage: [], totalFrameBytes: 0, totalImageBytes: digest.bytes, observation: 'generated-not-viewed', observationNote: '须按此artifact自身SHA实际Read后再作视觉判断。' };
+    signal.throwIfAborted();
+    await writeFile(join(dir, 'review.json'), `${JSON.stringify(receipt, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+    signal.throwIfAborted();
+    return receipt;
+  }
+
   async function generate(project, request, signal) {
     signal.throwIfAborted();
     const reviewId = newId(), dir = directory(reviewId);
@@ -175,9 +275,10 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
     // 仅本次独占创建成功后才进入清理区间，碰撞不能覆盖或删除原审片。
     try { await mkdir(dir, { mode: 0o700 }); }
     catch (error) { if (error.code === 'EEXIST') throw new ReviewError('审片 ID 已存在，请重新请求。', 409, 'review-id-collision'); throw error; }
-    let result, source, filmRevision, cleanup = [];
+    let result, source, filmRevision, sourceFacts = { status: 'unknown', reason: 'captured-facts-unavailable' }, cleanup = [];
     try {
       signal.throwIfAborted();
+      if (request.source === 'review-pair') return await pair(project, request, reviewId, dir, signal);
       if (request.source === 'export-job') {
         const job = jobs?.(project.id)?.find((j) => j.id === request.job);
         if (!job) throw new ReviewError('找不到此项目的导出任务。', 404, 'missing-job');
@@ -194,7 +295,8 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
         try { manifest = JSON.parse(await readFile(job.inputSnapshot.manifest, 'utf8')); } catch {}
         if (manifest && manifest.filmRevision !== job.inputSnapshot.filmRevision) throw new ReviewError('任务输入清单版本不匹配。', 409, 'receipt-mismatch');
         filmRevision = job.inputSnapshot.filmRevision;
-        source = { kind: 'export-job', jobId: job.id, jobStatus: 'done', output: { path: job.out, ...copied, digestOrigin: 'observed-at-review', exportCompletionDigest: null, outputTimeToFilmTime: null },
+        if (manifest?.reviewFacts && job.inputSnapshot.reviewFactsSha256 && reviewFactsDigest(manifest.reviewFacts) === job.inputSnapshot.reviewFactsSha256 && manifest.reviewFacts.filmSha256?.slice(0, 16) === filmRevision) sourceFacts = manifest.reviewFacts;
+        source = { kind: 'export-job', jobId: job.id, jobStatus: 'done', output: { path: job.out, ...copied, digestOrigin: 'observed-at-review', exportCompletionDigest: null, outputTimeToFilmTime: job.inputSnapshot.outputTimeToFilmTime ?? null },
           inputs: { filmRevision, manifest: job.inputSnapshot.manifest, files: manifest?.files ?? null, digestOrigin: 'export-input-manifest',
             limitations: [...(job.inputSnapshot.limitations ?? []), '新输入清单逐项 SHA-256 来自提交时冻结副本；旧清单可能只有 path/bytes，没有摘要时不能证明导出时每个场景或资源的 SHA-256。输出摘要在本次审片复制时观察，不是导出完成时的摘要。输出的播放相对时间不等于原 film 时间；range/clip 等导出不提供隐式全局时间映射。'] },
           consistency: 'independent-output-copy-checked-against-observed-source' };
@@ -208,6 +310,7 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
         const film = await readProjectFilm(frozen);
         if (!film.doc || film.problems?.length) throw new ReviewError('工程结构无效，不能生成审片。');
         filmRevision = manifest.filmRevision;
+        sourceFacts = manifest.reviewFacts ?? reviewFacts(await readFile(join(frozen, 'film.html')));
         source = { kind: 'current-project', inputs: { filmRevision, ...snapshot, digestOrigin: 'review-static-local-snapshot', limitations: manifest.limitations },
           consistency: 'local-snapshot-with-live-before-after-checks', limitations: ['静态本地依赖沿既有 filmClosure 冻结。远端资源、未解析的动态依赖和浏览器/字体环境不属于这个摘要，不能宣称原子冻结整个运行环境。'] };
         result = await drawProject(frozen, dir, request, film.doc.stage, { signal });
@@ -300,12 +403,13 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
       const findings = request.source === 'export-job' ? [{ code: 'dom-analysis', severity: 'info', status: 'unknown', time: null, source: { kind: 'export-job' }, selector: null, bounds: null, measurement: {}, evidence: [], limitations }] : result.findings ?? [];
       const coverage = request.source === 'export-job' ? [{ code: 'dom-analysis', status: 'unknown', time: null, source: { kind: 'export-job' }, details: { measured: false, reason: 'encoded-output-has-no-current-dom' }, limitations }] : result.coverage ?? [];
       const temporal = result.sequence ? { ...result.sequence.temporal, source: { kind: request.source, reviewId, filmRevision, ...(source.output ? { outputSha256: source.output.sha256 } : { inputSha256: source.inputs.sha256 }) } } : null;
-      const receipt = { version: request.sequence || request.compareWidths ? 3 : 2, reviewId, sourceKind: request.source, projectId: project.id, filmRevision, createdAt: new Date().toISOString(), request, source,
-        duration: result.duration, durationOrigin: result.durationOrigin ?? 'project-duration', timeOrigin: result.timeOrigin ?? 'project-timeline', timeOriginPTS: result.timeOriginPTS ?? null, ...(result.encodedRange ? { encodedRange: result.encodedRange } : {}), lastFramePolicy: result.lastFramePolicy,
+      const receipt = { version: request.sequence || request.compareWidths ? 3 : 2, sourceFacts, reviewId, sourceKind: request.source, projectId: project.id, filmRevision, createdAt: new Date().toISOString(), request, source,
+        duration: result.duration, durationOrigin: result.durationOrigin ?? 'project-duration', timeOrigin: result.timeOrigin ?? 'project-timeline', timeOriginPTS: result.timeOriginPTS ?? null, ...(result.timeOriginPTSTicks !== undefined ? { timeOriginPTSTicks: result.timeOriginPTSTicks } : {}), ...(result.encodedRange ? { encodedRange: result.encodedRange } : {}), lastFramePolicy: result.lastFramePolicy,
         frames, artifacts, ...(temporal ? { temporal } : {}), findings: findings.map(bind), coverage: coverage.map(bind), totalFrameBytes: frames.reduce((n, frame) => n + frame.bytes, 0), totalImageBytes: total,
         observation: 'generated-not-viewed', observationNote: '回执只证明生成和测量。导演应通过 Read(path, expected_sha256) 实际读取必要图片；图片进入请求不证明模型理解。DOM 与 PNG 是同一求帧采样窗口，不是像素与 DOM 原子快照。' };
       signal.throwIfAborted();
       await writeFile(join(dir, 'review.json'), `${JSON.stringify(receipt, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+      signal.throwIfAborted();
       return receipt;
     } catch (error) {
       await rm(dir, { recursive: true, force: true });

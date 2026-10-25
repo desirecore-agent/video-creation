@@ -48,6 +48,7 @@
  * into the picture as the editor shows them (captions.mjs: the cues and the person's style). `folder`: an absolute
  * path (or ~/…) to write to instead of the exports folder.
  */
+import { reviewFactsDigest, exportReviewMapping } from './review-facts.mjs';
 import { execFile, fork, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { constants as fsConstants, existsSync, readFileSync, statSync } from 'node:fs';
@@ -102,7 +103,7 @@ export { exportsRoot };
  *   out?: string, outputs: string[], bytes: number | null, outputSizes?: { path: string, bytes: number }[],
  *   alpha: { any: boolean } | null, error?: string, cancelling?: boolean,
  *   at: number, startedAt: number | null, finishedAt: number | null, retryOf?: string, temporaryOutputs?: string[],
- *   inputSnapshot?: { filmRevision: string, bytes: number, files: number, manifest: string, limitations: string[] } }} ExportJob
+ *   inputSnapshot?: { filmRevision: string, bytes: number, files: number, manifest: string, limitations: string[], reviewFactsSha256?: string | null, outputTimeToFilmTime?: ReturnType<typeof exportReviewMapping> } }} ExportJob
  */
 
 export class ExportError extends Error {
@@ -817,7 +818,8 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
       });
       if (item.abort.signal.aborted) throw new Error('cancelled');
       update(job, { inputSnapshot: { filmRevision: manifest.filmRevision, bytes: manifest.bytes, files: manifest.files.length,
-        manifest: join(stateDir, job.id, 'input-manifest.json'), limitations: manifest.limitations } });
+        manifest: join(stateDir, job.id, 'input-manifest.json'), limitations: manifest.limitations,
+        reviewFactsSha256: reviewFactsDigest(manifest.reviewFacts), outputTimeToFilmTime: exportReviewMapping(job.ask, manifest.filmRevision) } });
       return snapshotDir;
     });
     preparations.set(job.id, prepared);

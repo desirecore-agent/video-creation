@@ -26,7 +26,7 @@ function png(width, height) {
 }
 
 test('T3 窗口与CLI合同有界，三种制品互斥且旧请求仍兼容', () => {
-  assert.equal(reviewContract.contractVersion, 3);
+  assert.equal(reviewContract.contractVersion, 4);
   assert.deepEqual(reviewOptionsOf({ source: 'current-project', times: '0', 'sequence-start': '0', 'sequence-end': '3', 'sequence-count': '8' }).sequence, { start: 0, end: 3, count: 8 });
   assert.deepEqual(reviewOptionsOf({ source: 'current-project', times: '0', 'compare-widths': '180,360', 'compare-frame': '0' }).compareWidths, [180, 360]);
   for (const ask of [{ start: 0, end: 31, count: 8 }, { start: 1, end: 1, count: 8 }, { start: 0, end: 1, count: 25 }]) assert.throws(() => sequenceWindow(ask));

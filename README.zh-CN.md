@@ -140,7 +140,7 @@ node desirecore/cli.mjs scene-revise <项目> --args <revision.json> --home <应
 
 ## 时间窗总览与同源多尺寸对照
 
-`review --schema` v3 沿同一CLI／MCP／鉴权HTTP公开两个可选观察方式，不修改作品或人工锁：
+`review --schema`（v3起）沿同一CLI／MCP／鉴权HTTP公开两个可选观察方式，不修改作品或人工锁：
 
 ```sh
 node desirecore/cli.mjs review <项目> --source export-job --job <done任务ID> --times 0 --sequence-start 0 --sequence-end 8 --sequence-count 16 --max-edge 1280 --home <数据根>
@@ -152,3 +152,15 @@ node desirecore/cli.mjs review <项目> --source current-project --times 5 --com
 `compareWidths`的2–3个唯一宽度64–4096从同一target缩小前捕获派生，`compareFrame`为本回执timed index，默认0。竖排对照的每格请求／实际尺寸和限制分列，不放大、不假装响应式重排。DOM字号投影按该格实际宽度，复杂映射保持null；encoded没有当前DOM。捕获摘要与已经缩小的公开frame摘要分开。
 
 firstLast、sequence、compareWidths一次只选一种artifact。仍最多6张timed frame加1张artifact、每PNG4MiB／总12MiB；整图maxEdge可能再缩小每格。整图优先保留格子面积、最多留一个透明空格，不能把空格当黑帧。序列标签在独立带显示格号和3位小数实际秒数，尺寸标签为请求>实际px；源像素不被覆盖。极小格会完整简化或省略标签并在metadata标明，不能据此猜时点；完整时间与整数PTS以layout.cells/derivedFrom为准。实际看图使用artifact自身path和SHA。旧请求／v1、v2回执仍可读。窗口、来源或预算不成立明确失败，不偷偷降采样或改作品。自由场景、原源和人工锁保持；这些观察不是美学、字形对比度、音频或所有OS播放的认证。
+
+## 观看意图、同版本定位与修订对照
+
+review --schema v4沿用同一review / video_review入口，支持片段attrs.data-review-intent中的可选信息角色、目标宽度和说明。标注不驱动自动排版，原人工参数/DOM/锁继续保留；无标注仍可正常使用。
+
+编辑器“审片”入口可浏览已有材料、点选观察格、放大已有图及播放历史成片。工程定位需重新校验准确输入、保存状态和已证明的时间映射；旧任务缺映射不猜。新普通整片/线性选区可以记录映射，旧捕获请求及v1/v2/v3回执兼容。
+
+```sh
+node desirecore/cli.mjs review <项目> --source review-pair --before-review <已有reviewId> --before-frame 0 --after-review <已有reviewId> --after-frame 0 --target-width 360 --home <数据根>
+```
+
+对照复用两个已有timed PNG，不再渲染；每侧源、版本、时点、SHA与实际尺寸独立。只列可证明的输入/已捕获字段差异，缺数据unknown，不自动对齐语义、判优、删除源或解锁。字段、预算及来源边界以唯一Schema与[RUNTIME.md](desirecore/RUNTIME.md)为准。

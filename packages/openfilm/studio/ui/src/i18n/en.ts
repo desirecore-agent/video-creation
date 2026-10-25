@@ -6,6 +6,58 @@ const FILES = typeof navigator !== 'undefined' && /^win/i.test(navigator.platfor
   : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? 'Finder' : 'Files';
 
 export const en = {
+  review: {
+    overview: 'Overview',
+    "pairNote": "The two observations were chosen separately. Their content is not automatically aligned or judged.",
+    "field": {"sourcePath": "Scene reference", "paramsSha256": "Parameters", "locksSha256": "Parameter locks", "overridesSha256": "Human DOM overrides", "visualFieldsSha256": "Layout and timing fields", "flags": "Track switches and locks"},
+    "inputChange": {"input-added": "Input added", "input-removed": "Input no longer used", "input-changed": "Input changed"},
+  "open": "Review",
+  "title": "Review materials",
+  "close": "Close",
+  "material": "Material",
+  "choose": "Choose a material",
+  "refresh": "Refresh",
+  "recentOnly": "Recent materials are shown. Load older records as needed; unreadable materials are not a pass.",
+  "older": "Load older materials",
+  "empty": "No review materials yet. Ask the Director for frames or a window when needed.",
+  "pair": "Before and after",
+  "independentVersions": "Each side has its own version",
+  "artifact": "Review artifact; choose an observation cell",
+  "point": "Observation",
+  "selectedPoint": "Selected observation",
+  "fit": "Fit width",
+  "zoom": "Enlarge image",
+  "zoomNote": "This enlarges existing pixels. Reported dimensions remain the actual source size.",
+  "locateEngineering": "Locate in current project",
+  "engineeringChanged": "Project inputs or unsaved work changed. Nothing was sought; use matching material.",
+  "mappingUnknown": "No proven project-time mapping is available. Only the historical image is shown.",
+  "outputPlayback": "Play this historical output; its digest is checked when opened.",
+  "mediaChanged": "The output changed or cannot play. The current project was not substituted.",
+  "mediaOriginUnknown": "The browser media origin is not proven for this output. The image remains the locator; playback is not sought automatically.",
+  "imageChanged": "This review image changed or is unreadable.",
+  "intent": "Viewing intent (annotation)",
+  "intentInvalid": "The annotation does not match the contract; no role was inferred.",
+  "noIntent": "No viewing intent was recorded for this version. Unannotated does not mean disposable.",
+  "differences": "Captured data differences",
+  "fileChanges": "Input-set changes",
+  "preservedChanges": "Parameter, DOM and lock field changes",
+  "unknown": "Unknown (version data unavailable)",
+  "differencesNote": "An input removed from a set is not a deleted file. Field changes do not identify the editor or prove improved visuals.",
+  "before": "Before observation",
+  "after": "After observation",
+  "makePair": "Create comparison",
+  "working": "Working…",
+  "role": {
+    "essential": "Essential information",
+    "supporting": "Supporting information",
+    "decorative": "Decorative information"
+  },
+  "source": {
+    "current-project": "Project preview",
+    "export-job": "Encoded output",
+    "review-pair": "Version comparison"
+  }
+},
   motion: {
     newRow: 'New row draft',
     saveRow: 'Save row',

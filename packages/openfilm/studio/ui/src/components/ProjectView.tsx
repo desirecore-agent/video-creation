@@ -1,3 +1,5 @@
+import { ReviewDialog, type ReviewSelection } from './ReviewDialog';
+import { maySeekEngineering } from '@/lib/reviews';
 /**
  * A project in Studio: the top bar, then the assets, the picture and the inspector side by side, and the timeline
  * across the bottom. Every pane floats on the darker board; the seams between them are the board showing through and
@@ -252,6 +254,8 @@ export function ProjectView({ projectId, onProject, onLeave }: {
   const settledEdits = React.useRef(new Set<PersonEdit>());
   const initial = React.useMemo(() => (loaded?.doc && loaded.value ? { value: loaded.value, rev: loaded.rev } : null), [loaded?.doc, loaded?.value, loaded?.rev]);
   React.useEffect(() => { if (initial) lastServerDoc.current = initial.value; }, [initial]);
+  const [reviewOpen, setReviewOpen] = React.useState(false);
+  const [reviewSelection, setReviewSelection] = React.useState<ReviewSelection>(null);
   const film = useFilm(projectId, initial, React.useCallback((value: Film, kind: 'edit' | 'server', head?: string) => {
     preview.current?.update(value, head);
     if (kind === 'server') {
@@ -365,6 +369,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
 
   /* ── transport: the sound is the clock; the picture follows it ── */
   const player = React.useRef(new Player());
+  const reviewFilm = React.useRef(film); reviewFilm.current = film;
   React.useEffect(() => () => player.current.close(), []);
   const [playing, setPlaying] = React.useState(false);
   const [timeMs, setTimeMs] = React.useState(0);
@@ -2644,6 +2649,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
                 onTimeline={setTimelineOpen} onInspector={setInspectorOpen}
                 hostPanel={hostPanel ? { label: hostPanel.label, open: hostPanel.open, onChange: hostPanel.setOpen } : null} />
               <ProjectHistoryButton open={historyOpen} onClick={openHistory} className={TOP_BTN} />
+              <button type="button" data-review-entry="" className={TOP_BTN} onClick={() => setReviewOpen(true)}>{t('review.open')}</button>
               <ProjectMenu className={TOP_BTN}
                 onExport={() => {
                   if (previewError) toast.showError(`${t('project.filmCannotExport')} ${previewError}`);
@@ -3024,6 +3030,15 @@ export function ProjectView({ projectId, onProject, onLeave }: {
         </div>
       </div>
 
+      {reviewOpen ? <ReviewDialog projectId={projectId} selection={reviewSelection} onSelection={(next) => setReviewSelection((old) => next ? { ...old, ...next } : null)} onClose={() => setReviewOpen(false)}
+        onMediaPlay={(media) => { player.current.pause(); document.querySelectorAll<HTMLMediaElement>('audio,video').forEach((other) => { if (other !== media) other.pause(); }); }}
+        onEngineering={async (point, isCurrent) => {
+          await reviewFilm.current.settled();
+          const target = await api.reviewTarget(projectId, point.reviewId, point.kind, point.index, true);
+          const current = reviewFilm.current;
+          if (!isCurrent() || !maySeekEngineering(target, current.rev, current.isSettled(), current.error || current.broken)) throw new Error(t('review.engineeringChanged'));
+          seek(target.engineering.timeMs!);
+        }} /> : null}
       <ProjectHistoryControls projectId={projectId} history={history} open={historyOpen} anchor={historyAnchor} onClose={() => setHistoryOpen(false)} />
       <ProjectsPopover open={projectsOpen} currentProjectId={projectId} onOpen={(id) => { setProjectsOpen(false); onProject(id); }} onCurrentRemoved={onLeave} onClose={() => setProjectsOpen(false)} />
       {examplesOpen ? (
