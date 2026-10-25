@@ -84,7 +84,7 @@ const pngDigest = (data) => {
   if (data.length > REVIEW_MAX_FRAME_BYTES) throw new ReviewError('单图超过 4 MiB 审片预算。', 422, 'over-budget');
   return { bytes: data.length, sha256: createHash('sha256').update(data).digest('hex') };
 };
-async function readReviewPNG(file, signal) {
+export async function readReviewPNG(file, signal) {
   signal?.throwIfAborted();
   const before = await lstat(file), parent = await lstat(join(file, '..'));
   if (before.isSymbolicLink() || parent.isSymbolicLink() || !before.isFile() || before.size > REVIEW_MAX_FRAME_BYTES) throw new ReviewError('审片 PNG 被替换或超过原预算。', 409, 'digest-mismatch');

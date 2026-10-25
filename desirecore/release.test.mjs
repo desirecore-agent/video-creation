@@ -23,7 +23,7 @@ function fixture() {
     'packages/openfilm/studio/server/server.mjs', 'packages/openfilm/studio/server/bridge.js',
     'packages/openfilm/studio/ui/dist/index.html', 'packages/openfilm/studio/ui/dist/assets/main.js',
     'packages/openfilm/skills/video/SKILL.md', 'packages/openfilm/examples-index/examples.json',
-    'desirecore/cli.mjs', 'desirecore/application-lock.mjs', 'desirecore/client.mjs', 'desirecore/config.mjs', 'desirecore/config.schema.json',
+    'desirecore/cli.mjs', 'desirecore/application-lock.mjs', 'desirecore/client.mjs', 'desirecore/review-local.mjs', 'desirecore/config.mjs', 'desirecore/config.schema.json',
     'desirecore/mcp.mjs', 'desirecore/setup-runtime.mjs', 'desirecore/ffmpeg-runtime.mjs',
     'desirecore/licenses/example/LICENSE', 'desirecore/licenses/manifest.json',
     'examples/general-motion/product-demo/scene.html', 'examples/general-motion/product-demo/motion.mjs',

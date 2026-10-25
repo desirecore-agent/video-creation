@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { normalizeVideoExportOptions } from '../packages/openfilm/studio/server/video-export-options.mjs';
+import { REVIEW_MAX_FRAME_BYTES } from '../packages/openfilm/src/review-frames.mjs';
 
 export async function connectStudio(config, request = fetch) {
   let run;
@@ -36,7 +37,18 @@ export async function connectStudio(config, request = fetch) {
   const health = await call('/api/health');
   const home = createHash('sha256').update(resolve(config.home)).digest('hex');
   if (health.product !== 'video-creation-studio' || health.home !== home) throw new Error('运行记录属于另一个应用或数据目录，已停止连接。');
-  return { call, origin: origin.origin };
+  const png = async (path, expected) => {
+    if (!path.startsWith('/api/') || !Number.isSafeInteger(expected.bytes) || expected.bytes < 1 || expected.bytes > REVIEW_MAX_FRAME_BYTES || !/^[a-f0-9]{64}$/.test(expected.sha256)) throw new Error('无效的审片PNG引用。');
+    const response = await request(new URL(path, origin), { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(30_000), headers: { 'x-studio-key': run.key } });
+    if (!response.ok) throw new Error(`审片PNG读取失败：HTTP ${response.status}。`);
+    if (response.headers.get('content-type')?.split(';')[0] !== 'image/png' || !response.body) throw new Error('审片响应不是PNG。');
+    const chunks = []; let bytes = 0;
+    for await (const chunk of response.body) { bytes += chunk.length; if (bytes > expected.bytes) throw new Error('审片PNG响应超出回执预算。'); chunks.push(chunk); }
+    const data = Buffer.concat(chunks);
+    if (bytes !== expected.bytes || createHash('sha256').update(data).digest('hex') !== expected.sha256) throw new Error('审片PNG字节与回执摘要不符。');
+    return data;
+  };
+  return { call, png, origin: origin.origin };
 }
 
 export async function projectClient(config, folder, options) {
@@ -77,6 +89,7 @@ export async function projectClient(config, folder, options) {
     },
     review: (ask) => studio.call(`${base}/reviews`, ask, 'POST', { timeoutMs: 10 * 60_000 }),
     reviewReceipt: (id) => studio.call(`${base}/reviews/${encodeURIComponent(id)}`),
+    reviewImage: (id, image) => studio.png(`${base}/reviews/${encodeURIComponent(id)}/${image.artifactId ? `artifacts/${encodeURIComponent(image.artifactId)}` : `frames/${image.frameIndex}`}?expected_sha256=${encodeURIComponent(image.sha256)}`, image),
     jobs: async () => (await studio.call(`${base}/exports?statusOnly=1`)).exports,
     render: async (ask = {}, folder) => (await studio.call(`${base}/exports`, { jobs: [{ kind: 'video', ...normalizeVideoExportOptions({ fps: config.renderFps ?? 30, quality: config.renderQuality ?? 'standard', ...ask }) }], ...(folder ? { folder: resolve(folder) } : {}) }, 'POST', { timeoutMs: config.prepareTimeoutMs ?? 15 * 60_000, unknownReceipt: true })).exports[0],
     retry: (id) => studio.call(`${base}/exports/${encodeURIComponent(id)}/retry`, {}, 'POST', { timeoutMs: config.prepareTimeoutMs ?? 15 * 60_000, unknownReceipt: true }),

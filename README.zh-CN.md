@@ -164,3 +164,5 @@ node desirecore/cli.mjs review <项目> --source review-pair --before-review <�
 ```
 
 对照复用两个已有timed PNG，不再渲染；每侧源、版本、时点、SHA与实际尺寸独立。只列可证明的输入/已捕获字段差异，缺数据unknown，不自动对齐语义、判优、删除源或解锁。字段、预算及来源边界以唯一Schema与[RUNTIME.md](desirecore/RUNTIME.md)为准。
+
+可选本地审片副本：`review <项目> --read <reviewId> --copy-to <已授权目录>`复用已有回执和鉴权PNG，不再捕获。副本保留来源摘要供既有Read使用，同字节可复用，冲突不覆盖，也不授予权限；新捕获同样可选`--copy-to`。详见[运行合同](desirecore/RUNTIME.md)。

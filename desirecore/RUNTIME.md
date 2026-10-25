@@ -127,7 +127,7 @@ CLI 示例：`node desirecore/cli.mjs render <项目> --codec vp9 --alpha --fps 
 
 ## 带来源的审片材料
 
-正式入口是 `review <项目> --source current-project|export-job`、MCP `video_review` 和原鉴权下的 `POST /api/projects/:id/reviews`。HTTP/MCP 共用 `studio/server/review-contract.mjs` 的 Draft-07 `reviewRequestSchema`。CLI `review --schema` 在 home/服务发现前只读返回 `contractVersion:3`、requestSchema/findingSchema/coverageSchema/artifactSchema；原鉴权下 `GET /api/review-schema` 返回同一合同：
+正式入口是 `review <项目> --source current-project|export-job|review-pair`、MCP `video_review` 和原鉴权下的 `POST /api/projects/:id/reviews`。HTTP/MCP 共用 `studio/server/review-contract.mjs` 的 Draft-07 `reviewRequestSchema`。CLI `review --schema` 在 home/服务发现前只读返回 `contractVersion:4`、requestSchema/findingSchema/coverageSchema/artifactSchema；原鉴权下 `GET /api/review-schema` 返回同一合同：
 
 ```json
 {"source":"export-job","job":"真实12位十六进制任务ID","times":[0,2.5],"last":true,"maxEdge":1280}
@@ -135,7 +135,7 @@ CLI 示例：`node desirecore/cli.mjs render <项目> --codec vp9 --alpha --fps 
 
 `source` 必须显式提供。只有 `export-job` 必须提供 `job`，且仅接受此项目真实 `done` 视频任务的主输出；不接受任意路径、未完成任务、音频或无输入版本的旧记录，不自动降级为当前工程。`times` 是 1–6 个不重复的非负有限秒数，与 `count` 互斥；`count` 为 1–6，工程按 duration、编码视频按真实首末 PTS 范围均匀取样。`last` 额外一帧，总数最多六帧。未给 `firstLast` 和其他取样选项时默认 `count:4`。`maxEdge` 为 128–1920，默认 1280，保持画幅且不放大。时间越界或请求之后没有编码帧明确失败，不能偷偷钳到末帧。
 
-CLI 对应 `--job <ID>`、`--times 0,2.5`、`--count 4`、`--last`、`--max-edge 1280`。编码末帧使用真实解码 PTS，不由 duration×fps 猜测；`durationOrigin:container-format-metadata` 的 `duration` 是容器元数据（可能与首末帧范围不同），编码范围另报 `encodedRange:{firstPTS,lastPTS}`，不据容器 duration 提前拒绝存在的画面；数字时间以首个真实解码视频帧为零点，返回不早于所求相对时间的第一帧；`actualTime` 为此相对秒数，`actualPTS` 为原始 PTS，顶层 `timeOrigin:first-decoded-video-frame` 与 `timeOriginPTS` 声明这个工具口径，不把它推广成包含 edit-list/负 PTS 等媒体的通用播放器时钟。`source.output.outputTimeToFilmTime:null` 明确不提供 range/clip 输出到原 film 全局时间的隐式映射。当前工程没有编码 PTS，末态按 duration 前 1ms 求帧。每帧区分：
+CLI 对应 `--job <ID>`、`--times 0,2.5`、`--count 4`、`--last`、`--max-edge 1280`。编码末帧使用真实解码 PTS，不由 duration×fps 猜测；`durationOrigin:container-format-metadata` 的 `duration` 是容器元数据（可能与首末帧范围不同），编码范围另报 `encodedRange:{firstPTS,lastPTS}`，不据容器 duration 提前拒绝存在的画面；数字时间以首个真实解码视频帧为零点，返回不早于所求相对时间的第一帧；`actualTime` 为此相对秒数，`actualPTS` 为原始 PTS，顶层 `timeOrigin:first-decoded-video-frame` 与 `timeOriginPTS` 声明这个工具口径，不把它推广成包含 edit-list/负 PTS 等媒体的通用播放器时钟。旧任务或未证明出口的`source.output.outputTimeToFilmTime:null`不提供隐式工程映射；新普通整片/线性range在提交快照中记录的可证明映射见下节，clip出口不猜。当前工程没有编码 PTS，末态按 duration 前 1ms 求帧。每帧区分：
 
 ```js
 {
@@ -245,3 +245,18 @@ node desirecore/cli.mjs review <项目> --source review-pair --before-review <�
 ```
 
 同一review / video_review /鉴权HTTP接受before/after已有timed frame引用，不新建MCP工具、Store、任务或第三次渲染。返回v4对照回执（frames为空、单revision-comparison artifact），每侧保留独立源/版本/实际时点/原图SHA及尺寸。两边只缩小到共同实际宽度，标签0=before/1=after；相同数字秒数不证明语义对齐。differences只比较已有输入集合与已捕获数据字段；旧资料缺失为unknown，集合移出不表示删除原文件，数据相同不证明画面等价，像素不同也不自动判优。素材/回执在组合期间变化则失败并只清理本次自有目录。
+
+## CLI已有材料读取与本地PNG副本
+
+`review --schema`的`cliOptionsSchema`描述本地可选`--read <reviewId>`和`--copy-to <已存在的已授权目录>`。它们不属于HTTP/MCP捕获参数，不新增工具、服务或目录授权。省略时捕获/回执格式保持原行为；MCP请求继续拒绝任意输出路径。
+
+```sh
+node desirecore/cli.mjs review <项目> --source current-project --times 5 --copy-to <工作目录> --home <应用数据根>
+node desirecore/cli.mjs review <项目> --read <已有24位reviewId> --copy-to <工作目录> --home <应用数据根>
+```
+
+`--read`只经现有鉴权GET读原回执，不能混用source/job/采样/组合选项，不重新捕获。复制经同一实例、项目、review/图片身份与完整SHA核验，按既有每图4MiB/总12MiB预算读取PNG，在所选目录的`review-ID/`子目录写普通0600文件；不从回执中的任意物理path复制。CLI附加`localCopies.images[]`的实际path/bytes/sha256和源review/帧或制品标识，Read应使用该副本自身路径与原完整摘要。原服务回执、作品和锁不改，副本不是第二套Store或授权事实。
+
+相同完整副本可复用，既有冲突/非普通文件不覆盖。多图复制失败可留下已完成副本，CLI保留原review ID并返回失败，恢复用`--read`，不要再次生成；磁盘写入后外部修改仍由Read期望摘要检查，不承诺文件系统快照。
+
+捕获每次创建新的随机reviewId；读取和复制既有review才复用同ID。当前workdir授权列表不是生成历史，不能据它推断回执被覆盖。平台不会因信息角色标注自动排版；修改标注本身不是清晰度或布局改善的证据，只有实际输出的新图支持时才称改善。

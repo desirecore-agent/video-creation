@@ -162,3 +162,5 @@ node desirecore/cli.mjs review <project> --source review-pair --before-review <e
 ```
 
 Comparisons reuse two existing timed PNGs without another render. Each side retains its own source/version/time/digest/actual size. Only proven input and captured-field differences are reported; absent facts remain unknown. There is no automatic semantic alignment, quality verdict, source deletion or unlocking. The single Schema and [RUNTIME.md](desirecore/RUNTIME.md) define fields, budgets and source boundaries.
+
+Optional local review copies: `review <project> --read <reviewId> --copy-to <authorized-directory>` reuses the saved receipt and authenticated PNGs without another capture. Copies retain source digests for existing Read, reuse matching files and refuse conflicts; they do not grant permissions. The same `--copy-to` option can follow a new capture. See [runtime contract](desirecore/RUNTIME.md).
