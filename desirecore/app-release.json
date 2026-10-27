@@ -51,8 +51,8 @@
     },
     {
       "path": "desirecore/RUNTIME.md",
-      "sha256": "efc3b522e643b654a7cc33ecb0f27a76d5c9146a9339b2b5c8c5bf9dfe5e5703",
-      "size": 41463,
+      "sha256": "25e519c40b86a426e6fde9e9a30beb4030a40e4b4156e86c1fd97594e2763353",
+      "size": 42823,
       "role": "documentation"
     },
     {
@@ -225,8 +225,8 @@
     },
     {
       "path": "examples/general-motion/alpha-title/motion.mjs",
-      "sha256": "880d3640c30d689833623166b2659a2d6f5ed31c5a2b5b1128d1b349da0c3f8d",
-      "size": 323726,
+      "sha256": "aa66d11be993633b271d1a1fea845047d5981dd408dcd813b1fbafb43b11cbec",
+      "size": 326282,
       "role": "runtime"
     },
     {
@@ -243,8 +243,8 @@
     },
     {
       "path": "examples/general-motion/data-story/motion.mjs",
-      "sha256": "880d3640c30d689833623166b2659a2d6f5ed31c5a2b5b1128d1b349da0c3f8d",
-      "size": 323726,
+      "sha256": "aa66d11be993633b271d1a1fea845047d5981dd408dcd813b1fbafb43b11cbec",
+      "size": 326282,
       "role": "runtime"
     },
     {
@@ -273,8 +273,8 @@
     },
     {
       "path": "examples/general-motion/optional-caption/motion.mjs",
-      "sha256": "880d3640c30d689833623166b2659a2d6f5ed31c5a2b5b1128d1b349da0c3f8d",
-      "size": 323726,
+      "sha256": "aa66d11be993633b271d1a1fea845047d5981dd408dcd813b1fbafb43b11cbec",
+      "size": 326282,
       "role": "runtime"
     },
     {
@@ -309,8 +309,8 @@
     },
     {
       "path": "examples/general-motion/product-demo/motion.mjs",
-      "sha256": "880d3640c30d689833623166b2659a2d6f5ed31c5a2b5b1128d1b349da0c3f8d",
-      "size": 323726,
+      "sha256": "aa66d11be993633b271d1a1fea845047d5981dd408dcd813b1fbafb43b11cbec",
+      "size": 326282,
       "role": "runtime"
     },
     {
@@ -321,8 +321,8 @@
     },
     {
       "path": "package.json",
-      "sha256": "a1b08d734172e3f60430960e84e5cf30e76d1f54c55a16533fd0675036ccf78e",
-      "size": 3557,
+      "sha256": "4896fc6aa5bd4fa96d7fdb1aa0cb77be8725ff866b9f96d02d2c538efdc410f8",
+      "size": 4160,
       "role": "dependency"
     },
     {
@@ -771,8 +771,8 @@
     },
     {
       "path": "packages/openfilm/studio/server/captions.mjs",
-      "sha256": "7a9bd076c307b6296be6e3d05153bf3f386aa01e97503d23f5d5deac1f0d2df0",
-      "size": 28918,
+      "sha256": "424a143266e0aeee658ba643f997409671ca65cb21a5280fadc1d4ac0d43f962",
+      "size": 30981,
       "role": "runtime"
     },
     {
@@ -843,8 +843,8 @@
     },
     {
       "path": "packages/openfilm/studio/server/film-subtitle.mjs",
-      "sha256": "be4b1852bc254ff597e43694a732044ef51dd43a78df13735c2ff023957687dd",
-      "size": 36308,
+      "sha256": "c5e32bbb492655dc8c3bbd61e7e18bf0423a2cd6be09e992c5c17fff2c70b7b8",
+      "size": 37930,
       "role": "runtime"
     },
     {
@@ -867,8 +867,8 @@
     },
     {
       "path": "packages/openfilm/studio/server/get.mjs",
-      "sha256": "5f0051cf624d3770508ca6bb6e706d8dd29c581df6a9504901cfc92be0e9dc8f",
-      "size": 42837,
+      "sha256": "652778e924512d7f9c44de3e4bfbda2da412cece8ca69ec3336b0618e73b21a0",
+      "size": 44946,
       "role": "runtime"
     },
     {
@@ -1155,20 +1155,20 @@
     },
     {
       "path": "packages/openfilm/studio/server/subtitle-edits.mjs",
-      "sha256": "59e13625179f2c843667722989149e6ec1c01afd459b1c5b5328a91b6c866e8f",
-      "size": 13087,
+      "sha256": "a67f2e8a2a351b38142af94854cc42ad9a5dba28902618c6a66aaf12abf6e4be",
+      "size": 16854,
       "role": "runtime"
     },
     {
       "path": "packages/openfilm/studio/server/subtitle-segments.mjs",
-      "sha256": "b4791b6ec527379aeedaa5329ee7efc3855b8b5dc99cf36db25c2d4652e5784f",
-      "size": 34218,
+      "sha256": "0af44253fed3af21c4ad2581bd59b3824bcf81917562f3cea47b9b139e4f83db",
+      "size": 34580,
       "role": "runtime"
     },
     {
       "path": "packages/openfilm/studio/server/transcripts.mjs",
-      "sha256": "ff2c765bec47e7238a56f787c88da7cd1eea3ce893c8fe2959f0a1bdc6da50d3",
-      "size": 23994,
+      "sha256": "27acd63567c5b911673f573034daa02fdbbb856d129228d95dd17f6a2317b4e9",
+      "size": 27731,
       "role": "runtime"
     },
     {
@@ -1214,9 +1214,9 @@
       "role": "runtime"
     },
     {
-      "path": "packages/openfilm/studio/ui/dist/assets/index-B-qVwwGq.js",
-      "sha256": "fe58772a6ec63a90e8cda07b9cbe1c305145ae9c498831c2ffb47ebbee77abd4",
-      "size": 1865101,
+      "path": "packages/openfilm/studio/ui/dist/assets/index-CLzy9qbU.js",
+      "sha256": "788e7192a211438241b8845cb63df1ac6cd12a29dfab365aa417960d4acb0c63",
+      "size": 1868475,
       "role": "ui"
     },
     {
@@ -1227,14 +1227,14 @@
     },
     {
       "path": "packages/openfilm/studio/ui/dist/index.html",
-      "sha256": "c1ea7355ceb5e08d6cccdb7ff96e2f65f38e5014c1dce46efe5081be5ac5d692",
+      "sha256": "043318c91ac786519f0ad3e73bdb6d911c0f3f0ac55af4b65bcb1ebcc723cdaa",
       "size": 1176,
       "role": "ui"
     },
     {
       "path": "packages/openfilm/studio/ui/dist/motion.mjs",
-      "sha256": "880d3640c30d689833623166b2659a2d6f5ed31c5a2b5b1128d1b349da0c3f8d",
-      "size": 323726,
+      "sha256": "aa66d11be993633b271d1a1fea845047d5981dd408dcd813b1fbafb43b11cbec",
+      "size": 326282,
       "role": "ui"
     },
     {
@@ -1258,7 +1258,7 @@
   ],
   "source": {
     "kind": "worktree",
-    "sha256": "b026bbdfcfe27197d5ad52f9f306df28c78573cc9946fbfa61cbd8ab60fb8305"
+    "sha256": "6626359278930d3245952a0c75fdb41ec9171c7e0f7ada3b320eff85d2e54a1c"
   },
   "supportedPlatforms": [
     "darwin",
@@ -1291,5 +1291,5 @@
     "restoreInstructionsPath": "desirecore/RUNTIME.md"
   },
   "instructionsPath": "desirecore/RUNTIME.md",
-  "releaseDigest": "dff7430b029abcb71f3788f63bf376baaaa20a0a7e59137379c37ffa764b710d"
+  "releaseDigest": "7e20f5be30b93aabcd6388acaaab5e1decc6a863e03634331557c89d25183c2b"
 }

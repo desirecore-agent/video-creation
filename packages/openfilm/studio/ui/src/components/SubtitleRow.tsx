@@ -153,7 +153,10 @@ export const SubtitleRow = React.forwardRef<SubtitleRowHandle, {
   const [drag, setDrag] = React.useState<Drag | null>(null);
   /** Times an edit was sent with, shown until the lines come back. */
   const [held, setHeld] = React.useState<{ key: string; startMs: number; endMs: number } | null>(null);
-  const [editing, setEditing] = React.useState<{ key: string; text: string } | null>(null);
+  const [editing, setEditing] = React.useState<{ key: string; text: string; cue: SubtitleCue } | null>(null);
+  const savingText = React.useRef(false);
+  const cancelledText = React.useRef(false);
+  const [textBusy, setTextBusy] = React.useState(false);
   const [menu, setMenu] = React.useState<{ x: number; y: number; items: ContextMenuEntry[] } | null>(null);
   /** The cue to select (and maybe type into) once the lines come back from an edit, by its start. */
   const [after, setAfter] = React.useState<{ startMs: number; edit: boolean } | null>(null);
@@ -162,6 +165,7 @@ export const SubtitleRow = React.forwardRef<SubtitleRowHandle, {
   const targeted = React.useRef(false);
   const cuesRef = React.useRef(cues);
   cuesRef.current = cues;
+  React.useEffect(() => { if (editing) cancelledText.current = false; }, [editing?.key]);
 
   /* the lines came back: what an edit made is picked */
   React.useEffect(() => {
@@ -169,7 +173,7 @@ export const SubtitleRow = React.forwardRef<SubtitleRowHandle, {
     const found = cues.find((c) => Math.abs(c.startMs - after.startMs) <= 2);
     if (!found) return;
     setSelected(cueKey(found));
-    if (after.edit) setEditing({ key: cueKey(found), text: found.text });
+    if (after.edit) setEditing({ key: cueKey(found), text: found.text, cue: found });
     setAfter(null);
   }, [cues, after]);
   /* the selection follows the lines: one gone is let go */
@@ -214,13 +218,19 @@ export const SubtitleRow = React.forwardRef<SubtitleRowHandle, {
   }, [spec, run, onError, t]);
   React.useImperativeHandle(ref, () => ({ addAtPlayhead: () => addAt(playheadMs()) }), [addAt, playheadMs]);
   const commitText = React.useCallback(() => {
+    if (cancelledText.current) { cancelledText.current = false; return; }
     const now = editing;
-    setEditing(null);
-    if (!now) return;
-    const cue = cuesRef.current.find((c) => cueKey(c) === now.key);
-    if (!cue || now.text.trim() === cue.text.trim()) return;
-    void run(now.text.trim() ? spec.edits.setText(cue, now.text) : spec.edits.remove(cue), { startMs: cue.startMs });
-  }, [editing, spec.edits, run]);
+    if (!now || savingText.current) return;
+    const cue = now.cue;
+    if (now.text.trim() === cue.text.trim()) { setEditing(null); return; }
+    savingText.current = true;
+    setTextBusy(true);
+    void (now.text.trim() ? spec.edits.setText(cue, now.text) : spec.edits.remove(cue)).then((why) => {
+      if (why) onError(why);
+      else { setEditing(null); setAfter({ startMs: cue.startMs, edit: false }); }
+    }).catch((error) => onError(error instanceof Error ? error.message : String(error)))
+      .finally(() => { savingText.current = false; setTextBusy(false); });
+  }, [editing, spec.edits, onError]);
 
   /* ── keys, while the row is the timeline's target ── */
   React.useEffect(() => {
@@ -246,7 +256,7 @@ export const SubtitleRow = React.forwardRef<SubtitleRowHandle, {
       }
       if (!picked || mod || e.altKey) return;
       if (e.key === 'Delete' || e.key === 'Backspace') { take(); remove(picked); return; }
-      if (e.key === 'Enter') { take(); setEditing({ key: cueKey(picked), text: picked.text }); return; }
+      if (e.key === 'Enter') { take(); setEditing({ key: cueKey(picked), text: picked.text, cue: picked }); return; }
       if (e.key === 'Escape') { setSelected(null); }
     };
     window.addEventListener('pointerdown', onDown, true);
@@ -331,7 +341,7 @@ export const SubtitleRow = React.forwardRef<SubtitleRowHandle, {
         { id: 'split', label: t('subtitleRow.split'), icon: <Scissors size={14} />, shortcut: shortcutHint('B', { mod: true }),
           disabled: !canSplitAt(cue, at), hint: t('subtitleRow.splitWhere'), onSelect: () => split(cue, at) },
         { id: 'merge', label: t('subtitleRow.merge'), icon: <Combine size={14} />, disabled: !canMerge(cue, next), hint: t('subtitleRow.mergeWhy'), onSelect: () => merge(cue) },
-        { id: 'edit', label: t('subtitleRow.edit'), icon: <Pencil size={14} />, shortcut: '↵', onSelect: () => setEditing({ key: cueKey(cue), text: cue.text }) },
+        { id: 'edit', label: t('subtitleRow.edit'), shortcut: '↵', icon: <Pencil size={14} />, onSelect: () => setEditing({ key: cueKey(cue), text: cue.text, cue }) },
         { id: 'sep', separator: true },
         { id: 'delete', label: t('subtitleRow.delete'), icon: <Trash2 size={14} />, danger: true, shortcut: '⌫', onSelect: () => remove(cue) },
       ],
@@ -367,7 +377,7 @@ export const SubtitleRow = React.forwardRef<SubtitleRowHandle, {
                 zIndex: picked ? 2 : 1,
               }}
               onPointerDown={(e) => startDrag(e, cue, 'move')}
-              onDoubleClick={(e) => { e.stopPropagation(); setEditing({ key, text: cue.text }); }}
+              onDoubleClick={(e) => { e.stopPropagation(); setEditing({ key, text: cue.text, cue }); }}
               onContextMenu={(e) => openMenu(e, cue)}
             >
               <span className="pointer-events-none absolute inset-0 flex items-center truncate px-1.5 text-[10.5px] leading-none text-white/95">
@@ -381,20 +391,20 @@ export const SubtitleRow = React.forwardRef<SubtitleRowHandle, {
           );
         })}
         {editing ? (() => {
-          const cue = cues.find((c) => cueKey(c) === editing.key);
-          if (!cue) return null;
+          const cue = cues.find((c) => cueKey(c) === editing.key) ?? editing.cue;
           return (
             <input
               autoFocus
               data-subtitle-edit=""
               aria-label={t('subtitleRow.edit')}
               value={editing.text}
+              disabled={textBusy}
               onChange={(e) => setEditing({ ...editing, text: e.target.value })}
               onFocus={(e) => e.currentTarget.select()}
               onKeyDown={(e) => {
                 e.stopPropagation();
                 if (e.key === 'Enter') { e.preventDefault(); commitText(); }
-                if (e.key === 'Escape') { e.preventDefault(); setEditing(null); }
+                if (e.key === 'Escape') { e.preventDefault(); cancelledText.current = true; setEditing(null); }
               }}
               onBlur={commitText}
               onPointerDown={(e) => e.stopPropagation()}

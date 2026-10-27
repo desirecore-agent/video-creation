@@ -1334,6 +1334,8 @@ export const en = {
     subtitleTranslateNetwork: "Couldn't reach the translation service.",
     subtitleTranslateRetry: 'Retry',
     subtitleTranslateConnect: 'Connect a service that translates in Settings (the {productName} logo at the top left) → Providers.',
+    subtitleTiming: { measured: 'Model word timing', estimated: 'Estimated timing', edited: 'Manually edited', unknown: 'Timing source unknown' },
+    subtitleTimingAlignment: 'Whole transcript: {matched}/{total} words matched literally. This is not recognition accuracy.',
     subtitleSize: 'Size',
     subtitleLook: {
       outline: 'Outlined (default)',

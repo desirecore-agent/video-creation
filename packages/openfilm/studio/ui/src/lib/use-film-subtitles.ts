@@ -44,7 +44,7 @@ export interface FilmSubtitles {
   /** Whether a transcription runs now. */
   transcribing: boolean;
   /** with a `language`, the line's translation into it */
-  setLine: (cue: SubtitleCue, text: string, language?: string) => Promise<boolean>;
+  setLine: (cue: SubtitleCue, text: string, language?: string) => Promise<string | null>;
   sourceLanguage: string | null;
   captions: FilmCaptions | null;
   refresh: () => Promise<void>;
@@ -98,10 +98,14 @@ export function useFilmSubtitles(projectId: string): FilmSubtitles {
     } finally { setTranscribing(false); }
   }, [projectId, refresh, setStyle]);
   const setLine = React.useCallback(async (cue: SubtitleCue, text: string, language?: string) => {
-    if (cue.src === undefined || cue.line === undefined) return false;
-    const ok = await saveSubtitleLine(projectId, { src: cue.src, line: cue.line, ...(cue.part !== undefined ? { part: cue.part } : {}), text, ...(language ? { language } : {}) });
-    await refresh();
-    return ok;
+    if (cue.src === undefined || cue.line === undefined) return 'This subtitle is no longer available.';
+    try {
+      await saveSubtitleLine(projectId, { src: cue.src, line: cue.line, ...(cue.part !== undefined ? { part: cue.part } : {}), text, ...(language ? { language } : {}) }, cue);
+      await refresh();
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
   }, [projectId, refresh]);
 
   return {

@@ -268,3 +268,11 @@ node desirecore/cli.mjs review <项目> --read <已有24位reviewId> --copy-to <
 支持预算协商的宿主connect可选返回workProposal.maxBytes（1至262144），计量规范化完整工作提案的UTF-8字节，不是字符数或单独prompt。应用按完整序列化提案核算，只省略完整引用并准确记录omittedReferences，不截断用户指令或工程身份；没有该字段时按64KiB兼容，显式非法预算明确失败。超限但无引用可减时保留完整草稿并提示缩短内容，不把原指令盲重试当恢复方案。宿主仍独立准入，公开预算不增加能力或审批授权。未知结果的同键重试保持原正文；宿主预算改变不能使应用悄悄改正文或换请求ID。
 
 审片sourceFacts.version=2正确分离motion.locked的locksSha256与布局visualFieldsSha256。sourceFacts Schema继续接受历史version=1用于回读；任一侧是历史1的preservedData比较明确unknown/legacy-lock-projection，文件摘要和图像材料仍按各自证据可用，不从当前作品补造历史锁值。
+
+## 口播字幕来源与并发保存
+
+VTT cue identifier `openfilm-timing:measured|estimated|edited[:matched/total]` 持久化生成来源，缺字段为旧文件未知。`measured` 仅说明模型词时间完整字面匹配；`alignment` 是整段匹配数量，不是单句准确率或强制对齐。ITN低覆盖保留词时间外框并估算，人工改字/调时/拆并清除旧匹配依据，译文为估算。面板标签不烧录入画面。
+
+项目鉴权 HTTP `GET captions/source?src=` 返回原 `cues` 及 `snapshot:{files:{path:text|null}}`、`sourceRevision`（完整字幕/译文集合摘要）；`GET captions` 的各 cue 带所读 `sourceRevision`。`PUT captions/source` 的 `{src,cues,from}` 和 `PUT captions/line` 的原参数加 `from` 都要求所读 snapshot；缺失428、变化409且不写。保存前重新GET不代表旧草稿获准覆盖，UI同时比较所见版本。撤回与ASR落盘复用相同源前置检查与已有进程内串行；外部进程仍可能在检查/写入间修改，不是OS CAS或多文件事务。
+
+失效字幕仍可见供核对；自动转写不覆盖人工cut/edited，明确返回failed。普通ASR缓存仅在字幕未失效时skip；识别期间素材或字幕改变拒绝落盘。收费服务配置/授权不变，ASR仍同步请求，不借用导出job持久性；结果未知先读回再决定。

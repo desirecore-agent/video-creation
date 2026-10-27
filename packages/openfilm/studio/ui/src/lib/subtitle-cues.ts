@@ -103,7 +103,7 @@ export const toFilmMs = (span: ClipSpan, sourceMs: number) => Math.round(span.at
 
 export type Mark = { index: number; startMs: number };
 /** A subtitle of a source, in its ms (GET captions/source); `line` and `part` name it as a film cue does. */
-export type SourceCue = { startMs: number; endMs: number; text: string; marks?: Mark[]; alt?: Record<string, string>; line?: number; part?: number };
+export type SourceCue = { startMs: number; endMs: number; text: string; marks?: Mark[]; timing?: SubtitleCue['timing']; alignment?: SubtitleCue['alignment']; alt?: Record<string, string>; line?: number; part?: number };
 
 /** The source subtitle a film cue shows, or -1. */
 export const findSourceCue = (list: readonly SourceCue[], cue: Pick<SubtitleCue, 'line' | 'part'>) =>
@@ -153,6 +153,12 @@ function scaledMarks(cue: SourceCue, startMs: number, endMs: number): Mark[] | u
   return cue.marks.map((m) => ({ index: m.index, startMs: Math.round(startMs + (m.startMs - cue.startMs) * k) }));
 }
 
+/** 人工改字或改时间不再声称沿用测量词锚点；未编辑的其他行保持原来源。 */
+const editedCue = (cue: SourceCue): SourceCue => {
+  const { alignment: _alignment, ...rest } = cue;
+  return { ...rest, timing: 'edited' };
+};
+
 const withMarks = (cue: SourceCue, marks: Mark[] | undefined): SourceCue => {
   const { marks: _old, ...rest } = cue;
   return marks?.length ? { ...rest, marks } : rest;
@@ -169,8 +175,8 @@ export function retimeSource(list: readonly SourceCue[], i: number, startMs: num
   const { lo, hi } = sourceRoom(list, i);
   const s = Math.round(Math.max(lo, startMs));
   const e = Math.round(Math.min(hi, endMs));
-  if (e - s < 1) return [...list];
-  return list.map((c, j) => (j === i ? withMarks({ ...c, startMs: s, endMs: e }, scaledMarks(cue, s, e)) : c));
+  if (e - s < 1 || (s === cue.startMs && e === cue.endMs)) return [...list];
+  return list.map((c, j) => (j === i ? withMarks(editedCue({ ...c, startMs: s, endMs: e }), scaledMarks(cue, s, e)) : c));
 }
 
 /**
@@ -199,8 +205,8 @@ export function splitSource(list: readonly SourceCue[], i: number, atMs: number)
     altRight[language] = c ? text.slice(c).trim() : text;
   }
   const { line: _line, part: _part, alt: _alt, ...base } = cue;
-  const left = withMarks({ ...base, endMs: at, text: leftText, ...(cue.alt ? { alt: altLeft } : {}) }, leftMarks);
-  const right = withMarks({ ...base, startMs: at, text: rightText, ...(cue.alt ? { alt: altRight } : {}) }, rightMarks);
+  const left = withMarks(editedCue({ ...base, endMs: at, text: leftText, ...(cue.alt ? { alt: altLeft } : {}) }), leftMarks);
+  const right = withMarks(editedCue({ ...base, startMs: at, text: rightText, ...(cue.alt ? { alt: altRight } : {}) }), rightMarks);
   return [...list.slice(0, i), left, right, ...list.slice(i + 1)];
 }
 
@@ -216,7 +222,7 @@ export function mergeSource(list: readonly SourceCue[], i: number): SourceCue[] 
   const alt: Record<string, string> = {};
   for (const language of new Set([...Object.keys(a.alt ?? {}), ...Object.keys(b.alt ?? {})])) alt[language] = joinText(a.alt?.[language] ?? '', b.alt?.[language] ?? '');
   const { line: _line, part: _part, alt: _alt, ...base } = a;
-  const one = withMarks({ ...base, endMs: Math.max(a.endMs, b.endMs), text, ...(Object.keys(alt).length ? { alt } : {}) }, marks);
+  const one = withMarks(editedCue({ ...base, endMs: Math.max(a.endMs, b.endMs), text, ...(Object.keys(alt).length ? { alt } : {}) }), marks);
   return [...list.slice(0, i), one, ...list.slice(i + 2)];
 }
 
@@ -229,10 +235,11 @@ export function addSource(list: readonly SourceCue[], cue: SourceCue): SourceCue
   const startMs = Math.max(cue.startMs, i > 0 ? list[i - 1]!.endMs : 0);
   const endMs = Math.min(cue.endMs, i < list.length ? list[i]!.startMs : Infinity);
   if (endMs - startMs < 1) return [...list];
-  return [...list.slice(0, i), { ...cue, startMs, endMs }, ...list.slice(i)];
+  return [...list.slice(0, i), editedCue({ ...cue, startMs, endMs }), ...list.slice(i)];
 }
 
 /** Cue `i`'s words typed again: timed as a whole (its word times went with the words). */
 export function textSource(list: readonly SourceCue[], i: number, text: string): SourceCue[] {
-  return list.map((c, j) => (j === i ? withMarks({ ...c, text: text.replace(/\s+/g, ' ').trim() }, undefined) : c));
+  const said = text.replace(/\s+/g, ' ').trim();
+  return list.map((c, j) => (j === i && c.text !== said ? withMarks(editedCue({ ...c, text: said }), undefined) : c));
 }

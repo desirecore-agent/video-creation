@@ -27,7 +27,7 @@ import type {
   FilmSubtitleSize,
   FilmSubtitleStyle,
 } from '../../../server/film-subtitle.mjs';
-import type { SourceCue } from './subtitle-cues.ts';
+import { findSourceCue, type SourceCue } from './subtitle-cues.ts';
 
 export {
   FILM_SUBTITLE_KARAOKE_DEFAULT,
@@ -207,11 +207,13 @@ export async function requestSubtitleTranscription(projectId: string): Promise<S
  * The person's correction of one line: it goes back into the transcript it comes from (or its translation into
  * `language`); with `part` (a cue's), into that subtitle's words of the spoken line only.
  */
-export async function saveSubtitleLine(projectId: string, change: { src: string; line: number; part?: number; text: string; language?: string }): Promise<boolean> {
-  const res = await fetch(subtitlesApi(projectId, 'captions/line'), {
-    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(change),
-  }).catch(() => null);
-  return Boolean(res?.ok);
+export async function saveSubtitleLine(projectId: string, change: { src: string; line: number; part?: number; text: string; language?: string }, seen: SubtitleCue): Promise<void> {
+  const source = await fetchSourceSubtitles(projectId, change.src);
+  unchangedSourceRevision(source.sourceRevision, seen.sourceRevision);
+  unchangedSourceCue(source.cues, seen);
+  await answer(await fetch(subtitlesApi(projectId, 'captions/line'), {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...change, from: source.snapshot }),
+  }).catch(() => null));
 }
 
 /** Translate the film's voices into `language` (the lines then carry it; the style shows it). */
@@ -231,7 +233,7 @@ export async function requestSubtitleTranslation(projectId: string, language: st
 /* ── the subtitle row's edits of one source (studio/server/subtitle-edits.mjs) ── */
 
 /** A source's subtitles, one per cue, in its ms (lib/subtitle-cues SourceCue). */
-export type SourceSubtitles = { src: string; cut: boolean; cues: SourceCue[] };
+export type SourceSubtitles = { src: string; cut: boolean; cues: SourceCue[]; snapshot: SubtitleSnapshot; sourceRevision: string };
 /** A source's transcript files as they were or are (path → text, null: none). */
 export type SubtitleSnapshot = { files: Record<string, string | null> };
 
@@ -247,10 +249,36 @@ export async function fetchSourceSubtitles(projectId: string, src: string): Prom
 }
 
 /** Write a source's subtitles; the files before and after, for undo and redo. */
-export async function saveSourceSubtitles(projectId: string, src: string, cues: SourceCue[]): Promise<{ before: SubtitleSnapshot; after: SubtitleSnapshot }> {
+export async function saveSourceSubtitles(projectId: string, src: string, cues: SourceCue[], from: SubtitleSnapshot): Promise<{ before: SubtitleSnapshot; after: SubtitleSnapshot }> {
   return answer(await fetch(subtitlesApi(projectId, 'captions/source'), {
-    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ src, cues }),
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ src, cues, from }),
   }).catch(() => null));
+}
+
+/** 先核 sourceRevision，再按来源 line/part 定位；裁切、变速和显示清理后的文字不是原字节。 */
+export function unchangedSourceCue(cues: readonly SourceCue[], seen: SubtitleCue): number {
+  const i = findSourceCue(cues, seen);
+  if (i < 0) {
+    throw new Error('These subtitles changed elsewhere. Your draft has not been saved; review the current subtitles before trying again.');
+  }
+  return i;
+}
+
+export type SubtitleEditDraft = { text: string; cue: SubtitleCue; language: string | null };
+/** 同源可以在多个片段出现；草稿仍绑定原片段及其原时点，不能按新列表索引迁移。 */
+export const subtitleLineId = (cue: SubtitleCue) => `${cue.src ?? ''}:${cue.clip ?? ''}:${cue.line ?? cue.startMs}:${cue.part ?? ''}:${cue.startMs}`;
+
+/** 源被改时、重分段或删除后，保留唯一在编行供用户查看和明确取消；它仍持有旧摘要，不能保存到新源。 */
+export function subtitleDraftRows(lines: readonly SubtitleCue[], draft: SubtitleEditDraft | null): SubtitleCue[] {
+  if (!draft) return [...lines];
+  const key = subtitleLineId(draft.cue);
+  const exists = lines.some((cue) => subtitleLineId(cue) === key);
+  return exists ? lines.map((cue) => subtitleLineId(cue) === key ? draft.cue : cue) : [...lines, draft.cue];
+}
+
+/** 所见旧版本缺失或已变时要求刷新；不能以保存时的新 GET 冒充编辑基线。 */
+export function unchangedSourceRevision(now: string, seen: string | undefined): void {
+  if (!seen || seen !== now) throw new Error('These subtitles changed or need refreshing. Your draft has not been saved; review the current subtitles before trying again.');
 }
 
 /** Put a source's transcript files back as `to`, if they are still as `from` left them. */

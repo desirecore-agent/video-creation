@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { captionRoutes, filmCaptions } from './captions.mjs';
 import { HttpError, json } from './http.mjs';
-import { cleanCues, restoreSourceFiles, sourceSubtitles, writeSourceSubtitles } from './subtitle-edits.mjs';
+import { cleanCues, readSourceSnapshot, restoreSourceFiles, sourceSnapshotRevision, sourceSubtitles, writeSourceSubtitles } from './subtitle-edits.mjs';
 import { CUT_NOTE, readTranscript, vttOf } from './transcripts.mjs';
 import { filmHtml } from '../../src/film-doc.mjs';
 
@@ -45,7 +45,7 @@ test('a source\'s subtitles are read as the film shows them, each named as its c
 test('written back, each subtitle is a cue of its own, cut by hand: Studio does not cut it again', async () => {
   const root = project([{ clips: [{ id: 'vo', src: 'assets/vo.mp3' }] }], { 'assets/vo.mp3': 'x', 'assets/vo.vtt': ONE_LINE });
   /* the two merged into one long line, which Studio would cut at the full stop */
-  const { before, after } = await writeSourceSubtitles(root, 'assets/vo.mp3', [{ startMs: 0, endMs: 2500, text: TEXT }]);
+  const { before, after } = await writeSourceSubtitles(root, 'assets/vo.mp3', [{ startMs: 0, endMs: 2500, text: TEXT }], await readSourceSnapshot(root, 'assets/vo.mp3'));
   assert.equal(before.files['assets/vo.vtt'], ONE_LINE);
   const body = readFileSync(join(root, 'assets/vo.vtt'), 'utf8');
   assert.equal(after.files['assets/vo.vtt'], body);
@@ -79,9 +79,9 @@ test('translations are written at the same times; undo puts every file back, and
   const { before, after } = await writeSourceSubtitles(root, 'assets/vo.mp3', [
     { startMs: 0, endMs: 1100, text: 'One two three.', alt: { fr: 'Un deux trois.' } },
     { startMs: 1300, endMs: 2500, text: 'Four five six.', alt: { de: 'Vier fünf sechs.' } },
-  ]);
-  assert.deepEqual((await readTranscript(root, 'assets/vo.mp3', 'fr'))?.lines, [{ text: 'Un deux trois.', startMs: 0, endMs: 1100 }]);
-  assert.deepEqual((await readTranscript(root, 'assets/vo.mp3', 'de'))?.lines, [{ text: 'Vier fünf sechs.', startMs: 1300, endMs: 2500 }]);
+  ], await readSourceSnapshot(root, 'assets/vo.mp3'));
+  assert.deepEqual((await readTranscript(root, 'assets/vo.mp3', 'fr'))?.lines, [{ text: 'Un deux trois.', startMs: 0, endMs: 1100, timing: 'estimated' }]);
+  assert.deepEqual((await readTranscript(root, 'assets/vo.mp3', 'de'))?.lines, [{ text: 'Vier fünf sechs.', startMs: 1300, endMs: 2500, timing: 'estimated' }]);
   assert.equal(before.files['assets/vo.de.vtt'], null, 'the German one is new');
   /* undo: as it was, the file this step made gone */
   await restoreSourceFiles(root, 'assets/vo.mp3', after, before);
@@ -118,7 +118,7 @@ test('the routes: a source\'s subtitles, written, and put back', async () => {
     const got = await (await fetch(`${base}/captions/source?src=${encodeURIComponent('assets/vo.mp3')}`)).json();
     assert.equal(got.cues.length, 2);
     assert.equal((await fetch(`${base}/captions/source?src=..%2Fx.mp3`)).status, 400);
-    const res = await put('captions/source', { src: 'assets/vo.mp3', cues: [{ ...got.cues[0], endMs: 1400 }] });
+    const res = await put('captions/source', { src: 'assets/vo.mp3', cues: [{ ...got.cues[0], endMs: 1400 }], from: got.snapshot });
     assert.equal(res.status, 200);
     const { before, after } = await res.json();
     assert.deepEqual((await readTranscript(root, 'assets/vo.mp3'))?.lines.map((l) => [l.text, l.startMs, l.endMs]), [['One two three.', 0, 1400]]);
@@ -129,4 +129,76 @@ test('the routes: a source\'s subtitles, written, and put back', async () => {
     assert.equal((await again.json()).code, 'changed');
     assert.equal((await put('captions/source', { cues: [] })).status, 400);
   } finally { close(); }
+});
+
+test('普通保存缺少所读快照即拒绝，不覆盖字幕', async () => {
+  const root = project([], { 'assets/vo.mp3': 'x', 'assets/vo.vtt': ONE_LINE });
+  const cues = [{ startMs: 0, endMs: 1000, text: 'Draft' }];
+  await assert.rejects(writeSourceSubtitles(root, 'assets/vo.mp3', cues), (e) => e.status === 428 && e.extra.code === 'snapshot-required');
+  await assert.rejects(writeSourceSubtitles(root, 'assets/vo.mp3', cues, { files: {} }), (e) => e.status === 428);
+  assert.equal(readFileSync(join(root, 'assets/vo.vtt'), 'utf8'), ONE_LINE);
+});
+
+test('两个窗口以同一快照并发保存，只一份成功，另一份原草稿仍由调用方持有', async () => {
+  const root = project([], { 'assets/vo.mp3': 'x', 'assets/vo.vtt': ONE_LINE });
+  const read = await sourceSubtitles(root, 'assets/vo.mp3');
+  assert.equal(read.sourceRevision, sourceSnapshotRevision(read.snapshot));
+  const drafts = ['First window', 'Second window'].map((text) => [{ startMs: 0, endMs: 1500, text }]);
+  const results = await Promise.allSettled(drafts.map((cues) => writeSourceSubtitles(root, 'assets/vo.mp3', cues, read.snapshot)));
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+  assert.equal(results.filter((r) => r.status === 'rejected' && r.reason.status === 409).length, 1);
+  assert.equal((await sourceSubtitles(root, 'assets/vo.mp3')).cues[0].text, 'First window');
+  assert.equal(drafts[1][0].text, 'Second window');
+});
+
+test('ASR改写或翻译集合增删发生后，旧保存与旧撤销均不写任何文件', async () => {
+  const root = project([], { 'assets/vo.mp3': 'x', 'assets/vo.vtt': ONE_LINE });
+  const old = await sourceSubtitles(root, 'assets/vo.mp3');
+  const changed = vttOf([{ text: 'A new transcription', startMs: 10, endMs: 1200 }]);
+  writeFileSync(join(root, 'assets/vo.vtt'), changed);
+  await assert.rejects(writeSourceSubtitles(root, 'assets/vo.mp3', old.cues, old.snapshot), (e) => e.status === 409);
+  assert.equal(readFileSync(join(root, 'assets/vo.vtt'), 'utf8'), changed);
+  const read = await sourceSubtitles(root, 'assets/vo.mp3');
+  const french = vttOf([{ text: 'Nouveau', startMs: 10, endMs: 1200 }]);
+  writeFileSync(join(root, 'assets/vo.fr.vtt'), french);
+  await assert.rejects(writeSourceSubtitles(root, 'assets/vo.mp3', read.cues, read.snapshot), (e) => e.status === 409);
+  await assert.rejects(restoreSourceFiles(root, 'assets/vo.mp3', read.snapshot, old.snapshot), (e) => e.status === 409);
+  assert.equal(readFileSync(join(root, 'assets/vo.vtt'), 'utf8'), changed);
+  assert.equal(readFileSync(join(root, 'assets/vo.fr.vtt'), 'utf8'), french);
+  const withFrench = await sourceSubtitles(root, 'assets/vo.mp3');
+  const { rmSync } = await import('node:fs');
+  rmSync(join(root, 'assets/vo.fr.vtt'));
+  await assert.rejects(writeSourceSubtitles(root, 'assets/vo.mp3', withFrench.cues, withFrench.snapshot), (e) => e.status === 409);
+  assert.equal(existsSync(join(root, 'assets/vo.fr.vtt')), false);
+});
+
+test('单行HTTP入口也需要快照并拒绝旧版本', async () => {
+  const root = project([{ clips: [{ id: 'vo', src: 'assets/vo.mp3' }] }], { 'assets/vo.mp3': 'x', 'assets/vo.vtt': ONE_LINE });
+  const { base, close } = await serve(root);
+  const put = (body) => fetch(`${base}/captions/line`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  try {
+    const got = await (await fetch(`${base}/captions/source?src=assets%2Fvo.mp3`)).json();
+    const edit = { src: 'assets/vo.mp3', line: 0, part: 0, text: 'Corrected.' };
+    assert.equal((await put(edit)).status, 428);
+    assert.equal((await put({ ...edit, from: got.snapshot })).status, 200);
+    const saved = readFileSync(join(root, 'assets/vo.vtt'), 'utf8');
+    assert.equal((await put({ ...edit, text: 'Old window', from: got.snapshot })).status, 409);
+    assert.equal(readFileSync(join(root, 'assets/vo.vtt'), 'utf8'), saved);
+  } finally { close(); }
+});
+
+test('字幕保存保留未改实测来源，改字或改时不能继续冒称实测，译文只估时', async () => {
+  const original = vttOf([{ text: 'One two.', startMs: 0, endMs: 1100, marks: [{ index: 0, startMs: 0 }, { index: 4, startMs: 500 }],
+    timing: 'measured', alignment: { matchedWords: 2, totalWords: 2 } }]);
+  const root = project([], { 'assets/vo.mp3': 'x', 'assets/vo.vtt': original });
+  let read = await sourceSubtitles(root, 'assets/vo.mp3');
+  await writeSourceSubtitles(root, 'assets/vo.mp3', read.cues, read.snapshot);
+  read = await sourceSubtitles(root, 'assets/vo.mp3');
+  assert.equal(read.cues[0].timing, 'measured');
+  assert.deepEqual(read.cues[0].alignment, { matchedWords: 2, totalWords: 2 });
+  await writeSourceSubtitles(root, 'assets/vo.mp3', [{ ...read.cues[0], text: 'One changed.', alt: { fr: 'Un changé.' } }], read.snapshot);
+  const edited = (await readTranscript(root, 'assets/vo.mp3')).lines[0];
+  assert.equal(edited.timing, 'edited');
+  assert.equal(edited.alignment, undefined);
+  assert.equal((await readTranscript(root, 'assets/vo.mp3', 'fr')).lines[0].timing, 'estimated');
 });

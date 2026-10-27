@@ -19,19 +19,19 @@
  * Translations: `name.<language>.vtt` beside the transcript, the same lines at the same times; each line carries them
  * (`alt`), cut to follow the original's pieces, and the person's style picks one.
  */
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { clipKind, clipSpan, kindOf, soundRole } from '../../src/film-doc.mjs';
 import { probe } from './derived.mjs';
-import { readProjectFilm } from './film.mjs';
+import { readProjectFilm, withProjectFilmEdit } from './film.mjs';
 import { HttpError, json, readJson } from './http.mjs';
 import { TOOL_DIR } from './projects.mjs';
 import { filmSubtitleLanguageOf, filmSubtitleLanguagesIn, isFilmSubtitleLanguage, parseFilmSubtitleStyle, sameFilmSubtitleLanguage } from './film-subtitle.mjs';
 import { writeAtomic } from './atomic.mjs';
 import { inProject } from './files.mjs';
 import { alignTranslation, segmentLine, subtitleEnd } from './subtitle-segments.mjs';
-import { readTranscript, setLine, transcriptIsCurrent, translationsOf, writeTranscript } from './transcripts.mjs';
-import { subtitleEditRoutes } from './subtitle-edits.mjs';
+import { readTranscript, transcriptIsCurrent, transcriptPath, translationsOf, writeTranscript } from './transcripts.mjs';
+import { assertSourceSnapshot, readSourceSnapshot, sourceSnapshotRevision, subtitleEditRoutes, writeSubtitleLine } from './subtitle-edits.mjs';
 
 export { spokenLines, stripAudioTags } from './transcripts.mjs';
 export { SUBTITLE_SEGMENT_RULES } from './subtitle-segments.mjs';
@@ -109,7 +109,8 @@ export function trimToWindow(line, fromMs, untilMs) {
 
 /** A line as one subtitle piece (segmentLine's shape). @param {SpokenLine} line */
 export const wholeLine = (line) => ({
-  text: line.text, startMs: line.startMs, endMs: line.endMs, ...(line.marks?.length ? { marks: [...line.marks] } : {}), part: 0, from: 0, to: line.text.length,
+  text: line.text, startMs: line.startMs, endMs: line.endMs, ...(line.marks?.length ? { marks: [...line.marks] } : {}),
+  ...(line.timing ? { timing: line.timing } : {}), ...(line.alignment ? { alignment: line.alignment } : {}), part: 0, from: 0, to: line.text.length,
 });
 
 /**
@@ -160,6 +161,7 @@ export function clipCues(lines, span, extra = {}) {
         startMs: film(from),
         durMs: Math.round((to - from) / speed),
         text: said,
+        ...(piece.timing ? { timing: piece.timing } : {}), ...(piece.alignment ? { alignment: piece.alignment } : {}),
         ...(words.length > 1 ? { words } : {}),
         ...(extra.speaker ? { speaker: extra.speaker } : {}),
         ...(Object.keys(alt).length ? { alt } : {}),
@@ -226,10 +228,11 @@ export async function filmCaptions(root, options = {}) {
   const doc = /** @type {import('../../src/film-doc.d.mts').FilmDoc | null} */ (film.doc);
   if (!doc) return empty;
   const duration = options.duration ?? ((/** @type {string} */ src) => probe(root, src).then((p) => p.duration, () => undefined));
-  /** @type {Map<string, { lines: SpokenLine[], speaker?: string, alt: AltLines, cut?: boolean } | null>} */
+  /** @type {Map<string, { lines: SpokenLine[], speaker?: string, alt: AltLines, cut?: boolean, sourceRevision: string } | null>} */
   const known = new Map();
   const transcriptOf = async (/** @type {string} */ src) => {
     if (known.has(src)) return known.get(src) ?? null;
+    const before = await readSourceSnapshot(root, src);
     const read = await readTranscript(root, src);
     /** @type {AltLines} */
     const alt = new Map();
@@ -238,7 +241,8 @@ export async function filmCaptions(root, options = {}) {
         for (const line of (await readTranscript(root, src, language))?.lines ?? []) alt.set(line.startMs, { ...alt.get(line.startMs), [language]: line.text });
       }
     }
-    const one = read ? { lines: read.lines, ...(read.speaker ? { speaker: read.speaker } : {}), alt, ...(read.cut ? { cut: true } : {}) } : null;
+    await assertSourceSnapshot(root, src, before);
+    const one = read ? { sourceRevision: sourceSnapshotRevision(before), lines: read.lines, ...(read.speaker ? { speaker: read.speaker } : {}), alt, ...(read.cut ? { cut: true } : {}) } : null;
     known.set(src, one);
     return one;
   };
@@ -257,13 +261,16 @@ export async function filmCaptions(root, options = {}) {
     /* a transcript that runs on past the end of its file is not this file's any more (it was made again faster, or
        the transcript's times were moved): its lines would drift later and later and the last ones fall off. It is
        still shown, and made again with the rest (the CC button) */
-    if (await transcriptOutlasts(said.lines, await lengthOf(clip.src))) untranscribed.add(clip.src);
+    // 同路径换片不一定变短；mtime过期也须明确提示，旧字幕保留供复核。
+    const file = inProject(root, clip.src);
+    const changed = file && (await stat(file).catch(() => null))?.isFile() && !(await transcriptIsCurrent(root, clip.src));
+    if (changed || transcriptOutlasts(said.lines, await lengthOf(clip.src))) untranscribed.add(clip.src);
     const native = clip.time?.length === 2 ? undefined : await lengthOf(clip.src) ?? (said.lines.at(-1)?.endMs ?? 0) / 1000;
     let span;
     try { span = clipSpan(clip, native ?? NaN); } catch { continue; }
     cues.push(...clipCues(said.lines, {
       fromMs: span.from * 1000, startMs: (clip.at ?? 0) * 1000, durMs: span.length * 1000, speed: span.speed,
-    }, { alt: said.alt, ...(said.speaker ? { speaker: said.speaker } : {}), clip: clip.id, src: clip.src, ...(said.cut ? { cut: true } : {}) }));
+    }, { alt: said.alt, ...(said.speaker ? { speaker: said.speaker } : {}), clip: clip.id, src: clip.src, ...(said.cut ? { cut: true } : {}) }).map((cue) => ({ ...cue, sourceRevision: said.sourceRevision })));
   }
   cues.sort((a, b) => a.startMs - b.startMs);
   /* a speaker's name tells voices apart; with one voice in the film it tells nothing, and would open every line */
@@ -345,27 +352,33 @@ export async function translateFilmSubtitles(root, language, options) {
   const doc = /** @type {import('../../src/film-doc.d.mts').FilmDoc | null} */ (film.doc);
   /** @type {{ language: string, translated: string[], already: number, same: number, failed: { src: string, error: string }[] }} */
   const out = { language, translated: [], already: 0, same: 0, failed: [] };
-  /** @type {{ src: string, transcript: import('./transcripts.mjs').Transcript }[]} */
+  /** @type {{ src: string, transcript: import('./transcripts.mjs').Transcript, before: import('./subtitle-edits.mjs').Snapshot }[]} */
   const todo = [];
   for (const src of new Set((doc ? heardClips(root, doc) : []).map((c) => c.src))) {
+    const before = await readSourceSnapshot(root, src, [transcriptPath(src, language)]);
     const transcript = await readTranscript(root, src);
     if (!transcript) continue;
     const text = transcript.lines.map((l) => l.text).join(' ');
     if (sameFilmSubtitleLanguage(filmSubtitleLanguageOf(text), language)) out.same += 1;
     else if ((await translationsOf(root, src)).includes(language)) out.already += 1;
-    else todo.push({ src, transcript });
+    else todo.push({ src, transcript, before });
   }
   if (!todo.length) return out;
   if (!options.translate) throw new CaptionError(CONNECT_TRANSLATOR, 409, 'no-translator');
-  for (const { src, transcript } of todo) {
+  for (const { src, transcript, before } of todo) {
     options.signal?.throwIfAborted();
     const lines = transcript.lines;
     try {
       const got = await options.translate({ src, language, lines: lines.map((l) => l.text), times: lines.map((l) => ({ startSec: l.startMs / 1000, endSec: l.endMs / 1000 })),
         text: lines.map((l) => l.text).join(' '), words: wordsOfLines(lines), dur: (lines.at(-1)?.endMs ?? 0) / 1000, ...(options.signal ? { signal: options.signal } : {}) });
       if (!Array.isArray(got) || got.length !== lines.length || got.some((x) => typeof x !== 'string')) throw new Error('The translation came back with the wrong number of lines; nothing was kept. Try again.');
-      const translated = lines.map((line, i) => ({ text: got[i].trim(), startMs: line.startMs, endMs: line.endMs })).filter((l) => l.text);
-      await writeTranscript(root, src, { lines: translated }, language);
+      const translated = lines.map((line, i) => ({ text: got[i].trim(), startMs: line.startMs, endMs: line.endMs,
+        timing: /** @type {const} */ ('estimated') })).filter((l) => l.text);
+      // 翻译期间的人改或新转写不能被旧答案覆盖；网络等待不占用项目写入队列。
+      await withProjectFilmEdit(root, async () => {
+        await assertSourceSnapshot(root, src, before, [transcriptPath(src, language)]);
+        await writeTranscript(root, src, { lines: translated }, language);
+      });
       out.translated.push(src);
     } catch (e) {
       if (e instanceof CaptionError) throw e;
@@ -391,7 +404,7 @@ export const CONNECT_TRANSCRIBER = 'Connect a service that transcribes in Studio
 /**
  * The subtitle routes under /api/projects/:id/ (`rest` is the part after it). Returns whether it answered.
  *   GET  captions              → filmCaptions(root)
- *   PUT  captions/line         { src, line, part?, text, language? } → { ok } (the line of `src`'s transcript starting at
+ *   PUT  captions/line         { src, line, part?, text, language?, from: Snapshot } → { ok } (the line of `src`'s transcript starting at
  *                              `line` ms reads `text`, or its translation into `language` does; with `part`, only that
  *                              subtitle of the line (a cue's `part`); empty text takes it out)
  *   GET  subtitles             → { style: FilmSubtitleStyle | null } (null: never changed)
@@ -413,12 +426,12 @@ export async function captionRoutes(req, res, root, rest, { translate = async ()
     return true;
   }
   if (rest === 'captions/line' && req.method === 'PUT') {
-    const { src, line, part, text, language } = /** @type {{ src?: unknown, line?: unknown, part?: unknown, text?: unknown, language?: unknown }} */ (await readJson(req));
+    const { src, line, part, text, language, from } = /** @type {{ src?: unknown, line?: unknown, part?: unknown, text?: unknown, language?: unknown, from?: unknown }} */ (await readJson(req));
     if (typeof src !== 'string' || typeof line !== 'number' || typeof text !== 'string') throw new HttpError(400, 'which line? { src, line, text }');
     if (part != null && !(typeof part === 'number' && Number.isInteger(part) && part >= 0)) throw new HttpError(400, `no such part of a line: ${String(part)}`);
     if (language != null && (typeof language !== 'string' || !isFilmSubtitleLanguage(language))) throw new HttpError(400, `no such subtitle language: ${String(language)}`);
     if (!inProject(root, src)) throw new HttpError(400, `${src} is not a file inside the project`);
-    if (!(await setLine(root, src, line, text, language ?? undefined, part ?? undefined))) throw new HttpError(404, `${src} has no line starting at ${line} ms${part != null ? ` with a part ${part}` : ''}`);
+    if (!(await writeSubtitleLine(root, src, line, text, language ?? undefined, part ?? undefined, from))) throw new HttpError(404, `${src} has no line starting at ${line} ms${part != null ? ` with a part ${part}` : ''}`);
     json(res, 200, { ok: true });
     return true;
   }
@@ -440,9 +453,16 @@ export async function captionRoutes(req, res, root, rest, { translate = async ()
     for (const src of untranscribed) {
       /* one made since the file changed is kept, unless it outlasts the file (filmCaptions): then it is not its own */
       if (await transcriptIsCurrent(root, src) && !(await outlastsItsFile(root, src))) continue;
+      const transcript = await readTranscript(root, src);
+      if (transcript?.cut || transcript?.lines.some((line) => line.timing === 'edited')) {
+        out.failed.push({ src, error: 'These subtitles were edited by hand and are kept. Review the changed recording and use get asr --force only to explicitly replace them.' });
+        continue;
+      }
       if (!transcribe) throw new HttpError(409, CONNECT_TRANSCRIBER, { code: 'no-transcriber' });
       try {
         await transcribe(root, src, controller.signal);
+        // 请求完成不等于字幕已经刷新；仍无字幕或仍超长时不报成功。
+        if (!(await readTranscript(root, src)) || await outlastsItsFile(root, src)) throw new Error('Transcription did not leave a usable transcript for this recording. Review the subtitles before explicitly trying again.');
         out.transcribed.push(src);
       } catch (e) {
         if (/** @type {{ code?: unknown }} */ (e)?.code === 'not-connected') throw new HttpError(409, CONNECT_TRANSCRIBER, { code: 'no-transcriber' });

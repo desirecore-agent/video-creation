@@ -13,25 +13,28 @@
  * over the files they left (anything written in between, by the agent or another window, is kept and said).
  *
  *   GET captions/source?src=     → SourceSubtitles
- *   PUT captions/source          { src, cues } → { before: Snapshot, after: Snapshot }
+ *   PUT captions/source          { src, cues, from: Snapshot } → { before: Snapshot, after: Snapshot }
  *   PUT captions/files           { src, from: Snapshot, to: Snapshot } → { ok } (409 when the files are not `from`)
  */
+import { createHash } from 'node:crypto';
 import { readFile, rm } from 'node:fs/promises';
 import { basename, dirname, extname } from 'node:path';
 import { writeAtomic } from './atomic.mjs';
+import { withProjectFilmEdit } from './film.mjs';
 import { isFilmSubtitleLanguage } from './film-subtitle.mjs';
 import { inProject, inside } from './files.mjs';
 import { HttpError, json, readJson } from './http.mjs';
 import { alignTranslation, segmentLine } from './subtitle-segments.mjs';
-import { readTranscript, transcriptPath, translationsOf, vttOf } from './transcripts.mjs';
+import { readTranscript, setLine, transcriptPath, translationsOf, vttOf } from './transcripts.mjs';
 
 /** @typedef {import('./transcripts.mjs').SpokenLine} SpokenLine */
 /**
  * One subtitle of a source, in its milliseconds. `line` and `part` say which it is as captions.mjs names it (a cue's
  * `line` and `part`), so the row finds the one a cue on the film shows.
  * @typedef {{ startMs: number, endMs: number, text: string, marks?: { index: number, startMs: number }[],
- *   alt?: Record<string, string>, line?: number, part?: number }} SourceCue
- * @typedef {{ src: string, cut: boolean, speaker?: string, cues: SourceCue[] }} SourceSubtitles
+ *   alt?: Record<string, string>, line?: number, part?: number,
+ *   timing?: 'measured' | 'estimated' | 'edited', alignment?: {matchedWords: number, totalWords: number} }} SourceCue
+ * @typedef {{ src: string, cut: boolean, speaker?: string, cues: SourceCue[], snapshot: Snapshot, sourceRevision: string }} SourceSubtitles
  * The transcript files of a source (path in the project → text, null: no such file).
  * @typedef {{ files: Record<string, string | null> }} Snapshot
  */
@@ -45,36 +48,44 @@ const MAX_TEXT = 2000;
  * @param {string} root @param {string} src @returns {Promise<SourceSubtitles>}
  */
 export async function sourceSubtitles(root, src) {
-  const said = await readTranscript(root, src);
-  if (!said) return { src, cut: false, cues: [] };
-  /** @type {Map<number, Record<string, string>>} */
-  const alt = new Map();
-  for (const language of await translationsOf(root, src)) {
-    for (const line of (await readTranscript(root, src, language))?.lines ?? []) alt.set(line.startMs, { ...alt.get(line.startMs), [language]: line.text });
-  }
-  /** @type {SourceCue[]} */
-  const cues = [];
-  for (const line of said.lines) {
-    const translated = Object.entries(alt.get(line.startMs) ?? {});
-    if (said.cut) {
-      cues.push({ ...lineOf(line), ...(translated.length ? { alt: Object.fromEntries(translated) } : {}), line: line.startMs });
-      continue;
+  return withProjectFilmEdit(root, async () => {
+    const before = await readSourceSnapshot(root, src);
+    const said = await readTranscript(root, src);
+    if (!said) {
+      await assertSourceSnapshot(root, src, before);
+      return { src, cut: false, cues: [], snapshot: before, sourceRevision: sourceSnapshotRevision(before) };
     }
-    const pieces = segmentLine(line);
-    const parts = translated.map(([language, text]) => /** @type {const} */ ([language, alignTranslation(text, pieces)]));
-    pieces.forEach((piece, k) => {
-      const altOf = Object.fromEntries(parts.map(([language, list]) => [language, list[k].text]).filter(([, text]) => text));
-      cues.push({
-        text: piece.text, startMs: piece.startMs, endMs: piece.endMs, ...(piece.marks?.length ? { marks: piece.marks } : {}),
-        ...(Object.keys(altOf).length ? { alt: altOf } : {}), line: line.startMs, ...(pieces.length > 1 ? { part: k } : {}),
+    /** @type {Map<number, Record<string, string>>} */
+    const alt = new Map();
+    for (const language of await translationsOf(root, src)) {
+      for (const line of (await readTranscript(root, src, language))?.lines ?? []) alt.set(line.startMs, { ...alt.get(line.startMs), [language]: line.text });
+    }
+    /** @type {SourceCue[]} */
+    const cues = [];
+    for (const line of said.lines) {
+      const translated = Object.entries(alt.get(line.startMs) ?? {});
+      if (said.cut) {
+        cues.push({ ...lineOf(line), ...(translated.length ? { alt: Object.fromEntries(translated) } : {}), line: line.startMs });
+        continue;
+      }
+      const pieces = segmentLine(line);
+      const parts = translated.map(([language, text]) => /** @type {const} */ ([language, alignTranslation(text, pieces)]));
+      pieces.forEach((piece, k) => {
+        const altOf = Object.fromEntries(parts.map(([language, list]) => [language, list[k].text]).filter(([, text]) => text));
+        cues.push({
+          ...lineOf(piece),
+          ...(Object.keys(altOf).length ? { alt: altOf } : {}), line: line.startMs, ...(pieces.length > 1 ? { part: k } : {}),
+        });
       });
-    });
-  }
-  return { src, cut: Boolean(said.cut), ...(said.speaker ? { speaker: said.speaker } : {}), cues };
+    }
+    await assertSourceSnapshot(root, src, before);
+    return { src, cut: Boolean(said.cut), ...(said.speaker ? { speaker: said.speaker } : {}), cues, snapshot: before, sourceRevision: sourceSnapshotRevision(before) };
+  });
 }
 
 /** @param {SpokenLine} line */
-const lineOf = (line) => ({ text: line.text, startMs: line.startMs, endMs: line.endMs, ...(line.marks?.length ? { marks: line.marks } : {}) });
+const lineOf = (line) => ({ text: line.text, startMs: line.startMs, endMs: line.endMs, ...(line.marks?.length ? { marks: line.marks } : {}),
+  ...(line.timing ? { timing: line.timing } : {}), ...(line.alignment ? { alignment: line.alignment } : {}) });
 
 /** @param {unknown} v @returns {v is Record<string, unknown>} */
 const isRecord = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
@@ -104,7 +115,13 @@ export function cleanCues(raw) {
     }
     const marks = Array.isArray(one.marks) ? one.marks.flatMap((m) => (isRecord(m) && Number.isInteger(m.index) && Number.isFinite(whole(m.startMs))
       ? [{ index: /** @type {number} */ (m.index), startMs: whole(m.startMs) }] : [])) : [];
-    cues.push({ startMs, endMs, text, ...(marks.length ? { marks } : {}), ...(Object.keys(alt).length ? { alt } : {}) });
+    const timing = one.timing === 'measured' || one.timing === 'estimated' || one.timing === 'edited' ? one.timing : undefined;
+    const a = one.alignment;
+    const alignment = isRecord(a) && Number.isInteger(a.matchedWords) && Number.isInteger(a.totalWords)
+      && /** @type {number} */ (a.matchedWords) >= 0 && /** @type {number} */ (a.totalWords) >= /** @type {number} */ (a.matchedWords)
+      ? { matchedWords: /** @type {number} */ (a.matchedWords), totalWords: /** @type {number} */ (a.totalWords) } : undefined;
+    cues.push({ startMs, endMs, text, ...(marks.length ? { marks } : {}), ...(Object.keys(alt).length ? { alt } : {}),
+      ...(timing ? { timing } : {}), ...(alignment ? { alignment } : {}) });
   }
   cues.sort((a, b) => a.startMs - b.startMs);
   /** @type {SourceCue[]} */
@@ -129,7 +146,7 @@ export function cleanCues(raw) {
 }
 
 /** The transcript files of `src` now: its own and its translations', and `also` (paths of it, maybe not there). @param {string} root @param {string} src @param {readonly string[]} [also] */
-async function snapshot(root, src, also = []) {
+export async function readSourceSnapshot(root, src, also = []) {
   const paths = new Set([transcriptPath(src), ...(await translationsOf(root, src)).map((language) => transcriptPath(src, language)), ...also]);
   /** @type {Snapshot} */
   const out = { files: {} };
@@ -140,28 +157,69 @@ async function snapshot(root, src, also = []) {
   return out;
 }
 
+/** 仅给所见字幕携带轻量版本；保存仍比对原字节，不把摘要当作写入锁。@param {Snapshot} value */
+export function sourceSnapshotRevision(value) {
+  return createHash('sha256').update(JSON.stringify(Object.entries(value.files).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))).digest('hex');
+}
+
+/** 检查读取时的完整字幕集合；同进程写入另由项目串行边界协调，不承诺文件系统 CAS。
+ * @param {string} root @param {string} src @param {unknown} rawFrom @param {readonly string[]} [also] */
+export async function assertSourceSnapshot(root, src, rawFrom, also = []) {
+  if (rawFrom == null) throw new HttpError(428, 'Read these subtitles again before saving; their snapshot is required.', { code: 'snapshot-required' });
+  const from = snapshotOf(rawFrom, src);
+  if (!Object.hasOwn(from.files, transcriptPath(src))) throw new HttpError(428, 'The source transcript must be in the snapshot.', { code: 'snapshot-required' });
+  const now = await readSourceSnapshot(root, src, [...Object.keys(from.files), ...also]);
+  for (const path of new Set([...Object.keys(from.files), ...Object.keys(now.files)])) {
+    if ((now.files[path] ?? null) !== (from.files[path] ?? null)) throw new HttpError(409, 'These subtitles were changed since, elsewhere: they are left as they are now. Your draft has not been saved.', { code: 'changed' });
+  }
+  return now;
+}
+
 /**
  * Write `src`'s subtitles as `cues` (in its milliseconds): its transcript, cut by hand, and each translation at the same
  * times. A translation a cue no longer has loses that line; one no cue has is written empty (its file stays, so the
  * language stays known). Returns the files before and after.
- * @param {string} root @param {string} src @param {unknown} rawCues
+ * @param {string} root @param {string} src @param {unknown} rawCues @param {unknown} rawFrom
  * @returns {Promise<{ before: Snapshot, after: Snapshot }>}
  */
-export async function writeSourceSubtitles(root, src, rawCues) {
+export async function writeSourceSubtitles(root, src, rawCues, rawFrom) {
   if (!inProject(root, src)) throw new HttpError(400, `${src} is not a file inside the project`);
-  const cues = cleanCues(rawCues);
-  const had = await readTranscript(root, src);
-  const languages = new Set([...await translationsOf(root, src), ...cues.flatMap((c) => Object.keys(c.alt ?? {}))]);
-  const paths = [transcriptPath(src), ...[...languages].map((language) => transcriptPath(src, language))];
-  const before = await snapshot(root, src, paths);
-  /** @type {SpokenLine[]} */
-  const lines = cues.map((c) => ({ text: c.text, startMs: c.startMs, endMs: c.endMs, ...(c.marks ? { marks: c.marks } : {}) }));
-  await writeAtomic(inside(root, transcriptPath(src)), vttOf(lines, { ...(had?.speaker ? { speaker: had.speaker } : {}), cut: true }), 'utf8');
-  for (const language of languages) {
-    const translated = cues.flatMap((c) => (c.alt?.[language] ? [{ text: c.alt[language], startMs: c.startMs, endMs: c.endMs }] : []));
-    await writeAtomic(inside(root, transcriptPath(src, language)), vttOf(translated), 'utf8');
-  }
-  return { before, after: await snapshot(root, src, paths) };
+  return withProjectFilmEdit(root, async () => {
+    const cues = cleanCues(rawCues);
+    const had = await readTranscript(root, src);
+    const languages = new Set([...await translationsOf(root, src), ...cues.flatMap((c) => Object.keys(c.alt ?? {}))]);
+    const paths = [transcriptPath(src), ...[...languages].map((language) => transcriptPath(src, language))];
+    const before = await assertSourceSnapshot(root, src, rawFrom, paths);
+    const previous = had?.cut ? had.lines : (had?.lines ?? []).flatMap((line) => segmentLine(line));
+    /** @type {SpokenLine[]} */
+    const lines = cues.map((c) => {
+      const line = lineOf(c);
+      // 旧实测来源只能跟随原文字与原时标；API 不能把人工新输入仍标为原实测。
+      if (line.timing === 'measured' && !previous.some((p) => p.text === c.text && p.startMs === c.startMs && p.endMs === c.endMs
+        && JSON.stringify(p.marks ?? []) === JSON.stringify(c.marks ?? []))) {
+        line.timing = 'edited';
+        delete line.alignment;
+      }
+      return line;
+    });
+    await writeAtomic(inside(root, transcriptPath(src)), vttOf(lines, { ...(had?.speaker ? { speaker: had.speaker } : {}), cut: true }), 'utf8');
+    for (const language of languages) {
+      const translated = cues.flatMap((c) => (c.alt?.[language] ? [{ text: c.alt[language], startMs: c.startMs, endMs: c.endMs,
+        timing: /** @type {const} */ ('estimated') }] : []));
+      await writeAtomic(inside(root, transcriptPath(src, language)), vttOf(translated), 'utf8');
+    }
+    return { before, after: await readSourceSnapshot(root, src, paths) };
+  });
+}
+
+/** 旧单行 HTTP 入口也使用所读快照，不能绕开普通保存的前置检查。
+ * @param {string} root @param {string} src @param {number} line @param {string} text
+ * @param {string | undefined} language @param {number | undefined} part @param {unknown} from */
+export async function writeSubtitleLine(root, src, line, text, language, part, from) {
+  return withProjectFilmEdit(root, async () => {
+    await assertSourceSnapshot(root, src, from);
+    return setLine(root, src, line, text, language, part);
+  });
 }
 
 /** Whether `path` is one of `src`'s transcript files: `name.vtt` or `name.<language>.vtt` beside it. @param {string} src @param {string} path */
@@ -193,17 +251,16 @@ function snapshotOf(v, src) {
  */
 export async function restoreSourceFiles(root, src, rawFrom, rawTo) {
   if (!inProject(root, src)) throw new HttpError(400, `${src} is not a file inside the project`);
-  const from = snapshotOf(rawFrom, src), to = snapshotOf(rawTo, src);
-  const paths = [...new Set([...Object.keys(from.files), ...Object.keys(to.files)])];
-  const now = await snapshot(root, src, paths);
-  for (const path of paths) {
-    if ((now.files[path] ?? null) !== (from.files[path] ?? null)) throw new HttpError(409, 'These subtitles were changed since, elsewhere: they are left as they are now.', { code: 'changed' });
-  }
-  for (const path of paths) {
-    const body = to.files[path] ?? null;
-    if (body === null) await rm(inside(root, path), { force: true });
-    else await writeAtomic(inside(root, path), body, 'utf8');
-  }
+  return withProjectFilmEdit(root, async () => {
+    const from = snapshotOf(rawFrom, src), to = snapshotOf(rawTo, src);
+    const paths = [...new Set([...Object.keys(from.files), ...Object.keys(to.files)])];
+    await assertSourceSnapshot(root, src, from, paths);
+    for (const path of paths) {
+      const body = to.files[path] ?? null;
+      if (body === null) await rm(inside(root, path), { force: true });
+      else await writeAtomic(inside(root, path), body, 'utf8');
+    }
+  });
 }
 
 /**
@@ -218,9 +275,9 @@ export async function subtitleEditRoutes(req, res, root, rest) {
     return true;
   }
   if (rest === 'captions/source' && req.method === 'PUT') {
-    const { src, cues } = /** @type {{ src?: unknown, cues?: unknown }} */ (await readJson(req));
+    const { src, cues, from } = /** @type {{ src?: unknown, cues?: unknown, from?: unknown }} */ (await readJson(req));
     if (typeof src !== 'string') throw new HttpError(400, 'which source? { src, cues }');
-    json(res, 200, await writeSourceSubtitles(root, src, cues));
+    json(res, 200, await writeSourceSubtitles(root, src, cues, from));
     return true;
   }
   if (rest === 'captions/files' && req.method === 'PUT') {

@@ -2913,7 +2913,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
                     <ResourceInspector file={inspectorContent} url={(pickedSaved && inspectorContent === pickedMedia ? savedSources : mediaSources).file(inspectorContent)} width={inspectorShownWidth} onClose={closeInspector} />
                   ) : inspectorContent === 'subtitles' ? (
                     <SubtitleInspector
-                      subtitles={{ style: subs.style, onStyle: subs.patchStyle, translate: subs.translate, sourceLanguage: subs.sourceLanguage, lines: subs.captions?.cues ?? [], onEditLine: (cue, text, language) => void subs.setLine(cue, text, language), timeMs, onSeek: seek, untranscribed: subs.captions?.untranscribed.length ?? 0, onMake: makeSubtitles, making: subs.transcribing, ...(subtitleRefer ? { refer: subtitleRefer } : {}) }}
+                      subtitles={{ style: subs.style, onStyle: subs.patchStyle, translate: subs.translate, sourceLanguage: subs.sourceLanguage, lines: subs.captions?.cues ?? [], onEditLine: subs.setLine, timeMs, onSeek: seek, untranscribed: subs.captions?.untranscribed.length ?? 0, onMake: makeSubtitles, making: subs.transcribing, ...(subtitleRefer ? { refer: subtitleRefer } : {}) }}
                       width={inspectorShownWidth}
                       onClose={closeInspector}
                     />

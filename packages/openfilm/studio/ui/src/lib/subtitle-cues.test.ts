@@ -76,15 +76,15 @@ test('in the source: retimed with its words, kept between its neighbors', () => 
   assert.equal(findSourceCue(SOURCE, { line: 3000 }), 2);
   assert.equal(findSourceCue(SOURCE, { line: 0 }), -1);
   const longer = retimeSource(SOURCE, 0, 0, 2000);
-  assert.deepEqual(longer[0], { ...SOURCE[0], endMs: 1200, marks: [{ index: 0, startMs: 0 }, { index: 4, startMs: 360 }, { index: 8, startMs: 720 }] });
+  assert.deepEqual(longer[0], { ...SOURCE[0], timing: 'edited', endMs: 1200, marks: [{ index: 0, startMs: 0 }, { index: 4, startMs: 360 }, { index: 8, startMs: 720 }] });
   assert.equal(retimeSource(SOURCE, 1, 1500, 2500)[1]!.startMs, 1500);
   assert.equal(retimeSource(SOURCE, 1, 900, 2500)[1]!.startMs, 1000, 'not over the cue before');
 });
 
 test('in the source: split at the word said at that moment, its translation cut alike', () => {
   const [left, right] = splitSource(SOURCE, 0, 500).slice(0, 2);
-  assert.deepEqual(left, { startMs: 0, endMs: 500, text: 'One two', marks: [{ index: 0, startMs: 0 }, { index: 4, startMs: 300 }], alt: { fr: 'Un deux' } });
-  assert.deepEqual(right, { startMs: 500, endMs: 1000, text: 'three.', marks: [{ index: 0, startMs: 600 }], alt: { fr: 'trois.' } });
+  assert.deepEqual(left, { startMs: 0, endMs: 500, text: 'One two', timing: 'edited', marks: [{ index: 0, startMs: 0 }, { index: 4, startMs: 300 }], alt: { fr: 'Un deux' } });
+  assert.deepEqual(right, { startMs: 500, endMs: 1000, text: 'three.', timing: 'edited', marks: [{ index: 0, startMs: 600 }], alt: { fr: 'trois.' } });
   assert.equal(splitSource(SOURCE, 0, 500).length, 4);
   /* without word times, by how far through it is; one word stays on both halves */
   const halves = splitSource(SOURCE, 1, 1700);
@@ -97,7 +97,7 @@ test('in the source: merged, removed, added, typed', () => {
   const merged = mergeSource(SOURCE, 0);
   assert.equal(merged.length, 2);
   assert.deepEqual(merged[0], {
-    startMs: 0, endMs: 2200, text: 'One two three. Four five six.',
+    startMs: 0, endMs: 2200, text: 'One two three. Four five six.', timing: 'edited',
     marks: [{ index: 0, startMs: 0 }, { index: 4, startMs: 300 }, { index: 8, startMs: 600 }, { index: 15, startMs: 1200 }],
     alt: { fr: 'Un deux trois.' },
   });
@@ -106,5 +106,20 @@ test('in the source: merged, removed, added, typed', () => {
   assert.deepEqual(added.map((c) => [c.startMs, c.endMs, c.text]), [[0, 1000, 'One two three.'], [1200, 2200, 'Four five six.'], [2500, 3000, 'New'], [3000, 4000, 'Seven.']]);
   assert.equal(addSource(SOURCE, { startMs: 3200, endMs: 3500, text: 'No room' }).length, 3, 'no room inside Seven');
   const typed = textSource(SOURCE, 0, '  One,  two ');
-  assert.deepEqual(typed[0], { startMs: 0, endMs: 1000, text: 'One, two', alt: { fr: 'Un deux trois.' }, line: 0, part: 0 });
+  assert.deepEqual(typed[0], { startMs: 0, endMs: 1000, text: 'One, two', timing: 'edited', alt: { fr: 'Un deux trois.' }, line: 0, part: 0 });
+});
+
+
+test('manual text and time edits invalidate measured provenance while no-ops preserve it', () => {
+  const measured: SourceCue = { ...SOURCE[0]!, timing: 'measured', alignment: { matchedWords: 3, totalWords: 3 } };
+  const noTextChange = textSource([measured], 0, measured.text)[0]!;
+  assert.equal(noTextChange.timing, 'measured');
+  const typed = textSource([measured], 0, 'One hundred.')[0]!;
+  assert.equal(typed.timing, 'edited');
+  assert.equal(typed.alignment, undefined);
+  assert.equal(typed.marks, undefined);
+  const moved = retimeSource([measured], 0, 1000, 2000)[0]!;
+  assert.equal(moved.timing, 'edited');
+  assert.equal(moved.alignment, undefined);
+  assert.deepEqual(retimeSource([measured], 0, measured.startMs, measured.endMs), [measured]);
 });

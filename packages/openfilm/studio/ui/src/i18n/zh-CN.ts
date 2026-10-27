@@ -1334,6 +1334,8 @@ export const zhCN: Words = {
     subtitleTranslateNetwork: '无法连接到翻译服务。',
     subtitleTranslateRetry: '重试',
     subtitleTranslateConnect: '请在设置（左上角的 {productName} 标志）→ 服务商中连接一个翻译服务。',
+    subtitleTiming: { measured: '模型词时间', estimated: '估算时间', edited: '人工修订', unknown: '时间来源未知' },
+    subtitleTimingAlignment: '整段转写字面匹配 {matched}/{total} 词，不是识别准确率。',
     subtitleSize: '大小',
     subtitleLook: {
       outline: '描边（默认）',

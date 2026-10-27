@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { parseVtt } from './transcripts.mjs';
+import { clipCues } from './captions.mjs';
 import {
   FILM_SUBTITLE_DEFAULT, FILM_SUBTITLE_HOME_Y, FILM_SUBTITLE_LOOKS, FILM_SUBTITLE_PORTRAIT_Y, FILM_SUBTITLE_SIZE_PCT,
   filmSubtitleAt, filmSubtitleCss, filmSubtitleCssText, filmSubtitleFrameHtml, filmSubtitleLanguageOf,
@@ -80,7 +82,7 @@ test('files: overlapping lines give way, speakers stay apart from the text', () 
   assert.equal(filmSubtitleSrt([]), '');
 });
 
-test('a burned-in frame: the line in the frame\'s pixels, escaped, nothing when off or silent', () => {
+test('burn-in HTML: the escaped line, nothing when off or silent', () => {
   const cues = [{ startMs: 0, durMs: 1000, text: 'Tom & <Jerry>' }];
   const html = filmSubtitleFrameHtml(cues, D, { w: 1920, h: 1080 }, 500);
   assert.match(html, /^<div style="position:absolute;left:0;top:0;width:1920px;height:1080px;/);
@@ -90,4 +92,48 @@ test('a burned-in frame: the line in the frame\'s pixels, escaped, nothing when 
   assert.equal(filmSubtitleFrameHtml(cues, { ...D, on: false }, { w: 1920, h: 1080 }, 500), '');
   const karaoke = filmSubtitleFrameHtml([{ startMs: 0, durMs: 1000, text: 'aa bb' }], { ...D, karaoke: { mode: 'color', color: '#ff0000' } }, { w: 100, h: 100 }, 100);
   assert.match(karaoke, /<span style="color:#ff0000">aa<\/span> bb/);
+});
+
+
+test('translation declares estimated timing and frame HTML carries the same provenance without a visible badge', () => {
+  const cue = { startMs: 10000, durMs: 2000, text: '一百元', timing: 'measured', alignment: { matchedWords: 2, totalWords: 2 },
+    words: [{ text: '一百', startMs: 10000, durMs: 1000 }, { text: '元', startMs: 11000, durMs: 1000 }], alt: { en: '100 yuan' } };
+  const [translated] = filmSubtitleShown([cue], { language: 'en', bilingual: false });
+  assert.equal(translated.timing, 'estimated');
+  assert.equal(translated.alignment, undefined);
+  assert.equal(translated.words, undefined);
+  const html = filmSubtitleFrameHtml([cue], D, { w: 1280, h: 720 }, 10500);
+  assert.match(html, /data-timing-origin="measured"/);
+  assert.match(filmSubtitleVtt([cue]), /openfilm-timing:measured:2\/2/);
+});
+
+
+test('exported measured VTT retains film-time word anchors on parse and playback', () => {
+  const cue = { startMs: 10000, durMs: 2000, text: '一百元', timing: 'measured', alignment: { matchedWords: 2, totalWords: 2 },
+    words: [{ text: '一百', startMs: 10000, durMs: 1000 }, { text: '元', startMs: 11000, durMs: 1000 }] };
+  const exported = filmSubtitleVtt([cue]);
+  assert.match(exported, /一百<00:00:11\.000>元/);
+  const [line] = parseVtt(exported).lines;
+  assert.equal(line.timing, 'measured');
+  assert.deepEqual(line.marks, [{ index: 0, startMs: 10000 }, { index: 2, startMs: 11000 }]);
+  const [played] = clipCues([line], { fromMs: 0, startMs: 0, durMs: 12000, speed: 1 }, { cut: true });
+  assert.deepEqual(played.words, cue.words);
+  assert.deepEqual(filmSubtitleWords(played, 10500).filter((word) => word.active).map((word) => word.text), ['一百']);
+  assert.deepEqual(filmSubtitleWords(played, 11500).filter((word) => word.active).map((word) => word.text), ['元']);
+});
+
+test('text-only or unmappable VTT exports explicitly lose measured timing and coverage', () => {
+  const base = { startMs: 1000, durMs: 2000, text: 'One & <two>', timing: 'measured', alignment: { matchedWords: 2, totalWords: 2 } };
+  for (const cue of [base, { ...base, words: [{ text: 'Different', startMs: 1000, durMs: 2000 }] },
+    { ...base, words: [{ text: '<two>', startMs: 1000, durMs: 2000 }] },
+    { ...base, words: [{ text: 'One', startMs: 1000, durMs: 1000 }, { text: '& <two>', startMs: 1000, durMs: 1000 }] }]) {
+    const output = filmSubtitleVtt([cue]);
+    assert.match(output, /openfilm-timing:estimated\n/);
+    assert.doesNotMatch(output, /openfilm-timing:measured|:2\/2/);
+    const [line] = parseVtt(output).lines;
+    assert.equal(line.text, base.text);
+    assert.equal(line.timing, 'estimated');
+    assert.equal(line.alignment, undefined);
+    assert.equal(line.marks, undefined);
+  }
 });

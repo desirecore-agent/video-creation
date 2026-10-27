@@ -1,15 +1,15 @@
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createServer as netServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { filmCaptions, translateFilmSubtitles } from './captions.mjs';
-import { readTranscript } from './transcripts.mjs';
-import { VERBS, WEB_VERBS, WHERE_TO_CONNECT, catalog, flagHelp, runGet, services, subtitleTranslator } from './get.mjs';
+import { readTranscript, vttOf } from './transcripts.mjs';
+import { VERBS, WEB_VERBS, WHERE_TO_CONNECT, catalog, flagHelp, runGet, services, subtitleTranscriber, subtitleTranslator } from './get.mjs';
 import { changeSettings, kindOf, providersFile } from './keys.mjs';
 import { listProviders } from './providers/index.mjs';
 import { startStudio } from './server.mjs';
@@ -127,7 +127,7 @@ test('tts: the file lands, its timed words a WebVTT beside it, and the receipt s
   assert.equal(run.headers['xi-api-key'], 'elevenlabs-test-0123456789');
   assert.deepEqual(JSON.parse(run.body), { text: SAID, model_id: 'eleven_multilingual_v2' });
 
-  assert.match(readFileSync(join(root, 'assets/audio/vo/intro.vtt'), 'utf8'), /00:00:01\.800 --> 00:00:02\.800\nHow <00:00:02\.050>are <00:00:02\.250>you\?/);
+  assert.match(readFileSync(join(root, 'assets/audio/vo/intro.vtt'), 'utf8'), /openfilm-timing:measured:5\/5\n00:00:01\.800 --> 00:00:02\.800\n(?:<00:00:01\.800>)?How <00:00:02\.050>are <00:00:02\.250>you\?/);
   const transcript = await readTranscript(root, 'assets/audio/vo/intro.mp3');
   assert.deepEqual(transcript.lines.map((l) => l.text), ['Hello there.', 'How are you?']);
   assert.ok(!existsSync(join(root, 'assets/index.jsonl')), 'no ledger');
@@ -234,7 +234,7 @@ test('asr: the speech alone is sent, its transcript lands beside the recording, 
   execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1:sample_rate=48000', '-ac', '2', wav]);
   const receipt = JSON.parse(await runGet(root, 'asr', { src: 'assets/upload/talk.wav' }));
   assert.deepEqual(receipt, { src: 'assets/upload/talk.wav', text: 'One two.', transcript: 'assets/upload/talk.vtt' });
-  assert.match(readFileSync(join(root, 'assets/upload/talk.vtt'), 'utf8'), /^WEBVTT\n\n00:00:00\.100 --> .*\nOne <00:00:00\.500>two\./);
+  assert.match(readFileSync(join(root, 'assets/upload/talk.vtt'), 'utf8'), /^WEBVTT\n\nopenfilm-timing:measured:2\/2\n00:00:00\.100 --> .*\n(?:<00:00:00\.100>)?One <00:00:00\.500>two\./);
   const file = (await formOf(calls[0])).get('file');
   const proxy = Buffer.from(await file.arrayBuffer());
   assert.equal(file.name, 'talk.wav');
@@ -254,14 +254,14 @@ test('asr: a recording outside assets/ gets its transcript beside it too; the to
   const root = project();
   execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', join(root, 'talk.wav')]);
   assert.deepEqual(JSON.parse(await runGet(root, 'asr', { src: 'talk.wav' })), { src: 'talk.wav', text: 'One two.', transcript: 'talk.vtt' });
-  assert.match(readFileSync(join(root, 'talk.vtt'), 'utf8'), /^WEBVTT\n\n00:00:00\.100 --> .*\nOne <00:00:00\.500>two\./);
+  assert.match(readFileSync(join(root, 'talk.vtt'), 'utf8'), /^WEBVTT\n\nopenfilm-timing:measured:2\/2\n00:00:00\.100 --> .*\n(?:<00:00:00\.100>)?One <00:00:00\.500>two\./);
 
   /* a video the film is made like, kept beside the film but not in it */
   mkdirSync(join(root, 'references'));
   execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:d=1', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
     '-c:v', 'mpeg4', '-c:a', 'aac', '-shortest', join(root, 'references/ref.mp4')]);
   assert.deepEqual(JSON.parse(await runGet(root, 'asr', { src: 'references/ref.mp4' })), { src: 'references/ref.mp4', text: 'One two.', transcript: 'references/ref.vtt' });
-  assert.match(readFileSync(join(root, 'references/ref.vtt'), 'utf8'), /\nOne <00:00:00\.500>two\./);
+  assert.match(readFileSync(join(root, 'references/ref.vtt'), 'utf8'), /\n(?:<00:00:00\.100>)?One <00:00:00\.500>two\./);
   assert.equal(JSON.parse(await runGet(root, 'asr', { src: 'references/ref.mp4' })).skip, true, 'not made twice');
 
   /* files and folders starting with a dot are the tools': nothing is sent, nothing is written there */
@@ -270,6 +270,76 @@ test('asr: a recording outside assets/ gets its transcript beside it too; the to
   await assert.rejects(runGet(root, 'asr', { src: '.git/talk.wav' }), (e) => e.code === 2 && /belongs to the tools/.test(e.message));
   assert.ok(!existsSync(join(root, '.git/talk.vtt')));
   assert.equal(calls.filter((c) => c.path === '/v1/speech-to-text').length, 2);
+});
+
+test('asr refreshes a current-mtime transcript that outlasts the actual recording', async () => {
+  const root = project();
+  execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', join(root, 'talk.wav')]);
+  const stale = vttOf([{ text: 'old words', startMs: 0, endMs: 5000 }]);
+  writeFileSync(join(root, 'talk.vtt'), stale);
+  utimesSync(join(root, 'talk.wav'), 1, 1);
+  utimesSync(join(root, 'talk.vtt'), 2, 2);
+  const receipt = JSON.parse(await runGet(root, 'asr', { src: 'talk.wav' }));
+  assert.notEqual(receipt.skip, true);
+  assert.equal(receipt.text, 'One two.');
+  assert.equal(calls.filter((c) => c.path === '/v1/speech-to-text').length, 1);
+  assert.notEqual(readFileSync(join(root, 'talk.vtt'), 'utf8'), stale);
+});
+
+test('Studio transcriber refreshes the invalid current-mtime VTT instead of skipping it', async () => {
+  const root = project();
+  execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', join(root, 'talk.wav')]);
+  writeFileSync(join(root, 'talk.vtt'), vttOf([{ text: 'old words', startMs: 0, endMs: 5000 }]));
+  utimesSync(join(root, 'talk.wav'), 1, 1);
+  utimesSync(join(root, 'talk.vtt'), 2, 2);
+  await (await subtitleTranscriber())(root, 'talk.wav', new AbortController().signal);
+  assert.equal(calls.filter((c) => c.path === '/v1/speech-to-text').length, 1);
+  assert.equal((await readTranscript(root, 'talk.wav')).lines.map((line) => line.text).join(' '), 'One two.');
+});
+
+test('asr keeps stale hand-cut subtitles unless replacement is explicitly forced', async () => {
+  const root = project();
+  execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', join(root, 'talk.wav')]);
+  const manual = vttOf([{ text: '人工保留的整句', startMs: 0, endMs: 5000 }], { cut: true });
+  writeFileSync(join(root, 'talk.vtt'), manual);
+  utimesSync(join(root, 'talk.vtt'), 1, 1);
+  utimesSync(join(root, 'talk.wav'), 2, 2);
+  const receipt = JSON.parse(await runGet(root, 'asr', { src: 'talk.wav' }));
+  assert.equal(receipt.skip, true);
+  assert.match(receipt.note, /edited by hand.*--force/);
+  assert.equal(calls.length, 0);
+  assert.equal(readFileSync(join(root, 'talk.vtt'), 'utf8'), manual);
+  await assert.rejects((await subtitleTranscriber())(root, 'talk.wav', new AbortController().signal), /edited by hand.*--force/);
+  assert.equal(calls.length, 0);
+  await runGet(root, 'asr', { src: 'talk.wav', force: true });
+  assert.equal(calls.filter((c) => c.path === '/v1/speech-to-text').length, 1);
+  assert.equal((await readTranscript(root, 'talk.wav')).cut, undefined);
+});
+
+test('asr does not overwrite subtitles edited while its request is in flight', async () => {
+  const root = project();
+  execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', join(root, 'talk.wav')]);
+  const newer = vttOf([{ text: 'during request', startMs: 0, endMs: 1000 }], { cut: true });
+  refuse = (call) => {
+    if (call.path === '/v1/speech-to-text') writeFileSync(join(root, 'talk.vtt'), newer);
+    return answer(call);
+  };
+  await assert.rejects(runGet(root, 'asr', { src: 'talk.wav', force: true }), (error) => error.status === 409);
+  assert.equal(readFileSync(join(root, 'talk.vtt'), 'utf8'), newer);
+  assert.equal(calls.filter((c) => c.path === '/v1/speech-to-text').length, 1);
+});
+
+test('asr does not attach old speech to a recording replaced while its request is in flight', async () => {
+  const root = project();
+  execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', join(root, 'talk.wav')]);
+  const previous = vttOf([{ text: 'previous subtitles', startMs: 0, endMs: 900 }]);
+  writeFileSync(join(root, 'talk.vtt'), previous);
+  refuse = (call) => {
+    if (call.path === '/v1/speech-to-text') writeFileSync(join(root, 'talk.wav'), 'replacement bytes');
+    return answer(call);
+  };
+  await assert.rejects(runGet(root, 'asr', { src: 'talk.wav', force: true }), /recording changed during transcription/);
+  assert.equal(readFileSync(join(root, 'talk.vtt'), 'utf8'), previous);
 });
 
 test('what lands stays in assets/, and the receipt leaves out what it cost', async (t) => {
@@ -369,7 +439,7 @@ test('openfilm get: what can be got here, connected, partly or not at all; wrong
   const root = project();
   /* the listing as the CLI prints it: the verbs' names padded to the longest shown */
   const listing = (verbs, width = Math.max(...verbs.map((v) => v.length))) => [
-    'openfilm get <what> [--option value …]   media for this project, saved under assets/',
+    'video-creation get <what> [--option value …]   media for this project, saved under assets/',
     '  --yes              the person already agreed to what it spends',
     '',
     ...verbs.flatMap((verb) => {
@@ -433,8 +503,12 @@ test('openfilm get: what can be got here, connected, partly or not at all; wrong
     assert.equal(get(root, 'tts', 'extra', '--out', 'x').status, 2);
     assert.equal(get(root, 'tts', '--via', 'nobody', '--out', 'x', '--text', 'hi', '--voice', 'v').status, 2);
   } finally {
-    const run = JSON.parse(readFileSync(join(process.env.OPENFILM_HOME, 'run.json'), 'utf8'));
-    await fetch(`${run.origin}/api/quit`, { method: 'POST', headers: { 'x-studio-key': run.key } });
+    // 仅关闭本测试已启动的隔离实例；启动前的断言失败也不能被清理错误掩盖。
+    const file = join(process.env.OPENFILM_HOME, 'run.json');
+    if (existsSync(file)) {
+      const run = JSON.parse(readFileSync(file, 'utf8'));
+      await fetch(`${run.origin}/api/quit`, { method: 'POST', headers: { 'x-studio-key': run.key } });
+    }
   }
 });
 
