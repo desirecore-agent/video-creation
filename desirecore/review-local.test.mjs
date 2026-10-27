@@ -8,13 +8,26 @@ import { startStudio } from '../packages/openfilm/studio/server/server.mjs';
 import { projectClient } from './client.mjs';
 import { command } from './cli.mjs';
 import { copyReviewImages, reviewLocalOptionsOf } from './review-local.mjs';
+import { EXAMPLES_INDEX } from '../packages/openfilm/studio/server/examples.mjs';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jzu0AAAAASUVORK5CYII=', 'base64');
 const sha256 = createHash('sha256').update(png).digest('hex');
 const id = 'abcdef0123456789abcdef01';
 const receipt = { version: 4, reviewId: id, projectId: 'project', frames: [{ index: 0, bytes: png.length, sha256 }], artifacts: [{ artifactId: 'sequence', bytes: png.length, sha256 }] };
 async function fixture(fn) {
   const root = await mkdtemp(join(tmpdir(), 'review-local-'));
-  try { await fn(root); } finally { await rm(root, { recursive: true, force: true }); }
+  const previousIndex = process.env.OPENFILM_EXAMPLES_INDEX;
+  try {
+    // Studio warms the remote example catalog in the background. That unrelated network response can write its
+    // cache after close() and race fixture removal. This contract needs no examples: use its own local catalog.
+    const index = join(root, 'examples-index.json');
+    await writeFile(index, JSON.stringify({ examples: [] }));
+    process.env.OPENFILM_EXAMPLES_INDEX = index;
+    await fn(root);
+  } finally {
+    if (previousIndex === undefined) delete process.env.OPENFILM_EXAMPLES_INDEX;
+    else process.env.OPENFILM_EXAMPLES_INDEX = previousIndex;
+    await rm(root, { recursive: true, force: true });
+  }
 }
 test('本地选项明确区分读取/捕获，不把输出目录传给服务器', () => {
   assert.deepEqual(reviewLocalOptionsOf({ read: id, 'copy-to': '.' }), { read: id, copyTo: '.' });
@@ -32,12 +45,25 @@ test('显式副本核精确字节，复用同份图片且不覆盖用户冲突�
   await assert.rejects(copyReviewImages(client, receipt, root)); assert.deepEqual(await readFile(first.images[0].path), png.subarray(0, 20));
   assert.equal(JSON.stringify(receipt), before);
 }));
-test('真实鉴权HTTP读取已有review后保存副本，未触发捕获且原PNG/回执不变', { timeout: 20_000 }, () => fixture(async (root) => {
+test('真实鉴权HTTP读取已有review后保存副本，未触发捕获且原PNG/回执不变', { timeout: 20_000 }, (t) => fixture(async (root) => {
+  const originalFetch = globalThis.fetch;
+  let remoteCatalogRequests = 0;
+  t.mock.method(globalThis, 'fetch', (url, options) => {
+    if (String(url) === EXAMPLES_INDEX) {
+      remoteCatalogRequests++;
+      return Promise.resolve(new Response(null, { status: 503 }));
+    }
+    return originalFetch(url, options);
+  });
   const keys = ['OPENFILM_HOME', 'VIDEO_CREATION_HOME', 'APP_DATA_DIR'], old = Object.fromEntries(keys.map((k) => [k, process.env[k]])), home = join(root, 'home'), project = join(root, 'project'), copies = join(root, 'copies');
   await mkdir(project); await mkdir(copies); for (const key of keys) process.env[key] = home;
   await writeFile(join(project, 'film.html'), '<meta name="viewport" content="width=1, height=1"><section></section>');
   const studio = await startStudio({ port: 0, advertise: true, openBrowser: () => {} });
   try {
+    // Join the normal startup catalog read before teardown; do not sleep or ignore cleanup failures.
+    const examples = await fetch(`${studio.origin}/api/examples`, { headers: { 'x-studio-key': studio.key } });
+    assert.equal(examples.status, 200); assert.deepEqual(await examples.json(), { examples: [] });
+    assert.equal(remoteCatalogRequests, 0, 'receipt-copy acceptance is independent of remote catalog refresh');
     const client = await projectClient({ home }, project), dir = join(home, 'reviews', id); await mkdir(dir, { recursive: true });
     const forbiddenOutput = join(root, 'server-must-not-create');
     const invalid = await fetch(`${studio.origin}${client.base}/reviews`, { method: 'POST', headers: { 'x-studio-key': studio.key, 'content-type': 'application/json' }, body: JSON.stringify({ source: 'current-project', times: [0], copyTo: forbiddenOutput }) });

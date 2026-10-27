@@ -65,6 +65,7 @@ test('Studio follows an external same-id rename without losing the open director
     /* Complete the fixture before registering/opening it, so setup writes cannot refresh the first preview. */
     const projectPath = join(scratch, 'projects', 'Rename draft');
     mkdirSync(join(projectPath, 'assets'), { recursive: true });
+    writeFileSync(join(projectPath, 'assets', 'notes.md'), 'Initial non-picture watcher marker.');
     writeFileSync(join(projectPath, 'film.html'), filmHtml({ stage: { w: 640, h: 360 }, tracks: [{ clips: [{ id: 'scene', src: 'scene.html', time: [0, 10] }] }] }));
     writeFileSync(join(projectPath, 'scene.html'), '<body><h1>Before rename</h1><script>window.film={duration:10,frame(t){}}</script></body>');
     const { project } = await api('projects', 'POST', { path: projectPath, create: false });
