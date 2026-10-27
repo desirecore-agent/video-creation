@@ -157,7 +157,8 @@ export async function readSourceSnapshot(root, src, also = []) {
   return out;
 }
 
-/** 仅给所见字幕携带轻量版本；保存仍比对原字节，不把摘要当作写入锁。@param {Snapshot} value */
+/** 仅给所见字幕携带轻量版本；保存仍比对原字节，不把摘要当作写入锁。
+ * @param {Snapshot} value */
 export function sourceSnapshotRevision(value) {
   return createHash('sha256').update(JSON.stringify(Object.entries(value.files).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))).digest('hex');
 }

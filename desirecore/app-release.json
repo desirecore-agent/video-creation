@@ -1155,8 +1155,8 @@
     },
     {
       "path": "packages/openfilm/studio/server/subtitle-edits.mjs",
-      "sha256": "a67f2e8a2a351b38142af94854cc42ad9a5dba28902618c6a66aaf12abf6e4be",
-      "size": 16854,
+      "sha256": "f9fa58ee039518d65695bf65a11cd52e0259887a397a356376b5bead120c43f2",
+      "size": 16858,
       "role": "runtime"
     },
     {
@@ -1258,7 +1258,7 @@
   ],
   "source": {
     "kind": "worktree",
-    "sha256": "6626359278930d3245952a0c75fdb41ec9171c7e0f7ada3b320eff85d2e54a1c"
+    "sha256": "68d75a4910d9d72e4fe1bdbd8419d6a9fd48efa473cda9d018c6f91f3d8b579f"
   },
   "supportedPlatforms": [
     "darwin",
@@ -1291,5 +1291,5 @@
     "restoreInstructionsPath": "desirecore/RUNTIME.md"
   },
   "instructionsPath": "desirecore/RUNTIME.md",
-  "releaseDigest": "7e20f5be30b93aabcd6388acaaab5e1decc6a863e03634331557c89d25183c2b"
+  "releaseDigest": "858174a9baeef4415014af2106367922f430c12bb8de8d03126617ebbc2eb240"
 }
