@@ -32,7 +32,9 @@ function toolData(response) { return JSON.parse(response.result.content[0].text)
 
 // 环境在 server/film 等产品模块导入之前隔离；单一临时服务顺序完成每种入口。
 test('场景源码真实 HTTP、CLI 和 stdio 共用合同、字节预算和有限恢复回执', { timeout: 90_000 }, async (t) => {
-  const scratch = await fs.mkdtemp(join(tmpdir(), 'scene-source-transport-'));
+  // The service registers canonical project paths. macOS may give tmpdir() a /var alias whose real path starts
+  // with /private/var; use the same filesystem identity so the publication-race hook below actually matches.
+  const scratch = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'scene-source-transport-')));
   const home = join(scratch, 'home'), project = join(scratch, '影片 中文项目');
   const beforeEnv = Object.fromEntries(['OPENFILM_HOME', 'OPENFILM_LIBRARY', 'APP_DATA_DIR'].map((key) => [key, process.env[key]]));
   Object.assign(process.env, { OPENFILM_HOME: home, OPENFILM_LIBRARY: join(home, 'projects'), APP_DATA_DIR: home });
@@ -175,9 +177,13 @@ test('场景源码真实 HTTP、CLI 和 stdio 共用合同、字节预算和有�
         await reset(); const read = (await post('read', { clipId: 'scene' })).body;
         const content = `${initialSource}\n<!-- ${via} 完整新源码 -->`, target = `retained-${via}.html`;
         const input = ask(read, target, content);
+        let injected = 0;
         const mocked = t.mock.method(fs, 'link', async (from, to) => {
           const result = await originalLink(from, to);
-          if (to === join(project, target)) await fs.appendFile(join(project, 'film.html'), `\n<!-- 同期外写 ${via} -->`);
+          if (to === join(project, target)) {
+            injected += 1;
+            await fs.appendFile(join(project, 'film.html'), `\n<!-- 同期外写 ${via} -->`);
+          }
           return result;
         });
         let detail, status;
@@ -193,6 +199,7 @@ test('场景源码真实 HTTP、CLI 和 stdio 共用合同、字节预算和有�
             assert.equal(result.replies[0].result.isError, true); detail = toolData(result.replies[0]); status = detail.status;
           }
         } finally { mocked.mock.restore(); }
+        assert.equal(injected, 1, `${via}: the competing write ran after publishing the canonical target`);
         assert.equal(status, 409); assert.equal(detail.sceneSourceError, true); assert.equal(detail.kind, 'recovery');
         assert.equal(detail.recovery.outcome, 'published-film-state-requires-inspection');
         assert.equal(detail.recovery.publication.path, target);

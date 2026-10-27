@@ -62,12 +62,12 @@ import type { FadeMs } from '@/lib/clip-fade';
 import type { FoundKind } from '@/lib/transitions';
 import { MotionSection } from './MotionSection';
 import { TemplateSection, type TemplateHost } from './TemplateSection';
+import { createTextDraft, type TextDraftEdit } from '@/lib/text-draft';
 
 /** A change of a layer's words (kept as its `text` override). `expect` is what it said before: painted back on refusal. */
-export type StageTextEdit = {
-  loc: string;
-  value: string;
-  expect: string;
+export type StageTextEdit = TextDraftEdit & {
+  /** The layer when the edit was submitted, retained when the inspector selection changes during a write. */
+  target?: StageElement;
 };
 
 /** Why a text change was refused. */
@@ -201,7 +201,7 @@ export const FilmInspector = React.memo(function FilmInspector({
   onPreviewStyle: (loc: string, patch: StageElementStyle) => void;
   onEditText: (edit: StageTextEdit) => Promise<StageEditFailure | null>;
   /** Paints the words as they are typed (written on blur, see TextSection). */
-  onPreviewText?: (loc: string, value: string) => void;
+  onPreviewText?: (loc: string, value: string, target?: StageElement) => void;
   /** Where the thing in hand is on the stage now (stage px, reported by the stage). */
   geometry?: StageGeometry | null;
   inlineTextFailure?: InlineTextFailure | null;
@@ -766,7 +766,7 @@ function LayerPanel({
   countSimilar?: (element: StageElement) => Promise<number>;
   onPreviewStyle: (loc: string, patch: StageElementStyle) => void;
   onEditText: (edit: StageTextEdit) => Promise<StageEditFailure | null>;
-  onPreviewText?: (loc: string, value: string) => void;
+  onPreviewText?: (loc: string, value: string, target?: StageElement) => void;
   onEditOverride?: (
     element: StageElement,
     patch: OverrideGeometry | null,
@@ -971,17 +971,17 @@ function LayerPanel({
         <RefusalBanner message={refusal} onDismiss={() => setRefusal(null)} t={t} />
       ) : null}
 
-      <React.Fragment key={rev}>
       {element.text ? (
         <TextSection
           text={element.text}
           shared={copies}
-          onEditText={onEditText}
-          onPreviewText={onPreviewText}
+          onEditText={(edit) => onEditText({ ...edit, target: element })}
+          onPreviewText={(loc, value) => onPreviewText?.(loc, value, element)}
           onRefused={setRefusal}
         />
       ) : null}
 
+      <React.Fragment key={rev}>
       {canMove ? (
         <Section
           id="position"
@@ -1153,42 +1153,34 @@ function TextSection({
   onRefused: (message: string | null) => void;
 }) {
   const t = useT();
-  const [raw, setRaw] = React.useState(text.value);
-  const [saving, setSaving] = React.useState(false);
-  /* the picture paints the words as they are typed, and the layer is measured again from the picture: while typing,
-     `text.value` is the typed words, not the written ones. What was written is kept from before the first key. */
-  const written = React.useRef(text.value);
-  const typing = React.useRef(false);
+  const draft = React.useMemo(() => createTextDraft(text.loc, text.value), [text.loc]);
+  const [, repaint] = React.useReducer((n: number) => n + 1, 0);
+  React.useLayoutEffect(() => { draft.activate(); return () => draft.dispose(); }, [draft]);
   React.useEffect(() => {
-    if (typing.current) return;
-    written.current = text.value;
-    setRaw(text.value);
-  }, [text.value]);
-  React.useEffect(() => {
-    typing.current = false;
-    written.current = text.value;
-    setRaw(text.value);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text.loc]);
-  const send = async (value: string) => {
+    if (draft.receive(text.value)) repaint();
+  }, [draft, text.value]);
+  const send = async () => {
+    const edit = draft.submit();
+    if (!edit) return;
     onRefused(null);
-    setSaving(true);
-    const loc = text.loc;
-    const failed = await onEditText({ loc, value, expect: written.current });
-    setSaving(false);
-    typing.current = false;
-    if (!failed) { written.current = value; return; }
-    /* not written: the box and the picture go back to the written words, or it looks as if it took */
-    setRaw(written.current);
-    onPreviewText?.(loc, written.current);
-    onRefused(failed.error);
+    repaint();
+    let failed: StageEditFailure | null;
+    try { failed = await onEditText(edit); }
+    catch { failed = { error: t('timeline.editFail') }; }
+    draft.finish(edit, !!failed);
+    if (!draft.active) return;
+    repaint();
+    /* The written film may have repainted while the response was in flight. Keep a newer unsaved preview, or
+       restore the latest successful baseline on refusal; never restore an earlier request's `expect`. */
+    onPreviewText?.(edit.loc, draft.raw);
+    if (failed) onRefused(failed.error);
+    else if (edit.isCurrent?.()) onRefused(null);
   };
   /* Esc is "never mind": it blurs right after, and that blur still reads the half-typed words */
   const cancelled = React.useRef(false);
   const save = () => {
     if (cancelled.current) { cancelled.current = false; return; }
-    if (raw === written.current) { typing.current = false; return; }
-    void send(raw);
+    void send();
   };
   return (
     <Section
@@ -1201,12 +1193,12 @@ function TextSection({
       ) : null}
     >
       <textarea
-        value={raw}
+        value={draft.raw}
         aria-label={t('inspector.content')}
         onChange={(e) => {
           cancelled.current = false;
-          typing.current = true;
-          setRaw(e.target.value);
+          draft.change(e.target.value);
+          repaint();
           /* the picture follows the words (Figma's feel); the write still waits for blur / Enter */
           onPreviewText?.(text.loc, e.target.value);
         }}
@@ -1219,14 +1211,14 @@ function TextSection({
           }
           if (e.key === 'Escape') {
             cancelled.current = true;
-            typing.current = false;
-            setRaw(written.current);
-            onPreviewText?.(text.loc, written.current);
+            draft.cancel();
+            repaint();
+            onPreviewText?.(text.loc, draft.raw);
             (e.target as HTMLTextAreaElement).blur();
           }
         }}
-        rows={Math.min(6, Math.max(2, raw.split('\n').length))}
-        className={`w-full resize-none rounded-[5px] bg-[var(--fill-tsp)] px-2 py-1.5 text-[11.5px] leading-[1.5] text-[var(--text)] outline-none ring-1 ring-inset ring-transparent transition hover:ring-[var(--border)] focus:bg-[var(--bg)] focus:ring-[1.5px] focus:ring-[var(--accent)] ${saving ? 'opacity-60' : ''}`}
+        rows={Math.min(6, Math.max(2, draft.raw.split('\n').length))}
+        className={`w-full resize-none rounded-[5px] bg-[var(--fill-tsp)] px-2 py-1.5 text-[11.5px] leading-[1.5] text-[var(--text)] outline-none ring-1 ring-inset ring-transparent transition hover:ring-[var(--border)] focus:bg-[var(--bg)] focus:ring-[1.5px] focus:ring-[var(--accent)] ${draft.saving ? 'opacity-60' : ''}`}
       />
       <p className="text-[10.5px] leading-[15px] text-[var(--text-faint)]">
         {t('inspector.editOnCanvas')}

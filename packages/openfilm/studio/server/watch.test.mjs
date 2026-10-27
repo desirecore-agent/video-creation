@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { mkdirSync, mkdtempSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import { syncBuiltinESMExports } from 'node:module';
 import { revOf } from './film.mjs';
 import { createWatchers, watchTree } from './watch.mjs';
 
@@ -86,6 +87,7 @@ test('a renamed project keeps its existing streams and their cleanup follows the
     watchers.move(root, to);
     assert.deepEqual(watchers.roots(), [to]);
     await settle();
+    assert.ok(!first.some((event) => event.type === 'files' && event.paths?.includes('Final')), 'the folder rename is not a child-resource edit');
     first.length = second.length = 0;
     writeFileSync(join(to, 'film.html'), '{"stage":{"w":2,"h":2},"tracks":[]}');
     writeFileSync(join(to, 'new-page.html'), '<p>after rename</p>');
@@ -98,4 +100,61 @@ test('a renamed project keeps its existing streams and their cleanup follows the
     stopSecond();
     assert.deepEqual(watchers.roots(), [], 'old cleanup closures also release the relocated watcher');
   } finally { watchers.closeAll(); rmSync(scratch, { recursive: true, force: true }); }
+});
+
+test('native self-rename notifications do not invalidate a picture or hide legitimate same-name child edits', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'of-native-self-'));
+  const ownName = basename(root), seen = [];
+  let notify;
+  const mocked = t.mock.method(fs, 'watch', (_root, _options, callback) => {
+    notify = callback;
+    return { on() { return this; }, close() {} };
+  });
+  syncBuiltinESMExports();
+  let close;
+  try {
+    close = watchTree(root, (name) => seen.push(name), true);
+    notify('rename', ownName);
+    assert.deepEqual(seen, [], 'a late notification about the directory itself is not a child edit');
+    writeFileSync(join(root, ownName), 'actual child');
+    notify('rename', ownName);
+    notify('change', ownName);
+    unlinkSync(join(root, ownName));
+    notify('rename', ownName);
+    assert.deepEqual(seen, [ownName, ownName, ownName], 'creation, edit and deletion of a real namesake remain visible');
+    mkdirSync(join(root, ownName));
+    writeFileSync(join(root, ownName, 'scene.html'), 'a nested child');
+    notify('change', `${ownName}/scene.html`);
+    rmSync(join(root, ownName), { recursive: true });
+    notify('rename', ownName);
+    assert.deepEqual(seen.slice(-2), [`${ownName}/scene.html`, ownName], 'a nested event also proves that the namesake was a real child directory');
+    notify('rename', 'other-removed.html');
+    notify('rename', null);
+    assert.deepEqual(seen.slice(-2), ['other-removed.html', null], 'other deletions and unknown invalidations stay conservative');
+    rmSync(root, { recursive: true });
+    notify('rename', ownName);
+    assert.equal(seen.at(-1), ownName, 'removing the watched directory itself still invalidates the picture');
+    close();
+    notify('change', 'late.html');
+    assert.ok(!seen.includes('late.html'), 'a callback already queued for the closed watcher cannot reach its old subscribers');
+  } finally { close?.(); mocked.mock.restore(); syncBuiltinESMExports(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a namesake child present when native watching starts still invalidates on deletion', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'of-native-existing-')), ownName = basename(root);
+  writeFileSync(join(root, ownName), 'existing child');
+  const seen = [];
+  let notify;
+  const mocked = t.mock.method(fs, 'watch', (_root, _options, callback) => {
+    notify = callback;
+    return { on() { return this; }, close() {} };
+  });
+  syncBuiltinESMExports();
+  let close;
+  try {
+    close = watchTree(root, (name) => seen.push(name), true);
+    unlinkSync(join(root, ownName));
+    notify('rename', ownName);
+    assert.deepEqual(seen, [ownName]);
+  } finally { close?.(); mocked.mock.restore(); syncBuiltinESMExports(); rmSync(root, { recursive: true, force: true }); }
 });

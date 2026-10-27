@@ -578,6 +578,7 @@ export const zhCN: Words = {
     explanation: '确认所选内容并描述修改要求。视频导演开始工作前，DesireCore 会请你确认。',
     instruction: '希望创作或修改什么？', placeholder: '例如：缩短这个镜头，保留我调整过的标题布局。',
     selection: '将附带所选内容（{n} 项）', project: '项目', playhead: '当前时间', seconds: '秒', range: '选定范围', noReferences: '将附带当前画面时间和项目信息。',
+    referencesOmitted: '为适应本次可用的上下文长度，已省略 {n} 项引用。请确认剩余上下文后再开始。',
     prepare: '在 DesireCore 中确认', preparing: '正在准备…', prepared: '已在 DesireCore 中准备提案，请在那里确认后开始。',
     errors: {
       'host-unavailable': '请在 DesireCore 中打开此应用，再交给视频导演。这里可以继续编辑。',
@@ -586,6 +587,8 @@ export const zhCN: Words = {
       'permission-unavailable': '此应用尚未获准使用协作能力，请让 DesireCore 中的智能体完成配置。',
       'context-unavailable': '暂时无法读取导演配置，请让 DesireCore 中的智能体检查关联后重试。',
       'prepare-failed': '暂时无法确认提案是否准备成功，请保持原指令重试。应用尚未提交执行。',
+      'proposal-too-large': '内容超过宿主允许的长度。请缩短指令或减少所选内容后重新准备，尚未提交执行。',
+      'host-budget-unavailable': '无法读取宿主允许的内容长度，请让 DesireCore 中的智能体检查应用连接后重试。',
     },
   },
   exportTray: {

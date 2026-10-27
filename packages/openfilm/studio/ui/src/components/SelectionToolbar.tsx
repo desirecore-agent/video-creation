@@ -19,7 +19,7 @@ import { createPortal } from 'react-dom';
 
 import { Tooltip } from '@/components/Tooltip';
 import { inHostPanel } from '@/components/typing-target';
-import { placeToolbar, type ScreenBox, type ToolbarPlacement } from '@/lib/selection-toolbar';
+import { placeToolbar, sameToolbarPlacement, type ScreenBox, type ToolbarPlacement } from '@/lib/selection-toolbar';
 
 export interface SelectionTool {
   id: string;
@@ -83,14 +83,16 @@ export function SelectionToolbar({
 
   /* placed after every render (the owner re-renders as what it is about moves), measured first */
   React.useLayoutEffect(() => {
-    if (!shown) { setPos(null); return; }
+    if (!shown) { if (pos !== null) setPos(null); return; }
     const m = measure();
     const el = ref.current;
     const next = m ? placeToolbar({
       anchor: m.anchor, size: { width: el?.offsetWidth ?? 0, height: el?.offsetHeight ?? 0 }, bounds: m.bounds,
       ...(m.gap != null ? { gap: m.gap } : {}), ...(m.avoid ? { avoid: m.avoid } : {}),
     }) : null;
-    setPos((cur) => (cur && next && cur.left === next.left && cur.top === next.top && cur.side === next.side ? cur : next));
+    /* Do not enqueue an update at all when layout is unchanged. A refusal can synchronously remeasure the stage
+       while other layout updates are pending; returning `cur` inside an updater still queues work in that cycle. */
+    if (!sameToolbarPlacement(pos, next)) setPos(next);
   });
 
   if (!shown || typeof document === 'undefined') return null;

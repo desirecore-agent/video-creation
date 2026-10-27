@@ -166,3 +166,11 @@ node desirecore/cli.mjs review <项目> --source review-pair --before-review <�
 对照复用两个已有timed PNG，不再渲染；每侧源、版本、时点、SHA与实际尺寸独立。只列可证明的输入/已捕获字段差异，缺数据unknown，不自动对齐语义、判优、删除源或解锁。字段、预算及来源边界以唯一Schema与[RUNTIME.md](desirecore/RUNTIME.md)为准。
 
 可选本地审片副本：`review <项目> --read <reviewId> --copy-to <已授权目录>`复用已有回执和鉴权PNG，不再捕获。副本保留来源摘要供既有Read使用，同字节可复用，冲突不覆盖，也不授予权限；新捕获同样可选`--copy-to`。详见[运行合同](desirecore/RUNTIME.md)。
+
+## 编辑可靠性与导演上下文
+
+文字检查器在保存期间允许继续输入；先前保存的成功或失败回执不会覆盖后续草稿或另一片段的同名图层。片段导出的SRT/VTT只包含该片段的字幕，按已有源trim、speed和片段本地range映射到输出时间；整片选区仍使用工程时轴。工程重命名同步元数据和监听，目录自身改名不会被误当成画面资源变化。
+
+导演提案按宿主connect可选返回的workProposal.maxBytes核算完整UTF-8内容，按完整引用删减并提示省略数量，保留指令和必要工程身份；旧宿主缺字段时兼容64KiB。最小必要内容仍超限时保留完整草稿并提示调整，不静默截断指令；结果未知的重试保持原正文和请求身份。
+
+新审片sourceFacts.version为2，人工锁摘要来自真实motion.locked，与布局摘要分开。旧版1回执可继续读取和看图，但其工程字段对照标为unknown，不用错误的历史锁投影证明“锁未变化”。

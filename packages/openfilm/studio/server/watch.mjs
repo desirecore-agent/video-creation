@@ -4,8 +4,8 @@
  * file (`files`: a page, a picture, a sound). One watcher per open project, shared by every page showing it, closed when
  * the last one leaves. Studio's own folders and the usual build and dependency folders are not watched.
  */
-import { readdirSync, watch } from 'node:fs';
-import { join } from 'node:path';
+import { lstatSync, readdirSync, watch } from 'node:fs';
+import { basename, join } from 'node:path';
 import { readProjectFilm } from './film.mjs';
 import { FILM_FILE } from '../../src/film-doc.mjs';
 
@@ -39,10 +39,12 @@ export function watchFolder(root, send) {
   /** @type {Set<string> | null} null: some change could not say which file */
   let paths = new Set();
   let timer = /** @type {NodeJS.Timeout | null} */ (null);
+  let closed = false;
   let lastRev = '';
   readProjectFilm(root).then((f) => { lastRev = f.rev; }, () => {});
 
   const flush = async () => {
+    if (closed) return;
     timer = null;
     const kinds = [...pending];
     const changed = paths;
@@ -50,6 +52,7 @@ export function watchFolder(root, send) {
     paths = new Set();
     if (kinds.includes('film')) {
       const { rev } = await readProjectFilm(root).catch(() => ({ rev: '' }));
+      if (closed) return;
       /* the same text written again (an editor's save, Studio's own write echoed back) is no change */
       if (rev && rev !== lastRev) { lastRev = rev; send({ type: 'film', rev }); }
     }
@@ -57,6 +60,7 @@ export function watchFolder(root, send) {
   };
 
   const close = watchTree(root, (name) => {
+    if (closed) return;
     if (!name) { pending.add('files'); pending.add('film'); paths = null; }
     else {
       const rel = name;
@@ -66,7 +70,7 @@ export function watchFolder(root, send) {
     }
     if (!timer) timer = setTimeout(flush, SETTLE_MS);
   });
-  return () => { if (timer) clearTimeout(timer); close(); };
+  return () => { closed = true; if (timer) clearTimeout(timer); close(); };
 }
 
 /**
@@ -78,12 +82,33 @@ export function watchFolder(root, send) {
  */
 export function watchTree(root, onChange, native = process.platform === 'darwin' || process.platform === 'win32') {
   if (native) {
+    const ownName = basename(root);
+    const namesakeExists = () => {
+      try { lstatSync(join(root, ownName)); return true; }
+      catch (error) { return !['ENOENT', 'ENOTDIR'].includes(/** @type {NodeJS.ErrnoException} */ (error).code ?? ''); }
+    };
+    const rootStillThere = () => { try { return lstatSync(root).isDirectory(); } catch { return false; } };
+    let hadNamesake = namesakeExists();
+    let closed = false;
     /* a folder that is not there (any more) is not watched: nothing comes of it */
     let watcher;
-    try { watcher = watch(root, { recursive: true }, (_event, name) => onChange(name ? String(name).split('\\').join('/') : null)); }
+    try { watcher = watch(root, { recursive: true }, (event, name) => {
+      if (closed) return;
+      const rel = name ? String(name).split('\\').join('/') : null;
+      if (rel?.startsWith(`${ownName}/`)) hadNamesake = true;
+      if (rel === ownName) {
+        const exists = namesakeExists();
+        // macOS can deliver the watched directory's own creation/rename after a new watcher starts. It names
+        // the directory itself, not a child resource. A real child with that name must still invalidate on delete.
+        const selfRename = event === 'rename' && !hadNamesake && !exists && rootStillThere();
+        hadNamesake = exists;
+        if (selfRename) return;
+      }
+      onChange(rel);
+    }); }
     catch { return () => {}; }
     watcher.on('error', () => {});
-    return () => watcher.close();
+    return () => { closed = true; watcher.close(); };
   }
   /** @type {Map<string, import('node:fs').FSWatcher>} folder-relative folder ('' for the root) → its watcher */
   const folders = new Map();

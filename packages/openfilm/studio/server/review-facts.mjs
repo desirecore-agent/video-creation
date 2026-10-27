@@ -52,9 +52,9 @@ function extractReviewFacts(source) {
     for (const clip of track.clips) {
       if (clips.length >= 1000) return { status: 'unknown', reason: 'film-facts-clip-budget' };
       const { src, motion, overrides, attrs, ...other } = clip;
-      const { params, locks, ...motionRest } = motion ?? {};
+      const { params, locked, ...motionRest } = motion ?? {};
       const visualFieldsSha256 = dataHash({ ...other, motion: motionRest, attrs: Object.fromEntries(Object.entries(attrs ?? {}).filter(([key]) => key !== REVIEW_INTENT_ATTRIBUTE)) });
-      clips.push({ id: clip.id, sourcePath: clip.src, visualFieldsSha256, paramsSha256: dataHash(clip.motion?.params), locksSha256: dataHash(clip.motion?.locks), overridesSha256: dataHash(clip.overrides) });
+      clips.push({ id: clip.id, sourcePath: clip.src, visualFieldsSha256, paramsSha256: dataHash(params), locksSha256: dataHash(locked), overridesSha256: dataHash(clip.overrides) });
       const raw = clip.attrs?.[REVIEW_INTENT_ATTRIBUTE];
       if (raw === undefined) continue;
       let value;
@@ -66,7 +66,9 @@ function extractReviewFacts(source) {
       intents.push({ clipId: clip.id, status: 'observed', value });
     }
   }
-  const facts = { version: 1, status: 'observed', filmSha256: hash(bytes), intents, clips, tracks,
+  // Version 1 hashed the absent `motion.locks` field and included real locks in the visual hash.
+  // Keep historical receipts readable, but do not compare those incompatible projections as unchanged locks.
+  const facts = { version: 2, status: 'observed', filmSha256: hash(bytes), intents, clips, tracks,
     limitations: ['字段摘要只说明数据是否相同，不能证明修改者身份或任意新代码仍消费参数/选择器。', '未标注意图不等于可省略，角色也不改变现有人工锁。'] };
   return Buffer.byteLength(JSON.stringify(facts)) <= 256 * 1024 ? facts : { status: 'unknown', reason: 'film-facts-receipt-budget' };
 }
@@ -86,7 +88,10 @@ export function compareReviewFacts(before, after) {
   }
   const first = before.sourceFacts, last = after.sourceFacts;
   let preservedData = { status: 'unknown', reason: 'captured-facts-unavailable' };
-  if (first?.version === 1 && last?.version === 1 && first.status === 'observed' && last.status === 'observed' && first.filmSha256?.slice(0, 16) === before.filmRevision && last.filmSha256?.slice(0, 16) === after.filmRevision && [first.clips, last.clips, first.tracks, last.tracks].every(Array.isArray)) {
+  if (first?.status === 'observed' && last?.status === 'observed' && (first.version === 1 || last.version === 1)) {
+    preservedData.reason = 'legacy-lock-projection';
+  }
+  if (first?.version === 2 && last?.version === 2 && first.status === 'observed' && last.status === 'observed' && first.filmSha256?.slice(0, 16) === before.filmRevision && last.filmSha256?.slice(0, 16) === after.filmRevision && [first.clips, last.clips, first.tracks, last.tracks].every(Array.isArray)) {
     const fields = (f) => new Map([...f.clips.flatMap((c) => ['sourcePath', 'paramsSha256', 'locksSha256', 'overridesSha256', 'visualFieldsSha256'].map((key) => [`clip:${c.id}:${key}`, c[key]])), ...f.tracks.map((t) => [`track:${t.index}:flags`, t.flagsSha256])]);
     const left = fields(first), right = fields(last), changes = [];
     for (const field of [...new Set([...left.keys(), ...right.keys()])].sort()) if (left.get(field) !== right.get(field)) changes.push({ field, before: left.get(field) ?? null, after: right.get(field) ?? null });

@@ -164,3 +164,11 @@ node desirecore/cli.mjs review <project> --source review-pair --before-review <e
 Comparisons reuse two existing timed PNGs without another render. Each side retains its own source/version/time/digest/actual size. Only proven input and captured-field differences are reported; absent facts remain unknown. There is no automatic semantic alignment, quality verdict, source deletion or unlocking. The single Schema and [RUNTIME.md](desirecore/RUNTIME.md) define fields, budgets and source boundaries.
 
 Optional local review copies: `review <project> --read <reviewId> --copy-to <authorized-directory>` reuses the saved receipt and authenticated PNGs without another capture. Copies retain source digests for existing Read, reuse matching files and refuse conflicts; they do not grant permissions. The same `--copy-to` option can follow a new capture. See [runtime contract](desirecore/RUNTIME.md).
+
+## Editing reliability and director context
+
+The text inspector remains editable while saving. A prior success or failure cannot replace a newer draft or update a same-selector layer in another clip. SRT/VTT sidecars for a selected clip contain only its captions, mapped through source trim, speed and the clip-local range onto the output clock. Whole-film ranges retain their film-time behavior. Project renames migrate metadata and watchers without treating the directory's own rename as a picture-resource change.
+
+Director proposals measure the complete UTF-8 content against the optional workProposal.maxBytes returned by host connect. Whole references may be omitted with an explicit count; instructions and source identity are retained. Legacy hosts without the field use a 64 KiB fallback. Oversized necessary content retains the complete draft and requests adjustment rather than silently truncating instructions. Unknown-result retries preserve the original body and request identity.
+
+New review sourceFacts use version 2 and hash the actual motion.locked field separately from layout. Version 1 receipts remain readable and their images usable, but engineering-field comparisons are unknown: their historical lock projection cannot prove that locks stayed unchanged.

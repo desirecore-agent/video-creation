@@ -13,6 +13,7 @@ import { BookmarkPlus, ClipboardCopy, ClipboardPaste, GalleryVerticalEnd, Layers
 import { applyOps } from '../../../server/ops.mjs';
 import { api, ApiError, PREFS_EVENT, projectEvents, type Clip, type Film, type Listing, type MotionComponent, type Op, type ProjectFilm, type ProjectMetadata, type ProjectSettings } from '@/api';
 import { mergeProjectMetadata } from '@/lib/project-metadata';
+import { createTextWriteQueue } from '@/lib/text-draft';
 import { useT } from '@/i18n';
 import { useFilm, type Step } from '@/editor/use-film';
 import { Player } from '@/editor/player';
@@ -1468,20 +1469,20 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     /* the panel shows the new numbers at once; refused, they go back */
     const now = next ? overrideOf(next, target) : null;
     const before = element.override ?? null;
-    setStageElement((el) => (el?.loc === element.loc ? { ...el, override: now ? {
+    setStageElement((el) => (el?.loc === element.loc && el.clipLoc === element.clipLoc ? { ...el, override: now ? {
       ...(now.t ? { t: now.t } : {}), ...(now.s != null ? { s: now.s } : {}), ...(now.r != null ? { r: now.r } : {}),
       ...(now.style ? { style: now.style } : {}), ...(now.lock ? { lock: true } : {}), ...(now.text != null ? { text: now.text } : {}),
     } as StageElement['override'] : null } : el));
     const failed = await editBlocks([{ loc: found.loc, prop: 'overrides', value: next as unknown as Record<string, unknown> | null }]);
     if (failed) {
-      setStageElement((el) => (el?.loc === element.loc ? { ...el, override: before } : el));
+      setStageElement((el) => (el?.loc === element.loc && el.clipLoc === element.clipLoc ? { ...el, override: before } : el));
       stageControl.current?.release(element);
     }
     /* a style taken away: the panel reads the page's own value again, once the picture has it */
     if (!failed && (patch === null || patch.style)) {
       window.setTimeout(() => {
         void stageControl.current?.describe(element).then((fresh) => {
-          if (fresh) setStageElement((el) => (el?.loc === element.loc ? { ...el, style: fresh.style } : el));
+          if (fresh) setStageElement((el) => (el?.loc === element.loc && el.clipLoc === element.clipLoc ? { ...el, style: fresh.style } : el));
         });
       }, 120);
     }
@@ -1549,24 +1550,36 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     const held = stageElementRef.current;
     if (held) stageControl.current?.previewStyle(held, patch);
   }, []);
-  const previewStageText = React.useCallback((_loc: string, v: string) => {
-    const held = stageElementRef.current;
-    if (held) stageControl.current?.previewText(held, v);
+  const previewStageText = React.useCallback((loc: string, v: string, target?: StageElement) => {
+    const held = target ?? stageElementRef.current;
+    const selected = stageElementRef.current;
+    if (held?.text?.loc === loc && selected?.loc === held.loc && selected.clipLoc === held.clipLoc) stageControl.current?.previewText(held, v);
   }, []);
   /* `on`: the element typed in, when it is known (typing in place); the inspector edits the one it shows. A double-click
      selects and types at once, so the element held may still be the one before: written to that, the edit failed */
   /* kept with what holds the other layers where they are (more words would push those beside them on): `hold`, worked
      out as the words were typed in place, else asked for now */
-  const editStageText = React.useCallback(async (e: StageTextEdit, on?: StageElement, typedHold?: Record<string, string | null>): Promise<StageEditFailure | null> => {
-    const held = on ?? stageElementRef.current;
-    if (!held?.clipLoc) return { error: t('timeline.editFail') };
-    const hold = typedHold ?? await stageControl.current?.holdStyle(held, {}, e.value) ?? {};
-    stageControl.current?.previewText(held, e.value);
-    const failed = await editStageOverrideRef.current(held, { text: e.value, ...(Object.keys(hold).length ? { style: hold } : {}) } as OverrideGeometry);
-    if (failed) { stageControl.current?.previewText(held, e.expect); return { error: failed }; }
-    setStageElement((el) => (el?.text?.loc === e.loc ? { ...el, text: { ...el.text, value: e.value }, label: e.value.slice(0, 40) } : el));
-    return null;
-  }, [t]);
+  const queueTextWrite = React.useMemo(createTextWriteQueue, []);
+  const editStageText = React.useCallback((e: StageTextEdit, on?: StageElement, typedHold?: Record<string, string | null>): Promise<StageEditFailure | null> => {
+    /* Capture the original target before queueing. The user may be editing another layer by the time its turn
+       comes; a geometry round trip must not reorder two blur submissions or write to the current selection. */
+    const held = on ?? e.target ?? stageElementRef.current;
+    if (!held?.clipLoc) return Promise.resolve({ error: t('timeline.editFail') });
+    return queueTextWrite(async () => {
+      const current = () => !e.isCurrent || e.isCurrent();
+      const hold = typedHold ?? await stageControl.current?.holdStyle(held, {}, e.value) ?? {};
+      if (current()) stageControl.current?.previewText(held, e.value);
+      const failed = await editStageOverrideRef.current(held, { text: e.value, ...(Object.keys(hold).length ? { style: hold } : {}) } as OverrideGeometry);
+      if (failed) {
+        /* The inspector owns its newest buffer and rolls back to its latest successful baseline itself. */
+        if (!e.isCurrent) stageControl.current?.previewText(held, e.expect);
+        return { error: failed };
+      }
+      if (current()) setStageElement((el) => (el?.loc === held.loc && el.clipLoc === held.clipLoc && el.text?.loc === e.loc
+        ? { ...el, text: { ...el.text, value: e.value }, label: e.value.slice(0, 40) } : el));
+      return null;
+    });
+  }, [queueTextWrite, t]);
   const previewStageOverride = React.useCallback((_loc: string, g: NodeOverride, pivot?: OverridePivot) => {
     const held = stageElementRef.current;
     if (held) void stageControl.current?.previewOverride(held, g as OverrideGeometry, pivot);

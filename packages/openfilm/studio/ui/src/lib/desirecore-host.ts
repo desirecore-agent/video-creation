@@ -34,16 +34,34 @@ export interface DirectorProposal {
   scopeDescription: string;
 }
 
-export type DirectorError = 'host-unavailable' | 'unbound' | 'host-identity-unavailable' | 'permission-unavailable' | 'context-unavailable' | 'prepare-failed';
+export type DirectorError = 'host-unavailable' | 'unbound' | 'host-identity-unavailable' | 'host-budget-unavailable' | 'permission-unavailable' | 'context-unavailable' | 'proposal-too-large' | 'prepare-failed';
 export class DirectorBridgeError extends Error {
   readonly code: DirectorError;
   constructor(code: DirectorError) { super(code); this.code = code; }
 }
 
 const LIMITS = Object.freeze({ refs: 64, text: 1024, path: 4096, summary: 16_000, prompt: 16_000 });
+// Hosts predating the workProposal contract use the platform's original 64 KiB default.
+const LEGACY_PROPOSAL_BYTES = 64 * 1024;
+const proposalBytes = (proposal: DirectorProposal) => new TextEncoder().encode(JSON.stringify(proposal)).byteLength;
+function proposalBudget(connection: Record<string, unknown>): number {
+  if (!Object.hasOwn(connection, 'workProposal')) return LEGACY_PROPOSAL_BYTES;
+  const contract = connection.workProposal;
+  const maxBytes = contract && typeof contract === 'object' && !Array.isArray(contract)
+    ? (contract as Record<string, unknown>).maxBytes : undefined;
+  if (typeof maxBytes !== 'number' || !Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 262_144) {
+    throw new DirectorBridgeError('host-budget-unavailable');
+  }
+  return maxBytes;
+}
 const text = (value: unknown, max: number = LIMITS.text) => typeof value === 'string' ? value.slice(0, max) : undefined;
 const number = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 const strings = (value: unknown) => Array.isArray(value) ? value.slice(0, LIMITS.refs).map((item) => text(item)).filter((item) => item !== undefined) : undefined;
+const sourceText = (value: unknown, max: number): string => {
+  if (typeof value !== 'string' || !value) throw new DirectorBridgeError('context-unavailable');
+  if (value.length > max) throw new DirectorBridgeError('proposal-too-large');
+  return value;
+};
 
 /** Keep semantic fields, never screenshots, data URLs, arbitrary object properties or full source files. */
 export function boundedStudioRef(ref: StudioRef): Record<string, unknown> {
@@ -71,14 +89,39 @@ export function boundedStudioRef(ref: StudioRef): Record<string, unknown> {
 export function directorSelection(context: DirectorContext, uuid: () => string = () => crypto.randomUUID()): DirectorSelection {
   const refs = context.refs.slice(0, LIMITS.refs).map(boundedStudioRef);
   const summary = {
-    projectId: text(context.projectId, 160), projectPath: text(context.projectPath, LIMITS.path),
-    filmRevision: text(context.filmRevision, 256), playheadSeconds: number(context.time),
+    projectId: sourceText(context.projectId, 160), projectPath: sourceText(context.projectPath, LIMITS.path),
+    filmRevision: sourceText(context.filmRevision, 256), playheadSeconds: number(context.time),
     range: context.range ? { start: number(context.range.start), end: number(context.range.end) } : null,
     refs, omittedReferences: Math.max(0, context.refs.length - refs.length),
   };
   // Remove whole references so the bounded summary always remains parseable JSON.
   while (JSON.stringify(summary).length > LIMITS.summary && refs.length) { refs.pop(); summary.omittedReferences += 1; }
   return { schemaVersion: 1, selectionRevision: uuid(), summary: JSON.stringify(summary), objects: [] };
+}
+
+/** Account for the complete proposal, including JSON escaping and the context repeated in its prompt. */
+function directorProposal(source: DirectorContext, instruction: string, agentId: string, maxBytes: number, uuid: () => string): DirectorProposal {
+  const selection = directorSelection(source, uuid);
+  const summary = JSON.parse(selection.summary) as { refs: Record<string, unknown>[]; omittedReferences: number };
+  const proposal: DirectorProposal = {
+    clientRequestId: uuid(), userMessageId: uuid(), agentId,
+    prompt: '', selection, operation: 'video-creation.discuss-selection',
+    scopeDescription: `项目 ${source.projectId} 中当前选中的内容；仅在平台确认后交给视频导演。`,
+  };
+  for (;;) {
+    selection.summary = JSON.stringify(summary);
+    proposal.prompt = `${instruction}\n\n影片上下文（应用声明，读取或修改仍需平台授权）：\n${selection.summary}`;
+    if (proposalBytes(proposal) <= maxBytes) return proposal;
+    // Preserve the instruction and exact source identity. Omit references whole and report how many were omitted.
+    if (!summary.refs.length) throw new DirectorBridgeError('proposal-too-large');
+    summary.refs.pop(); summary.omittedReferences += 1;
+  }
+}
+
+function isProposalBudgetError(cause: unknown): boolean {
+  if (!cause || typeof cause !== 'object') return false;
+  const value = cause as { code?: unknown; message?: unknown };
+  return value.code === 'proposal_budget_exceeded' || value.message === 'proposal_budget_exceeded';
 }
 
 export interface DirectorDraft { open: boolean; context: DirectorContext | null; generation: number }
@@ -126,11 +169,12 @@ export class DirectorHost {
   };
 
   /** Only prepares a proposal. The host owns the separate final confirmation and work submission. */
-  async prepare(context: DirectorContext, instruction: string): Promise<{ clientRequestId: string }> {
+  async prepare(context: DirectorContext, instruction: string): Promise<{ clientRequestId: string; omittedReferences: number }> {
     const bridge = this.options.bridge();
     if (!bridge) throw new DirectorBridgeError('host-unavailable');
     const promptText = instruction.trim();
-    if (!promptText || promptText.length > LIMITS.prompt) throw new DirectorBridgeError('context-unavailable');
+    if (!promptText) throw new DirectorBridgeError('context-unavailable');
+    if (promptText.length > LIMITS.prompt) throw new DirectorBridgeError('proposal-too-large');
     const source = structuredClone(context);
     const generation = this.draft.generation;
     const reader = this.contextReader;
@@ -161,18 +205,15 @@ export class DirectorHost {
     if (!Array.isArray(capabilities) || !capabilities.includes('publishSelection') || !capabilities.includes('requestWork')) {
       throw new DirectorBridgeError('permission-unavailable');
     }
+    const maxBytes = proposalBudget(connection);
     const key = JSON.stringify([identity, source, promptText, configured.directorAgentId]);
     if (this.pending?.key !== key) {
       const uuid = this.options.uuid ?? (() => crypto.randomUUID());
-      const selection = directorSelection(source, uuid);
-      this.pending = { key, proposal: {
-        clientRequestId: uuid(), userMessageId: uuid(), agentId: configured.directorAgentId,
-        prompt: `${promptText}\n\n影片上下文（应用声明，读取或修改仍需平台授权）：\n${selection.summary}`,
-        selection, operation: 'video-creation.discuss-selection',
-        scopeDescription: `项目 ${source.projectId.slice(0, 160)} 中当前选中的内容；仅在平台确认后交给视频导演。`,
-      } };
+      this.pending = { key, proposal: directorProposal(source, promptText, configured.directorAgentId, maxBytes, uuid) };
     }
     const { proposal } = this.pending;
+    // An unknown prior result must keep its IDs and exact body. A smaller reconnect budget cannot silently replace it.
+    if (proposalBytes(proposal) > maxBytes) throw new DirectorBridgeError('proposal-too-large');
     try {
       currentSource();
       await bridge.call('publishSelection', proposal.selection);
@@ -180,9 +221,10 @@ export class DirectorHost {
       const result = await bridge.call('prepareWork', proposal) as { status?: string; clientRequestId?: string } | undefined;
       currentSource();
       if (result?.status !== 'prepared' || result.clientRequestId !== proposal.clientRequestId) throw new Error('invalid-prepared-receipt');
-      return { clientRequestId: proposal.clientRequestId };
+      return { clientRequestId: proposal.clientRequestId, omittedReferences: JSON.parse(proposal.selection.summary).omittedReferences };
     } catch (cause) {
       if (cause instanceof DirectorBridgeError) throw cause;
+      if (isProposalBudgetError(cause)) throw new DirectorBridgeError('proposal-too-large');
       throw new DirectorBridgeError('prepare-failed');
     }
   }

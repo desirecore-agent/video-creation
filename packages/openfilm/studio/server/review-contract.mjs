@@ -126,13 +126,13 @@ export const reviewSourceFactsSchema = {
   description: '从同一冻结film提取的意图与工程字段摘要。observed是数据采样，不证明任意代码的视觉语义或修改者身份。',
   properties: {
     status: { enum: ['observed', 'unknown'], description: '可解析且在预算内才记录，否则unknown并给reason，不从live补造。' },
-    version: { const: 1, description: '已捕获事实格式。' }, filmSha256: { type: 'string', description: '事实所属完整film原字节SHA256。' },
+    version: { enum: [1, 2], description: '已捕获事实格式：2按真实motion.locked提取人工锁并独立于布局；历史1仍可读取，其锁/布局投影不参与工程字段对照证明。' }, filmSha256: { type: 'string', description: '事实所属完整film原字节SHA256。' },
     reason: { type: 'string', description: '不可提取的具体边界。' },
     intents: { type: 'array', description: '按clipId关联的作者标注；observed表示JSON符合intentSchema，不是DOM或可读性通过。', items: { type: 'object', properties: {
       clipId: { type: 'string', description: '稳定片段ID。' }, status: { enum: ['observed', 'invalid'], description: '标注解析结果。' }, value: reviewIntentSchema,
       reason: { type: 'string', description: '标注无效原因，原作品仍可播放。' },
     } } },
-    clips: { type: 'array', maxItems: 1000, description: '每片段的src及params、locks、DOM overrides、其他布局/时间字段的规范JSON摘要；不创建第二套锁。', items: { type: 'object', additionalProperties: true } },
+    clips: { type: 'array', maxItems: 1000, description: '每片段的src及params、motion.locked、DOM overrides、其他布局/时间字段的规范JSON摘要；不创建第二套锁。', items: { type: 'object', additionalProperties: true } },
     tracks: { type: 'array', description: '按轨道位置记录已有开关/锁字段摘要。', items: { type: 'object', additionalProperties: true } },
     limitations: { type: 'array', items: { type: 'string' }, description: '数据摘要与视觉判断的边界。' },
   },

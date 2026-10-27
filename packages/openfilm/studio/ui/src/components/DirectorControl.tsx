@@ -16,13 +16,14 @@ export function DirectorControl({ context, className }: { context: () => Directo
   const [instruction, setInstruction] = React.useState('');
   const [state, setState] = React.useState<'idle' | 'preparing' | 'prepared'>('idle');
   const [error, setError] = React.useState<DirectorError | null>(null);
+  const [omittedReferences, setOmittedReferences] = React.useState(0);
   const dialog = React.useRef<HTMLElement>(null);
   const trigger = React.useRef<HTMLButtonElement>(null);
   const preparing = React.useRef(false);
   const generation = React.useRef(draft.generation);
   generation.current = draft.generation;
   React.useEffect(() => directorHost.registerContext(() => latest.current()), []);
-  React.useEffect(() => { setState(preparing.current ? 'preparing' : 'idle'); setError(null); }, [draft.generation]);
+  React.useEffect(() => { setState(preparing.current ? 'preparing' : 'idle'); setError(null); setOmittedReferences(0); }, [draft.generation]);
   React.useEffect(() => {
     if (!draft.open) return undefined;
     const previous = document.activeElement;
@@ -43,8 +44,11 @@ export function DirectorControl({ context, className }: { context: () => Directo
     if (!draft.context || preparing.current || state === 'prepared') return;
     const started = draft.generation;
     preparing.current = true;
-    setState('preparing'); setError(null);
-    try { await directorHost.prepare(draft.context, instruction); if (generation.current === started) setState('prepared'); }
+    setState('preparing'); setError(null); setOmittedReferences(0);
+    try {
+      const prepared = await directorHost.prepare(draft.context, instruction);
+      if (generation.current === started) { setState('prepared'); setOmittedReferences(prepared.omittedReferences); }
+    }
     catch (cause) { if (generation.current === started) { setState('idle'); setError(cause instanceof DirectorBridgeError ? cause.code : 'prepare-failed'); } }
     finally { preparing.current = false; if (generation.current !== started) setState('idle'); }
   };
@@ -64,7 +68,7 @@ export function DirectorControl({ context, className }: { context: () => Directo
           <div className="min-h-0 space-y-4 overflow-y-auto px-5 py-4 text-[13px]">
             <p className="text-[var(--text-muted)]">{t('director.explanation')}</p>
             <label className="block space-y-2"><span>{t('director.instruction')}</span>
-              <textarea rows={4} maxLength={16000} value={instruction} disabled={state !== 'idle'}
+              <textarea rows={4} value={instruction} disabled={state !== 'idle'}
                 onChange={(event) => setInstruction(event.target.value)} placeholder={t('director.placeholder')}
                 className="studio-field w-full resize-y border border-[var(--border)] p-3 outline-none" />
             </label>
@@ -81,6 +85,7 @@ export function DirectorControl({ context, className }: { context: () => Directo
               </div> : null}
             </details>
             {error ? <p role="alert" className="text-[var(--err)]">{name(`director.errors.${error}`)}</p> : null}
+            {omittedReferences > 0 ? <p role="status" className="text-[var(--text-muted)]">{t('director.referencesOmitted').replace('{n}', String(omittedReferences))}</p> : null}
             {state === 'prepared' ? <p role="status" className="text-[var(--ok)]">{t('director.prepared')}</p> : null}
           </div>
           <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-[var(--border-soft)] px-5 py-3">
