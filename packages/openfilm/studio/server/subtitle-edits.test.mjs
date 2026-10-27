@@ -144,11 +144,15 @@ test('两个窗口以同一快照并发保存，只一份成功，另一份原�
   const read = await sourceSubtitles(root, 'assets/vo.mp3');
   assert.equal(read.sourceRevision, sourceSnapshotRevision(read.snapshot));
   const drafts = ['First window', 'Second window'].map((text) => [{ startMs: 0, endMs: 1500, text }]);
+  const originalDrafts = structuredClone(drafts);
   const results = await Promise.allSettled(drafts.map((cues) => writeSourceSubtitles(root, 'assets/vo.mp3', cues, read.snapshot)));
   assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
   assert.equal(results.filter((r) => r.status === 'rejected' && r.reason.status === 409).length, 1);
-  assert.equal((await sourceSubtitles(root, 'assets/vo.mp3')).cues[0].text, 'First window');
-  assert.equal(drafts[1][0].text, 'Second window');
+  // 文件读写的实际排队顺序不固定，核对真正成功的一方及仍保留的另一份草稿。
+  const winner = results.findIndex((r) => r.status === 'fulfilled');
+  const loser = results.findIndex((r) => r.status === 'rejected');
+  assert.equal((await sourceSubtitles(root, 'assets/vo.mp3')).cues[0].text, originalDrafts[winner][0].text);
+  assert.deepEqual(drafts[loser], originalDrafts[loser]);
 });
 
 test('ASR改写或翻译集合增删发生后，旧保存与旧撤销均不写任何文件', async () => {
