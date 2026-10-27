@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DirectorBridgeError, DirectorHost, boundedStudioRef, directorSelection, installDesirecoreHost, type DesirecoreAppBridge, type DirectorContext, type DirectorProposal } from './desirecore-host.ts';
+import { regionRef, regionTexts } from './studio-refs.ts';
 
 const context: DirectorContext = {
   projectId: 'project-123', projectPath: '/work/My film', filmRevision: 'actual-film-revision', time: 4.5,
@@ -202,4 +203,109 @@ test('a path change visible to the context reader invalidates preparation before
   release.resolve();
   await rejected;
   assert.deepEqual(calls, ['connect']);
+});
+
+const utf8Bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+const proposalError = (code: string) => (cause: unknown) => cause instanceof DirectorBridgeError && cause.code === code;
+
+test('a large Chinese region from the actual selection producer fits the legacy full-proposal budget', async () => {
+  const texts = regionTexts(Array.from({ length: 10 }, (_, i) => ({ text: { value: String.fromCharCode(0x4e00 + i).repeat(1024) } })));
+  const region = regionRef(context.projectId, 500, { x: 0, y: 0, w: 640, h: 360 }, { clipIds: ['s1'], texts }, { w: 640, h: 360 });
+  const source = { ...context, refs: [region] }, instruction = '改'.repeat(2000);
+  const { host, calls } = fixture();
+  const prepared = await host.prepare(source, instruction);
+  const proposal = calls.find((entry) => entry.method === 'prepareWork')!.payload as DirectorProposal;
+  const summary = JSON.parse(proposal.selection.summary);
+  assert.ok(utf8Bytes(proposal) <= 65_536, 'count the instruction, repeated summary and JSON envelope together');
+  assert.equal(proposal.prompt.startsWith(instruction + '\n\n'), true, 'the instruction was not shortened');
+  assert.equal(summary.projectPath, source.projectPath);
+  assert.equal(summary.filmRevision, source.filmRevision);
+  assert.equal(summary.refs.length, 0, 'the oversized region is omitted whole, rather than clipping its text');
+  assert.equal(summary.omittedReferences, 1);
+  assert.equal(prepared.omittedReferences, 1);
+  assert.deepEqual(calls.find((entry) => entry.method === 'publishSelection')!.payload, proposal.selection);
+});
+
+test('host bytes include emoji, control/quote escaping and long Unicode source paths; only complete references are omitted', async () => {
+  const maxBytes = 13_000, refs = Array.from({ length: 12 }, (_, i) => ({
+    kind: 'subtitle' as const, index: i, start: i, end: i + 1, text: `${i}:` + '汉🙂"\\\n\t'.repeat(300),
+  }));
+  const source = { ...context, projectPath: '/工程/' + '目录🙂'.repeat(250), refs };
+  const instruction = 'Keep these exact instructions: "quoted"\\line\n下一行🙂';
+  const { host, calls } = fixture({ connected: { ...connection, workProposal: { maxBytes } } });
+  const receipt = await host.prepare(source, instruction);
+  const proposal = calls.find((entry) => entry.method === 'prepareWork')!.payload as DirectorProposal;
+  const parsed = JSON.parse(proposal.selection.summary);
+  assert.ok(utf8Bytes(proposal) <= maxBytes);
+  assert.equal(proposal.prompt.startsWith(instruction + '\n\n'), true);
+  assert.equal(parsed.projectPath, source.projectPath);
+  assert.ok(parsed.refs.length > 0 && parsed.refs.length < refs.length);
+  assert.deepEqual(parsed.refs, refs.slice(0, parsed.refs.length).map(boundedStudioRef));
+  assert.equal(parsed.omittedReferences, refs.length - parsed.refs.length);
+  assert.equal(receipt.omittedReferences, parsed.omittedReferences);
+});
+
+test('the exact advertised byte boundary succeeds and one byte less fails before publishing anything', async () => {
+  const source = { ...context, refs: [] }, instruction = 'Only this instruction🙂';
+  const baseline = fixture(); await baseline.host.prepare(source, instruction);
+  const expected = baseline.calls.find((entry) => entry.method === 'prepareWork')!.payload as DirectorProposal;
+  const size = utf8Bytes(expected);
+  const exact = fixture({ connected: { ...connection, workProposal: { maxBytes: size } } });
+  await exact.host.prepare(source, instruction);
+  assert.deepEqual(exact.calls.find((entry) => entry.method === 'prepareWork')!.payload, expected);
+  const over = fixture({ connected: { ...connection, workProposal: { maxBytes: size - 1 } } });
+  await assert.rejects(over.host.prepare(source, instruction), proposalError('proposal-too-large'));
+  assert.deepEqual(over.calls.map((entry) => entry.method), ['connect']);
+});
+
+test('a small host budget preserves all source identity and the instruction or rejects it; source fields are never silently sliced', async () => {
+  const source = { ...context, projectPath: '/工程/' + '长'.repeat(4000), refs: [] }, instruction = '改'.repeat(16_000);
+  const small = fixture({ connected: { ...connection, workProposal: { maxBytes: 4096 } } });
+  await assert.rejects(small.host.prepare(source, instruction), proposalError('proposal-too-large'));
+  assert.deepEqual(small.calls.map((entry) => entry.method), ['connect']);
+  const longInstruction = fixture();
+  await assert.rejects(longInstruction.host.prepare(context, 'A'.repeat(16_001)), proposalError('proposal-too-large'));
+  assert.deepEqual(longInstruction.calls, []);
+  for (const oversized of [{ projectPath: '/' + 'x'.repeat(4096) }, { projectId: 'x'.repeat(161) }, { filmRevision: 'r'.repeat(257) }]) {
+    const current = fixture();
+    await assert.rejects(current.host.prepare({ ...context, ...oversized }, 'Keep exact identity'), proposalError('proposal-too-large'));
+    assert.deepEqual(current.calls.map((entry) => entry.method), ['connect']);
+  }
+});
+
+test('an absent legacy budget is compatible, but explicitly malformed budgets fail before bridge effects', async () => {
+  for (const workProposal of [null, {}, [], { maxBytes: '65536' }, { maxBytes: NaN }, { maxBytes: Infinity }, { maxBytes: 0 }, { maxBytes: 262_145 }]) {
+    const { host, calls } = fixture({ connected: { ...connection, workProposal } });
+    await assert.rejects(host.prepare(context, 'Edit'), proposalError('host-budget-unavailable'));
+    assert.deepEqual(calls.map((entry) => entry.method), ['connect']);
+  }
+  const tiny = fixture({ connected: { ...connection, workProposal: { maxBytes: 1 } } });
+  await assert.rejects(tiny.host.prepare(context, 'Edit'), proposalError('proposal-too-large'));
+});
+
+test('a budget change after an unknown result never changes the pending request body or identities', async () => {
+  const advertised = { ...connection, workProposal: { maxBytes: 4096 } };
+  const { host, calls } = fixture({ connected: advertised, failOnce: true });
+  await assert.rejects(host.prepare(context, 'Keep the same request'), proposalError('prepare-failed'));
+  const first = calls.find((entry) => entry.method === 'prepareWork')!.payload as DirectorProposal;
+  const effectCount = calls.filter((entry) => entry.method !== 'connect').length;
+  advertised.workProposal.maxBytes = utf8Bytes(first) - 1;
+  await assert.rejects(host.prepare(context, 'Keep the same request'), proposalError('proposal-too-large'));
+  assert.equal(calls.filter((entry) => entry.method !== 'connect').length, effectCount);
+  advertised.workProposal.maxBytes = 4096;
+  await host.prepare(context, 'Keep the same request');
+  assert.deepEqual(calls.filter((entry) => entry.method === 'prepareWork').map((entry) => entry.payload), [first, first]);
+});
+
+test('a legacy or changed-host budget rejection has a specific recoverable error, not an unchanged retry hint', async () => {
+  for (const rejecting of ['publishSelection', 'prepareWork']) {
+    const { host, bridge, calls } = fixture();
+    const original = bridge.call;
+    bridge.call = async (method, payload) => {
+      if (method === rejecting) throw Object.assign(new Error('proposal_budget_exceeded'), { code: 'proposal_budget_exceeded', status: 413 });
+      return original(method, payload);
+    };
+    await assert.rejects(host.prepare(context, 'Shorten the reference if necessary'), proposalError('proposal-too-large'));
+    assert.equal(calls.some((entry) => entry.method === 'prepareWork'), false);
+  }
 });

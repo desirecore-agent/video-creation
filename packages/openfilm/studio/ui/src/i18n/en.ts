@@ -578,6 +578,7 @@ export const en = {
     explanation: 'Review the selected context and describe the change. DesireCore will ask you to confirm before the director starts.',
     instruction: 'What would you like to create or change?', placeholder: 'For example: shorten this scene and preserve my title layout.',
     selection: 'Selected context ({n} references)', project: 'Project', playhead: 'Playhead', seconds: 's', range: 'Range', noReferences: 'The current frame and project are included.',
+    referencesOmitted: '{n} references were omitted to fit the available context. Review the remaining context before starting.',
     prepare: 'Review in DesireCore', preparing: 'Preparing…', prepared: 'The proposal is ready in DesireCore. Confirm it there to begin.',
     errors: {
       'host-unavailable': 'Open this application inside DesireCore to send work to the director. You can keep editing here.',
@@ -586,6 +587,8 @@ export const en = {
       'permission-unavailable': 'This application has not been granted collaboration access. Ask your DesireCore agent to finish setup.',
       'context-unavailable': 'The director configuration could not be read. Ask your DesireCore agent to check the association, then try again.',
       'prepare-failed': 'The proposal could not be confirmed as ready. Retry with the same instruction; no work has been submitted by this application.',
+      'proposal-too-large': 'This content is too long for the host. Shorten the instruction or select less content, then prepare again. No work has been submitted.',
+      'host-budget-unavailable': 'The host content limit could not be read. Ask your DesireCore agent to check the application connection, then try again.',
     },
   },
   exportTray: {

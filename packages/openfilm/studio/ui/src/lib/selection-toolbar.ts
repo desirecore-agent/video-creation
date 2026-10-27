@@ -35,6 +35,13 @@ export function overlapBox(a: ScreenBox, b: ScreenBox): ScreenBox | null {
 
 export interface ToolbarPlacement { left: number; top: number; side: 'above' | 'below' }
 
+/** A no-op layout must not enqueue a React update, including when both measurements have no visible placement. */
+export function sameToolbarPlacement(a: ToolbarPlacement | null, b: ToolbarPlacement | null): boolean {
+  return a === b || Boolean(a && b && a.left === b.left && a.top === b.top && a.side === b.side);
+}
+
+const finiteBox = (box: ScreenBox) => Object.values(box).every(Number.isFinite) && box.width >= 0 && box.height >= 0;
+
 /** Whether two boxes share any area (touching edges do not). */
 function intersects(a: ScreenBox, b: ScreenBox): boolean {
   return a.left < b.left + b.width && b.left < a.left + a.width && a.top < b.top + b.height && b.top < a.top + a.height;
@@ -91,6 +98,11 @@ export function placeToolbar(opts: {
   avoid?: readonly ScreenBox[];
 }): ToolbarPlacement | null {
   const { anchor, size, bounds, gap = TOOLBAR_GAP, edge = TOOLBAR_EDGE } = opts;
+  /* A preview being replaced may have no measurable geometry yet. Hide its toolbar until measurements are valid;
+     NaN coordinates can never compare equal on the next layout pass. Zero-sized initial bar measurements are valid. */
+  if (!finiteBox(anchor) || !finiteBox(bounds) || bounds.width === 0 || bounds.height === 0
+    || !Number.isFinite(size.width) || !Number.isFinite(size.height) || size.width < 0 || size.height < 0
+    || !Number.isFinite(gap) || !Number.isFinite(edge) || (opts.avoid ?? []).some((box) => !finiteBox(box))) return null;
   const seen = overlapBox(anchor, bounds);
   if (!seen) return null;
   if (opts.avoid?.length && size.width > 0) {

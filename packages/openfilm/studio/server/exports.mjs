@@ -18,7 +18,8 @@
  *       shortEdge the picture's short side in pixels (default: the film's own size)
  *       clip     only this clip of film.html (by id), from its start, at the stage's size × `scale` (default 1)
  *       preset   a platform's name, for the file name
- *       sidecar  'srt' | 'vtt': the subtitles as a file beside the video too
+ *       sidecar  'srt' | 'vtt': the subtitles as a file beside the video too; a single clip keeps only its own cues,
+ *                rebased from the clip's film position to its output's local clock (and then its optional range)
  *   { kind: 'gif', frame?, fill?, width? (long side, default 640), fps? (default 15) }
  *   { kind: 'audio', format?: 'wav' | 'm4a' | 'mp3', mix?: boolean (default true), stems?: boolean }
  *       mix: `<name> - mix`; stems: voice, music, sound effects and the footage's own sound, each its own file
@@ -498,7 +499,24 @@ async function clipFilm(root, clipId, { change = {}, doc = filmDoc(root) } = {})
   const dir = join(root, '.film', 'cache', 'export', `clip-${randomBytes(4).toString('hex')}`);
   await mkdir(dir, { recursive: true });
   await filmElsewhere(root, dir, { stage: doc.stage, tracks: [{ clips: [{ ...clip, ...change, at: 0 }], ...(track.muted ? { muted: true } : {}) }] });
-  return { dir, stage: doc.stage, remove: () => rm(dir, { recursive: true, force: true }) };
+  return { dir, stage: doc.stage, source: clip, remove: () => rm(dir, { recursive: true, force: true }) };
+}
+
+/**
+ * A video's explicitly requested plain subtitle file. `cues` already follows the saved source trim, speed,
+ * audible tracks and chosen language. A clip-only render moves just that clip to 0: match its identity (not merely
+ * its source, which can be used elsewhere), and use that same local clock before applying a clip-local range.
+ * Preview's CC switch and the video's audio switch do not disable an explicitly requested subtitle sidecar.
+ * @param {readonly Cue[]} cues @param {'srt' | 'vtt'} format
+ * @param {{ range?: [number, number], clip?: Pick<import('../../src/film-doc.mjs').FilmClip, 'id' | 'at'> }} [options]
+ */
+export function videoSidecarText(cues, format, { range, clip } = {}) {
+  const own = clip ? cues.filter((cue) => cue.clip === clip.id) : cues;
+  const origin = clip ? (clip.at ?? 0) * 1000 : 0;
+  const part = clip || range
+    ? filmSubtitleCuesInRange(own, origin + (range?.[0] ?? 0) * 1000, range ? origin + range[1] * 1000 : Infinity)
+    : own;
+  return format === 'vtt' ? filmSubtitleVtt(part) : filmSubtitleSrt(part);
 }
 
 /**
@@ -941,8 +959,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
         /* the subtitles as a file beside it, timed to the part exported */
         if (ask.sidecar) {
           const { cues } = await subtitlesOf(root);
-          const part = ask.range ? filmSubtitleCuesInRange(cues, ask.range[0] * 1000, ask.range[1] * 1000) : cues;
-          const text = ask.sidecar === 'vtt' ? filmSubtitleVtt(part) : filmSubtitleSrt(part);
+          const text = videoSidecarText(cues, ask.sidecar, { range: ask.range, ...(clip ? { clip: clip.source } : {}) });
           if (text) {
             const file = `${out.slice(0, -CODEC_EXT[codec].length)}.${ask.sidecar}`;
             await writeFile(file, text, 'utf8');

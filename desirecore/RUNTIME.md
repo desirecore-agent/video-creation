@@ -260,3 +260,11 @@ node desirecore/cli.mjs review <项目> --read <已有24位reviewId> --copy-to <
 相同完整副本可复用，既有冲突/非普通文件不覆盖。多图复制失败可留下已完成副本，CLI保留原review ID并返回失败，恢复用`--read`，不要再次生成；磁盘写入后外部修改仍由Read期望摘要检查，不承诺文件系统快照。
 
 捕获每次创建新的随机reviewId；读取和复制既有review才复用同ID。当前workdir授权列表不是生成历史，不能据它推断回执被覆盖。平台不会因信息角色标注自动排版；修改标注本身不是清晰度或布局改善的证据，只有实际输出的新图支持时才称改善。
+
+## 编辑与提案预算的兼容边界
+
+顶层Studio文字保存保留提交时的片段/图层目标，并按输入代际应用回执；在途保存不会禁止继续输入，旧成功或失败不能回写新草稿或新选层。导出clip的旁SRT/VTT按所选clip ID筛选冻结cues（含已有trim/speed投影），再减原clip.at并按clip本地range裁剪。显式旁字幕请求独立于预览CC及输出audio开关；单clip不烧录字幕的既有出口语义不变。
+
+支持预算协商的宿主connect可选返回workProposal.maxBytes（1至262144），计量规范化完整工作提案的UTF-8字节，不是字符数或单独prompt。应用按完整序列化提案核算，只省略完整引用并准确记录omittedReferences，不截断用户指令或工程身份；没有该字段时按64KiB兼容，显式非法预算明确失败。超限但无引用可减时保留完整草稿并提示缩短内容，不把原指令盲重试当恢复方案。宿主仍独立准入，公开预算不增加能力或审批授权。未知结果的同键重试保持原正文；宿主预算改变不能使应用悄悄改正文或换请求ID。
+
+审片sourceFacts.version=2正确分离motion.locked的locksSha256与布局visualFieldsSha256。sourceFacts Schema继续接受历史version=1用于回读；任一侧是历史1的preservedData比较明确unknown/legacy-lock-projection，文件摘要和图像材料仍按各自证据可用，不从当前作品补造历史锁值。

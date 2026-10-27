@@ -68,6 +68,7 @@ test('API rename synchronizes the already-open project and keeps watching its ne
     /* Linux discovers a new directory and invalidates it as a whole; its already-created children need not each
        have an event. The editor reloads the listing for either form of invalidation. */
     await first.until((event) => event.type === 'files' && (!event.paths || event.paths.some((path) => path === 'scenes' || path === 'scenes/after-rename.html')));
+    assert.ok(!first.events.some((event) => event.type === 'files' && event.paths?.includes('Final')), 'the project directory itself is not a changed child resource');
     const listed = await api(`projects/${project.id}/files`);
     assert.ok(listed.pages.some((entry) => entry.path === 'scenes/after-rename.html'), 'the new directory invalidation exposes the actual new page');
     const readPage = async () => {

@@ -1,9 +1,31 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { distributeShifts, overlapBox, placeToolbar, unionBox } from './selection-toolbar.ts';
+import { distributeShifts, overlapBox, placeToolbar, sameToolbarPlacement, unionBox } from './selection-toolbar.ts';
 
 const bounds = { left: 0, top: 100, width: 1000, height: 400 };
 const size = { width: 120, height: 28 };
+
+test('unchanged or absent toolbar placement is a no-op before scheduling a layout update', () => {
+  const position = { left: 200, top: 140, side: 'above' as const };
+  assert.equal(sameToolbarPlacement(position, { ...position }), true);
+  assert.equal(sameToolbarPlacement(null, null), true);
+  assert.equal(sameToolbarPlacement(position, { ...position, left: 201 }), false);
+  assert.equal(sameToolbarPlacement(position, { ...position, side: 'below' }), false);
+  assert.equal(sameToolbarPlacement(position, null), false);
+});
+
+test('unmeasurable preview geometry hides the toolbar instead of producing non-finite placement', () => {
+  const anchor = { left: 400, top: 300, width: 200, height: 40 };
+  for (const bad of [NaN, Infinity, -Infinity]) {
+    assert.equal(placeToolbar({ anchor: { ...anchor, left: bad }, bounds, size }), null);
+    assert.equal(placeToolbar({ anchor, bounds: { ...bounds, top: bad }, size }), null);
+    assert.equal(placeToolbar({ anchor, bounds, size: { ...size, width: bad } }), null);
+    assert.equal(placeToolbar({ anchor, bounds, size, gap: bad }), null);
+  }
+  assert.equal(placeToolbar({ anchor: { ...anchor, width: -1 }, bounds, size }), null);
+  assert.equal(placeToolbar({ anchor, bounds: { ...bounds, height: 0 }, size }), null);
+  assert.equal(placeToolbar({ anchor, bounds, size: { width: 0, height: 0 } })?.side, 'above', 'initial unmeasured bar size is still allowed');
+});
 
 test('the union of several boxes, none for none', () => {
   assert.deepEqual(unionBox([{ left: 10, top: 20, width: 30, height: 10 }, { left: 100, top: 5, width: 20, height: 50 }]), { left: 10, top: 5, width: 110, height: 50 });

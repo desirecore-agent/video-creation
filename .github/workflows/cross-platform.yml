@@ -33,6 +33,8 @@ jobs:
       - run: node --test desirecore/platform-smoke.test.mjs
       - name: Verify project rename in the actual editor
         run: node --test desirecore/project-sync.runtime.test.mjs
+      - name: Verify text drafts and selected-clip subtitles in the actual runtime
+        run: VIDEO_CREATION_CLIP_SIDECAR_RUNTIME=1 node --test --test-concurrency=1 desirecore/text-draft.runtime.test.mjs desirecore/clip-sidecar.runtime.test.mjs
       - run: pnpm test:motion:runtime
       - name: Exercise the local service, MCP and MP4 export
         shell: bash
