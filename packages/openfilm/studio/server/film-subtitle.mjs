@@ -403,6 +403,9 @@ export function filmSubtitleFontSizePx(/** @type {FilmSubtitleStyle} */ style, /
  *   durMs: number,
  *   text: string,
  *   speaker?: string,
+ *   timing?: import('./transcripts.mjs').TimingOrigin,
+ *   alignment?: import('./transcripts.mjs').WordAlignment,
+ *   sourceRevision?: string,
  *   words?: readonly { text: string, startMs: number, durMs: number }[],
  *   alt?: Readonly<Record<string, string>>,
  *   clip?: string,
@@ -434,8 +437,8 @@ export function filmSubtitleShown(cues, style) {
       out[out.length - 1] = { ...prev, durMs: Math.max(prev.durMs, cue.startMs + cue.durMs - prev.startMs) };
       continue;
     }
-    const { words: _words, ...rest } = cue;
-    out.push(/** @type {T} */ ({ ...rest, text: style.bilingual ? `${cue.text}\n${alt}` : alt }));
+    const { words: _words, alignment: _alignment, ...rest } = cue;
+    out.push(/** @type {T} */ ({ ...rest, timing: 'estimated', text: style.bilingual ? `${cue.text}\n${alt}` : alt }));
   }
   return out;
 }
@@ -677,7 +680,7 @@ export function filmSubtitleFrameHtml(cues, style, frame, timeMs) {
       : escapeHtml(w.text))).join('')
     : escapeHtml(filmSubtitleText(cue));
   return `<div style="position:absolute;left:0;top:0;width:${frame.w}px;height:${frame.h}px;overflow:hidden;pointer-events:none">`
-    + `<div style="${escapeHtml(filmSubtitleCssText(css.box))}"><span style="${escapeHtml(filmSubtitleCssText(css.text))}">${body}</span></div></div>`;
+    + `<div data-timing-origin="${escapeHtml(cue.timing ?? 'unknown')}" style="${escapeHtml(filmSubtitleCssText(css.box))}"><span style="${escapeHtml(filmSubtitleCssText(css.text))}">${body}</span></div></div>`;
 }
 
 /* ── files ───────────────────────────────────────────────────────────────── */
@@ -725,8 +728,26 @@ export function filmSubtitleSrt(cues) {
 export function filmSubtitleVtt(cues) {
   const blocks = sequencedCues(cues).map(({ cue, end }) => {
     const text = cue.text.trim().replace(/-->/g, '→');
-    const line = cue.speaker ? `<v ${cue.speaker.replace(/[<>]/g, '')}>${text}` : text;
-    return `${srtStamp(cue.startMs).replace(',', '.')} --> ${srtStamp(end).replace(',', '.')}\n${line}`;
+    const escapeVtt = (/** @type {string} */ value) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    let cursor = 0, payload = '', lastMs = Math.round(cue.startMs);
+    const mapped = Boolean(cue.words?.length) && cue.words?.every((word, i) => {
+      const index = text.indexOf(word.text, cursor), wordMs = Math.round(word.startMs);
+      if (!word.text || index < 0 || /[\p{L}\p{N}]/u.test(text.slice(cursor, index)) || !Number.isFinite(wordMs)
+        || wordMs < lastMs || (i > 0 && wordMs === lastMs) || wordMs >= end) return false;
+      payload += escapeVtt(text.slice(cursor, index));
+      if (wordMs > lastMs) payload += `<${srtStamp(wordMs).replace(',', '.')}>`;
+      payload += escapeVtt(word.text);
+      cursor = index + word.text.length;
+      lastMs = wordMs;
+      return true;
+    }) && !/[\p{L}\p{N}]/u.test(text.slice(cursor));
+    /* 导出仍是影片时间：保留实际词锚点；纯文本降级不能携更强的逐词测量声明。 */
+    const timing = cue.timing === 'measured' && !mapped ? 'estimated' : cue.timing;
+    const alignment = mapped ? cue.alignment : undefined;
+    const words = mapped ? payload + escapeVtt(text.slice(cursor)) : escapeVtt(text);
+    const line = cue.speaker ? `<v ${cue.speaker.replace(/[<>]/g, '')}>${words}` : words;
+    const origin = timing ? `openfilm-timing:${timing}${alignment ? `:${alignment.matchedWords}/${alignment.totalWords}` : ''}\n` : '';
+    return `${origin}${srtStamp(cue.startMs).replace(',', '.')} --> ${srtStamp(end).replace(',', '.')}\n${line}`;
   });
   return blocks.length ? `WEBVTT\n\n${blocks.join('\n\n')}\n` : '';
 }

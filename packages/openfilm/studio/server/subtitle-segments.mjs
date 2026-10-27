@@ -78,11 +78,11 @@ export const SUBTITLE_SEGMENT_RULES = Object.freeze({
 });
 
 /** @typedef {typeof SUBTITLE_SEGMENT_RULES} SubtitleSegmentRules */
-/** @typedef {{ text: string, startMs: number, endMs: number, marks?: readonly { index: number, startMs: number }[] }} SegmentLine */
+/** @typedef {{ text: string, startMs: number, endMs: number, marks?: readonly { index: number, startMs: number }[], timing?: import('./transcripts.mjs').TimingOrigin, alignment?: import('./transcripts.mjs').WordAlignment }} SegmentLine */
 /**
  * One subtitle cut from a line: its text (as the line has it, trimmed), its times, its timed words (indexes in `text`),
  * which piece of the line it is, and where its text sits in the line's (`from`/`to`, for putting a correction back).
- * @typedef {{ text: string, startMs: number, endMs: number, marks?: { index: number, startMs: number }[], part: number, from: number, to: number }} SubtitlePiece
+ * @typedef {{ text: string, startMs: number, endMs: number, marks?: { index: number, startMs: number }[], part: number, from: number, to: number, timing?: import('./transcripts.mjs').TimingOrigin, alignment?: import('./transcripts.mjs').WordAlignment }} SubtitlePiece
  */
 
 /* ── characters ──────────────────────────────────────────────────────────── */
@@ -411,7 +411,8 @@ function cutLong(s, e, bounds, m, R) {
  */
 export function segmentLine(line, R = SUBTITLE_SEGMENT_RULES) {
   const t = line.text;
-  const whole = () => [{ text: t.trim(), startMs: line.startMs, endMs: line.endMs, ...(line.marks?.length ? { marks: [...line.marks] } : {}), part: 0, from: t.length - t.trimStart().length, to: t.trimEnd().length }];
+  const origin = { ...(line.timing ? { timing: line.timing } : {}), ...(line.alignment ? { alignment: line.alignment } : {}) };
+  const whole = () => [{ text: t.trim(), startMs: line.startMs, endMs: line.endMs, ...(line.marks?.length ? { marks: [...line.marks] } : {}), part: 0, from: t.length - t.trimStart().length, to: t.trimEnd().length, ...origin }];
   const times = timeline(line, R);
   const { atoms, bounds } = analyse(t, R, times, Boolean(line.marks?.length));
   if (atoms.length < 2) return whole();
@@ -482,7 +483,7 @@ export function segmentLine(line, R = SUBTITLE_SEGMENT_RULES) {
     const to = p.b === atoms.length ? t.trimEnd().length : from + t.slice(from, atoms[p.b].from).trimEnd().length;
     const own = marks.filter((mk) => mk.index >= from && mk.index < to).map((mk) => ({ index: mk.index - from, startMs: mk.startMs }));
     const timed = marks.length ? (own[0]?.index === 0 ? own : [{ index: 0, startMs: p.startMs }, ...own]) : [];
-    return { text: t.slice(from, to), startMs: p.startMs, endMs: p.endMs, ...(timed.length ? { marks: timed } : {}), part, from, to };
+    return { text: t.slice(from, to), startMs: p.startMs, endMs: p.endMs, ...(timed.length ? { marks: timed } : {}), part, from, to, ...origin };
   });
 }
 

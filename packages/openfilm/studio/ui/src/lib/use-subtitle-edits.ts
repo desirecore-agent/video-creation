@@ -16,7 +16,6 @@ import {
   addSource,
   clipSpanOf,
   cueEnd,
-  findSourceCue,
   mergeSource,
   removeSource,
   retimeSource,
@@ -26,7 +25,7 @@ import {
   type ClipSpan,
   type SourceCue,
 } from './subtitle-cues';
-import { fetchSourceSubtitles, restoreSubtitleFiles, saveSourceSubtitles, type SubtitleCue } from './subtitles';
+import { fetchSourceSubtitles, restoreSubtitleFiles, saveSourceSubtitles, unchangedSourceCue, unchangedSourceRevision, type SubtitleCue } from './subtitles';
 import type { TimelineTrack } from './timeline-layout';
 
 export interface SubtitleEdits {
@@ -68,15 +67,16 @@ export function useSubtitleEdits(projectId: string, {
   const queue = React.useRef<Promise<unknown>>(Promise.resolve());
 
   /** One edit of `src`'s subtitles through the clip `clipId`: `make` gets them and the clip's span, and gives them back changed (null: it cannot). */
-  const change = React.useCallback((src: string, clipId: string | undefined, label: string, make: (list: SourceCue[], span: ClipSpan) => SourceCue[] | string) => {
+  const change = React.useCallback((src: string, clipId: string | undefined, label: string, make: (list: SourceCue[], span: ClipSpan) => SourceCue[] | string, seen?: SubtitleCue) => {
     const run = async (): Promise<string | null> => {
       const clip = filmRef.current?.tracks.flatMap((tr) => tr.clips).find((c) => c.id === clipId);
       if (!clip) return t('subtitleRow.gone');
       try {
-        const { cues } = await fetchSourceSubtitles(projectId, src);
+        const { cues, snapshot, sourceRevision } = await fetchSourceSubtitles(projectId, src);
+        if (seen) unchangedSourceRevision(sourceRevision, seen.sourceRevision);
         const next = make(cues, clipSpanOf(clip));
         if (typeof next === 'string') return next;
-        const { before, after } = await saveSourceSubtitles(projectId, src, next);
+        const { before, after } = await saveSourceSubtitles(projectId, src, next, snapshot);
         const put = (from: typeof before, to: typeof before) => async () => {
           try { await restoreSubtitleFiles(projectId, src, from, to); await refresh(); return null; } catch (e) { return e instanceof Error ? e.message : String(e); }
         };
@@ -94,8 +94,8 @@ export function useSubtitleEdits(projectId: string, {
 
   /** The source subtitle a cue shows, or the reason it is not there any more. */
   const at = React.useCallback((list: SourceCue[], cue: SubtitleCue): number | string => {
-    const i = findSourceCue(list, cue);
-    return i < 0 ? t('subtitleRow.gone') : i;
+    try { return unchangedSourceCue(list, cue); }
+    catch (e) { return e instanceof Error ? e.message : String(e); }
   }, [t]);
 
   return React.useMemo<SubtitleEdits>(() => ({
@@ -107,25 +107,25 @@ export function useSubtitleEdits(projectId: string, {
       const s = startMs !== cue.startMs ? toSourceMs(span, startMs) : was.startMs;
       const e = endMs !== cueEnd(cue) ? toSourceMs(span, endMs) : was.endMs;
       return retimeSource(list, i, s, e);
-    }),
+    }, cue),
     split: (cue, atMs) => change(cue.src ?? '', cue.clip, 'history.stepSubtitleSplit', (list, span) => {
       const i = at(list, cue);
       return typeof i === 'string' ? i : splitSource(list, i, toSourceMs(span, atMs));
-    }),
+    }, cue),
     merge: (a, b) => change(a.src ?? '', a.clip, 'history.stepSubtitleMerged', (list) => {
       const i = at(list, a), j = at(list, b);
       if (typeof i === 'string') return i;
       if (typeof j === 'string') return j;
       return j === i + 1 ? mergeSource(list, i) : t('subtitleRow.notNext');
-    }),
+    }, a),
     remove: (cue) => change(cue.src ?? '', cue.clip, 'history.stepSubtitleRemoved', (list) => {
       const i = at(list, cue);
       return typeof i === 'string' ? i : removeSource(list, i);
-    }),
+    }, cue),
     setText: (cue, text) => change(cue.src ?? '', cue.clip, 'history.stepSubtitleText', (list) => {
       const i = at(list, cue);
       return typeof i === 'string' ? i : textSource(list, i, text);
-    }),
+    }, cue),
     add: (clipId, src, startMs, endMs, text) => change(src, clipId, 'history.stepSubtitleAdded', (list, span) => {
       const next = addSource(list, { startMs: toSourceMs(span, startMs), endMs: toSourceMs(span, endMs), text });
       return next.length > list.length ? next : t('subtitleRow.noRoom');

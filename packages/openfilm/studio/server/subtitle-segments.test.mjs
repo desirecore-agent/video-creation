@@ -186,3 +186,12 @@ test('the rules are one table', () => {
   /* a narrower cap cuts more */
   assert.ok(cut('我今天没有去公司上班因为外面一直在下很大的雨', 5000, undefined, { ...SUBTITLE_SEGMENT_RULES, maxCells: 8 }).length >= 3);
 });
+
+
+test('subtitle segmentation preserves declared timing origin and transcript-level word coverage', () => {
+  const line = { text: '第一句完成。第二句继续。', startMs: 10000, endMs: 14000, timing: 'estimated', alignment: { matchedWords: 1, totalWords: 3 } };
+  const pieces = segmentLine(line);
+  assert.ok(pieces.length > 1);
+  assert.ok(pieces.every((piece) => piece.timing === 'estimated'));
+  assert.ok(pieces.every((piece) => piece.alignment.matchedWords === 1 && piece.alignment.totalWords === 3));
+});

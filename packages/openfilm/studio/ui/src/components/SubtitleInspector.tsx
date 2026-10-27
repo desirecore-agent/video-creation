@@ -5,6 +5,7 @@ import { STUDIO_REF_TYPE, type StudioRef } from '@/lib/host';
 import {
   FILM_SUBTITLE_KARAOKE_DEFAULT, FILM_SUBTITLE_LANGUAGES, joinColor, matchSubtitleLook, sameFilmSubtitleLanguage, splitColor,
   SUBTITLE_DEFAULT, SUBTITLE_LOOKS, SUBTITLE_LOOK_IDS, SUBTITLE_SIZE_PCT_MAX, SUBTITLE_SIZE_PCT_MIN, subtitleCss,
+  subtitleDraftRows, subtitleLineId, type SubtitleEditDraft,
   type SubtitleCue, type SubtitleLookId, type SubtitleStyle, type SubtitleTranslateResult,
 } from '@/lib/subtitles';
 import { SUBTITLE_FONT_SYSTEM, useSubtitleFonts, type SubtitleFontOption } from '@/lib/use-subtitle-font';
@@ -27,7 +28,7 @@ export interface SubtitleLineAt {
 }
 
 /** A line's key in the list, the same across a refresh of the lines (a correction keeps it). */
-export const subtitleLineKey = (cue: SubtitleCue) => `${cue.src ?? ''}:${cue.line ?? cue.startMs}:${cue.startMs}`;
+export const subtitleLineKey = subtitleLineId;
 
 /**
  * With an app that has a chat (lib/host.ts `refer`): each line's "Reference in chat" (a button shown on hover), ⌘L in
@@ -54,7 +55,7 @@ export function SubtitleInspector({ subtitles, width, onClose }: {
     /** The film's lines as transcribed (with their translations), to correct; `onEditLine` writes one back (with a
         `language`, its translation into it). */
     lines?: readonly SubtitleCue[];
-    onEditLine?: (cue: SubtitleCue, text: string, language?: string) => void;
+    onEditLine?: (cue: SubtitleCue, text: string, language?: string) => Promise<string | null>;
     /** The playhead (film ms), which the lines follow, and moving it to a line. */
     timeMs?: number;
     onSeek?: (ms: number) => void;
@@ -354,7 +355,7 @@ const lineTime = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(
  */
 function SubtitleLines({ lines, onEdit, untranscribed, onMake, making, timeMs, onSeek, language, refer }: {
   lines: readonly SubtitleCue[];
-  onEdit?: (cue: SubtitleCue, text: string, language?: string) => void;
+  onEdit?: (cue: SubtitleCue, text: string, language?: string) => Promise<string | null>;
   untranscribed: number;
   onMake?: () => void;
   making: boolean;
@@ -366,10 +367,14 @@ function SubtitleLines({ lines, onEdit, untranscribed, onMake, making, timeMs, o
   const t = useT();
   const list = React.useRef<HTMLUListElement>(null);
   const touched = React.useRef(0);
+  // 草稿只归属当前面板；保留原行而不是把旧输入搬到重分段后的另一行。
+  const [draft, setDraft] = React.useState<SubtitleEditDraft | null>(null);
+  const rows = React.useMemo(() => subtitleDraftRows(lines, draft), [lines, draft]);
+  const draftKey = draft ? subtitleLineKey(draft.cue) : null;
   /* the rows are drawn once per change of the lines, not per frame: what changes as the film plays is which is lit */
   const calls = React.useRef({ onEdit, onSeek, refer });
   calls.current = { onEdit, onSeek, refer };
-  const edit = React.useCallback((cue: SubtitleCue, text: string, lang: string | null) => calls.current.onEdit?.(cue, text, lang ?? undefined), []);
+  const edit = React.useCallback((cue: SubtitleCue, text: string, lang: string | null) => calls.current.onEdit?.(cue, text, lang ?? undefined) ?? Promise.resolve(null), []);
   const go = React.useCallback((ms: number) => calls.current.onSeek?.(ms), []);
   const lineRefer = React.useMemo<LineRefer | null>(() => (refer ? {
     of: (line) => calls.current.refer!.of(line),
@@ -411,13 +416,15 @@ function SubtitleLines({ lines, onEdit, untranscribed, onMake, making, timeMs, o
             : t(untranscribed === 1 ? 'timeline.subtitleLinesMakeOne' : 'timeline.subtitleLinesMake').replace('{n}', String(untranscribed))}
         </button>
       ) : null}
-      {lines.length ? (
+      {rows.length ? (
         <ul ref={list} onWheel={mark} onPointerDown={mark} onTouchMove={mark}
           className="relative flex max-h-[260px] flex-col gap-0.5 overflow-y-auto pb-1">
-          {lines.map((cue, i) => (
+          {rows.map((cue, i) => (
             <SubtitleLine key={subtitleLineKey(cue)} cue={cue} index={i + 1} lit={i === active}
-              language={language} editable={!!onEdit && cue.src !== undefined} seekable={!!onSeek} onEdit={edit} onGo={go} ask={ask}
-              refer={lineRefer} />
+              language={draftKey === subtitleLineKey(cue) ? draft!.language : language}
+              editable={!!onEdit && cue.src !== undefined && (!draftKey || draftKey === subtitleLineKey(cue))}
+              seekable={!!onSeek} onEdit={edit} onGo={go} ask={ask}
+              draft={draftKey === subtitleLineKey(cue) ? draft : null} setDraft={setDraft} refer={lineRefer} />
           ))}
         </ul>
       ) : null}
@@ -428,21 +435,44 @@ function SubtitleLines({ lines, onEdit, untranscribed, onMake, making, timeMs, o
 /** A line's references, made by the panel's owner (SubtitleLineRefer) from what the row knows. */
 type LineRefer = { of: (line: SubtitleLineAt) => StudioRef; send: (line: SubtitleLineAt) => void; pick: (line: SubtitleLineAt) => void };
 
-const SubtitleLine = React.memo(function SubtitleLine({ cue, index, lit, language, editable, seekable, onEdit, onGo, ask, refer }: {
+const SubtitleLine = React.memo(function SubtitleLine({ cue, index, lit, language, editable, seekable, onEdit, onGo, ask, refer, draft, setDraft }: {
   cue: SubtitleCue;
   index: number;
   lit: boolean;
   language: string | null;
   editable: boolean;
   seekable: boolean;
-  onEdit: (cue: SubtitleCue, text: string, language: string | null) => void;
+  onEdit: (cue: SubtitleCue, text: string, language: string | null) => Promise<string | null>;
   onGo: (ms: number) => void;
   ask: { go: string; at: string; untranslated: string; refer: string; shortcut: string };
   refer: LineRefer | null;
+  draft: SubtitleEditDraft | null;
+  setDraft: React.Dispatch<React.SetStateAction<SubtitleEditDraft | null>>;
 }) {
+  const t = useT();
   const time = lineTime(cue.startMs);
   const text = language ? cue.alt?.[language] ?? '' : cue.text;
   const field = React.useRef<HTMLInputElement>(null);
+  // 保留开始编辑时的所见版本；外部刷新和保存失败都不覆盖尚未提交的文字。
+  const [error, setError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const saving = React.useRef(false);
+  const cancelled = React.useRef(false);
+  const cancel = () => { cancelled.current = true; setDraft(null); setError(null); field.current?.blur(); };
+  const commit = async () => {
+    if (cancelled.current) { cancelled.current = false; return; }
+    if (!draft || saving.current) return;
+    const was = draft.language ? draft.cue.alt?.[draft.language] ?? '' : draft.cue.text;
+    if (draft.text.trim() === was) { setDraft(null); setError(null); return; }
+    saving.current = true;
+    setBusy(true);
+    try {
+      const why = await onEdit(draft.cue, draft.text, draft.language);
+      setError(why);
+      if (!why) setDraft(null);
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { saving.current = false; setBusy(false); }
+  };
   /* the line as the field has it now: its words as typed (the reference says what the person sees), and the words
      selected in it while it has the focus (a field keeps its last selection after it loses it, unseen) */
   const lineAt = (withPick = true): SubtitleLineAt => {
@@ -460,7 +490,7 @@ const SubtitleLine = React.memo(function SubtitleLine({ cue, index, lit, languag
     e.dataTransfer.effectAllowed = 'copy';
   };
   return (
-    <li className="group flex items-start gap-1.5 rounded-md py-0.5 pr-0.5"
+    <li data-subtitle-draft={draft ? '1' : undefined} className="group flex items-start gap-1.5 rounded-md py-0.5 pr-0.5"
       style={lit ? { background: 'var(--bg-active)', boxShadow: 'inset 2px 0 0 var(--accent)' } : undefined}
       aria-current={lit ? 'true' : undefined}>
       <button type="button" disabled={!seekable} onClick={() => onGo(cue.startMs)}
@@ -476,15 +506,14 @@ const SubtitleLine = React.memo(function SubtitleLine({ cue, index, lit, languag
         ) : null}
         <input
           ref={field}
-          defaultValue={text}
-          key={`${language ?? ''}:${text}`}
+          value={draft?.text ?? text}
           placeholder={language ? ask.untranslated : undefined}
-          aria-label={ask.at.replace('{time}', time)}
-          disabled={!editable}
-          onFocus={() => { if (seekable && !lit) onGo(cue.startMs); refer?.pick(lineAt(false)); }}
+          aria-label={(language ? t('timeline.subtitleLineInLanguage').replace('{lang}', FILM_SUBTITLE_LANGUAGES.find((item) => item.code === language)?.native ?? language) : t('timeline.subtitleLineAt')).replace('{time}', time)}
+          disabled={!editable || busy}
+          onFocus={() => { cancelled.current = false; setDraft((had) => had ?? { text, cue, language }); if (seekable && !lit) onGo(cue.startMs); refer?.pick(lineAt(false)); }}
           /* words selected in the line: they are what ⌘L, a drag and the selection carry (with their own times) */
           onSelect={() => refer?.pick(lineAt())}
-          onChange={() => refer?.pick(lineAt())}
+          onChange={(e) => { setDraft((had) => had && subtitleLineKey(had.cue) !== subtitleLineKey(cue) ? had : { ...(had ?? { cue, language }), text: e.target.value }); refer?.pick(lineAt()); }}
           onMouseUp={() => refer?.pick(lineAt())}
           onKeyUp={(e) => { if (e.shiftKey || e.key.startsWith('Arrow')) refer?.pick(lineAt()); }}
           onDragStart={(e) => drag(e, true)}
@@ -495,12 +524,21 @@ const SubtitleLine = React.memo(function SubtitleLine({ cue, index, lit, languag
               return;
             }
             if (e.key === 'Enter') e.currentTarget.blur();
-            if (e.key === 'Escape') { e.currentTarget.value = text; e.currentTarget.blur(); }
+            if (e.key === 'Escape') cancel();
           }}
-          onBlur={(e) => { const next = e.currentTarget.value; if (next.trim() !== text) onEdit(cue, next, language); }}
+          onBlur={() => { void commit(); }}
+          aria-invalid={!!error}
           className="h-7 min-w-0 rounded-md border px-2 text-[11.5px]"
           style={{ background: 'var(--fill-tsp)', borderColor: lit ? 'var(--accent)' : 'var(--border)', color: 'var(--text)' }}
         />
+        <span data-subtitle-timing={language ? 'estimated' : cue.timing ?? 'unknown'}
+          className="px-2 text-[10.5px]" style={{ color: 'var(--text-faint)' }}
+          title={!language && cue.alignment ? t('timeline.subtitleTimingAlignment').replace('{matched}', String(cue.alignment.matchedWords)).replace('{total}', String(cue.alignment.totalWords)) : undefined}>
+          {t(`timeline.subtitleTiming.${language ? 'estimated' : cue.timing ?? 'unknown'}`)}
+        </span>
+        {error ? <span role="alert" className="px-2 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>{error}</span> : null}
+        {draft ? <button type="button" disabled={busy} className="self-start px-2 text-[10.5px] underline" style={{ color: 'var(--text-muted)' }}
+          onMouseDown={(e) => e.preventDefault()} onClick={cancel}>{t('confirm.cancel')}</button> : null}
       </div>
       {refer ? (
         <Tooltip label={ask.refer} shortcut={ask.shortcut || undefined}>

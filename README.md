@@ -172,3 +172,11 @@ The text inspector remains editable while saving. A prior success or failure can
 Director proposals measure the complete UTF-8 content against the optional workProposal.maxBytes returned by host connect. Whole references may be omitted with an explicit count; instructions and source identity are retained. Legacy hosts without the field use a 64 KiB fallback. Oversized necessary content retains the complete draft and requests adjustment rather than silently truncating instructions. Unknown-result retries preserve the original body and request identity.
 
 New review sourceFacts use version 2 and hash the actual motion.locked field separately from layout. Version 1 receipts remain readable and their images usable, but engineering-field comparisons are unknown: their historical lock projection cannot prove that locks stayed unchanged.
+
+## Speech timing and subtitle edit protection
+
+The subtitle panel distinguishes model word timing, estimated timing, manual edits, and unknown timing for older files. Model timing means complete literal matching between supplied words and text, not recognition accuracy or phoneme alignment; match counts describe the whole transcript. Low coverage, including normalized Chinese numbers, uses the observed word interval rather than silently returning to zero. Standard VTT cue identifiers retain provenance without printing technical labels into the film.
+
+Replacing media at the same path or subtitles extending past the audio makes transcription stale. Automatically refreshing keeps manually cut or edited captions and reports why; explicit ASR `--force` requests replacement. Normal subtitle saves, single-line changes, undo and ASR commits compare the source snapshot that was read. Conflicting changes retain the editor draft. This reuses process-local serialization and snapshot preconditions, not a cross-process filesystem transaction.
+
+`pnpm test:speech` runs only named speech/subtitle regression files and is included in default CI. Actual recognition, listening quality and audiovisual rhythm require a real recording and final encoded output; mock-service tests do not establish cloud-service accuracy. Directors still choose components, compositions or original scenes autonomously.

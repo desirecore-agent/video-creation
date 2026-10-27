@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
@@ -10,7 +10,8 @@ import {
 } from './captions.mjs';
 import { FILM_SUBTITLE_DEFAULT, filmSubtitleShown, filmSubtitleSrt, filmSubtitleVtt } from './film-subtitle.mjs';
 import { HttpError, json } from './http.mjs';
-import { vttOf } from './transcripts.mjs';
+import { readTranscript, vttOf } from './transcripts.mjs';
+import { readSourceSnapshot } from './subtitle-edits.mjs';
 import { filmHtml } from '../../src/film-doc.mjs';
 
 /* "One two three. Four five six.", said in 2.5 s of a 3 s file */
@@ -149,7 +150,8 @@ test('translations are transcripts beside it (name.<language>.vtt); Studio trans
   const translate = async (job) => { asked.push(job); return job.lines.map((l) => `de:${l}`); };
   assert.deepEqual(await translateFilmSubtitles(root, 'de', { translate }), { language: 'de', translated: ['assets/vo.mp3'], already: 0, same: 0, failed: [] });
   assert.deepEqual(asked[0].lines, ['One two three.', 'Four five six.']);
-  assert.match(readFileSync(join(root, 'assets/vo.de.vtt'), 'utf8'), /^WEBVTT\n\n00:00:00\.000 --> 00:00:01\.500\nde:One two three\./);
+  assert.match(readFileSync(join(root, 'assets/vo.de.vtt'), 'utf8'), /^WEBVTT\n\nopenfilm-timing:estimated\n00:00:00\.000 --> 00:00:01\.500\nde:One two three\./);
+  assert.equal((await readTranscript(root, 'assets/vo.mp3', 'de')).lines[0].timing, 'estimated');
   out = await filmCaptions(root, noProbe);
   assert.deepEqual(out.cues.map((c) => c.alt), [{ fr: 'Un deux trois.', de: 'de:One two three.' }, { de: 'de:Four five six.' }]);
 
@@ -172,7 +174,7 @@ test('a clip whose src leads out of the project (`../`) has no subtitles: its tr
   assert.deepEqual([asked.length, result.translated], [0, []]);
   const { base, close } = await serve(root);
   try {
-    const edit = (body) => fetch(`${base}/captions/line`, { method: 'PUT', body: JSON.stringify(body) });
+    const edit = async (body) => fetch(`${base}/captions/line`, { method: 'PUT', body: JSON.stringify({ ...body, from: await readSourceSnapshot(root, body.src).catch(() => undefined) }) });
     assert.equal((await edit({ src, line: 0, text: 'changed' })).status, 400);
     assert.equal((await edit({ src, line: 0, text: 'changed', language: 'de' })).status, 400);
   } finally {
@@ -229,7 +231,7 @@ test('the routes: captions, style, and translation without a service', async () 
 test('the person corrects a line: it goes back into its transcript; emptied, the line goes', async () => {
   const root = project([{ clips: [{ id: 'vo', src: 'assets/vo.mp3', at: 10 }] }], { 'assets/vo.vtt': VTT });
   const { base, close } = await serve(root);
-  const edit = (body) => fetch(`${base}/captions/line`, { method: 'PUT', body: JSON.stringify(body) });
+  const edit = async (body) => fetch(`${base}/captions/line`, { method: 'PUT', body: JSON.stringify({ ...body, from: await readSourceSnapshot(root, body.src).catch(() => undefined) }) });
   try {
     assert.equal((await edit({ src: 'assets/vo.mp3', line: 1500, text: 'Four, five, six!' })).status, 200);
     assert.match(readFileSync(join(root, 'assets/vo.vtt'), 'utf8'), /00:00:01\.500 --> 00:00:03\.000\nFour, five, six!\n/);
@@ -249,7 +251,7 @@ test('a translated line is corrected in its own language; a line with no transla
     'assets/vo.ja.vtt': 'WEBVTT\n\n00:00:00.000 --> 00:00:01.500\n一二三。\n',
   });
   const { base, close } = await serve(root);
-  const edit = (body) => fetch(`${base}/captions/line`, { method: 'PUT', body: JSON.stringify(body) });
+  const edit = async (body) => fetch(`${base}/captions/line`, { method: 'PUT', body: JSON.stringify({ ...body, from: await readSourceSnapshot(root, body.src).catch(() => undefined) }) });
   try {
     assert.equal((await edit({ src: 'assets/vo.mp3', line: 0, text: 'いち、に、さん。', language: 'ja' })).status, 200);
     assert.equal((await edit({ src: 'assets/vo.mp3', line: 1500, text: '四五六！', language: 'ja' })).status, 200);
@@ -341,7 +343,7 @@ test('the person corrects one subtitle of a line: those words change in the tran
   const root = project([{ clips: [{ id: 'vo', src: 'assets/vo.wav' }] }], { 'assets/vo.vtt': vttOf(spokenLines(SAID, ttsWords(SAID), 3500)) });
   const before = (await filmCaptions(root, noProbe)).cues;
   const { base, close } = await serve(root);
-  const edit = (body) => fetch(`${base}/captions/line`, { method: 'PUT', body: JSON.stringify(body) });
+  const edit = async (body) => fetch(`${base}/captions/line`, { method: 'PUT', body: JSON.stringify({ ...body, from: await readSourceSnapshot(root, body.src).catch(() => undefined) }) });
   try {
     assert.equal((await edit({ src: 'assets/vo.wav', line: 0, part: 1, text: '完全免费' })).status, 200);
     assert.match(readFileSync(join(root, 'assets/vo.vtt'), 'utf8'), /它<[^>]+>叫 <[^>]+>OpenFilm，<[^>]+>完全免费，<[^>]+>MIT <[^>]+>协<[^>]+>议。/);
@@ -376,7 +378,7 @@ test('a translation follows the original\'s subtitles; one that cannot be cut sp
   /* a correction of one translated subtitle changes those words of the translation */
   const { base, close } = await serve(root);
   try {
-    const res = await fetch(`${base}/captions/line`, { method: 'PUT', body: JSON.stringify({ src: 'assets/vo.wav', line: 0, part: 1, text: 'free, open source,', language: 'en' }) });
+    const res = await fetch(`${base}/captions/line`, { method: 'PUT', body: JSON.stringify({ src: 'assets/vo.wav', line: 0, part: 1, text: 'free, open source,', language: 'en', from: await readSourceSnapshot(root, 'assets/vo.wav') }) });
     assert.equal(res.status, 200);
     assert.match(readFileSync(join(root, 'assets/vo.en.vtt'), 'utf8'), /It's called OpenFilm, free, open source, MIT licensed\./);
   } finally {
@@ -391,9 +393,88 @@ test('a transcript that runs past the end of its file is listed to be made again
   assert.equal(transcriptOutlasts([{ endMs: 2500 }], undefined), false);
   assert.equal(transcriptOutlasts([{ endMs: 2500 }], 1.2), true);
   const root = project([{ clips: [{ id: 'v', src: 'assets/vo.mp3' }] }], { 'assets/vo.mp3': 'x', 'assets/vo.vtt': VTT });
+  utimesSync(join(root, 'assets/vo.mp3'), 1, 1);
+  utimesSync(join(root, 'assets/vo.vtt'), 2, 2);
   const kept = await filmCaptions(root, { duration: async () => 3 });
   assert.deepEqual(kept.untranscribed, []);
   const shorter = await filmCaptions(root, { duration: async () => 1.2 });
   assert.deepEqual(shorter.untranscribed, ['assets/vo.mp3']);
   assert.ok(shorter.cues.length > 0, 'still shown until it is made again');
+});
+
+
+test('same-path recording replacement is listed even when the old transcript still fits, and its text stays visible', async () => {
+  const root = project([{ clips: [{ id: 'vo', src: 'assets/vo.mp3' }] }], { 'assets/vo.mp3': 'old', 'assets/vo.vtt': VTT });
+  utimesSync(join(root, 'assets/vo.mp3'), 1, 1);
+  utimesSync(join(root, 'assets/vo.vtt'), 2, 2);
+  assert.deepEqual((await filmCaptions(root, { duration: async () => 3 })).untranscribed, []);
+  writeFileSync(join(root, 'assets/vo.mp3'), 'new recording of equal duration');
+  utimesSync(join(root, 'assets/vo.mp3'), 3, 3);
+  const result = await filmCaptions(root, { duration: async () => 3 });
+  assert.deepEqual(result.untranscribed, ['assets/vo.mp3']);
+  assert.ok(result.cues.length > 0);
+  assert.equal(readFileSync(join(root, 'assets/vo.vtt'), 'utf8'), VTT);
+});
+
+test('automatic transcription keeps hand-cut subtitles after recording replacement and reports the explicit action required', async () => {
+  const kept = vttOf([{ text: '人工保留', startMs: 0, endMs: 1000 }], { cut: true });
+  const root = project([{ clips: [{ id: 'vo', src: 'assets/vo.mp3' }] }], { 'assets/vo.mp3': 'new', 'assets/vo.vtt': kept });
+  utimesSync(join(root, 'assets/vo.vtt'), 1, 1);
+  utimesSync(join(root, 'assets/vo.mp3'), 2, 2);
+  let calls = 0;
+  const { base, close } = await serve(root, { transcribe: async () => { calls++; } });
+  try {
+    const response = await fetch(`${base}/subtitles/transcribe`, { method: 'POST' });
+    assert.equal(response.status, 502);
+    const result = await response.json();
+    assert.deepEqual(result.transcribed, []);
+    assert.equal(result.failed.length, 1);
+    assert.match(result.failed[0].error, /edited by hand.*--force/);
+    assert.equal(calls, 0);
+    assert.equal(readFileSync(join(root, 'assets/vo.vtt'), 'utf8'), kept);
+  } finally { close(); }
+});
+
+
+test('a transcription callback that writes no transcript is a failure, not a successful subtitle count', async () => {
+  const root = project([{ clips: [{ id: 'vo', src: 'assets/vo.mp3' }] }], { 'assets/vo.mp3': 'recording' });
+  const { base, close } = await serve(root, { transcribe: async () => {} });
+  try {
+    const response = await fetch(`${base}/subtitles/transcribe`, { method: 'POST' });
+    assert.equal(response.status, 502);
+    const result = await response.json();
+    assert.deepEqual(result.transcribed, []);
+    assert.match(result.failed[0].error, /did not leave a usable transcript/);
+  } finally { close(); }
+});
+
+
+test('translation cannot overwrite a translation created by hand while the request is in flight', async () => {
+  const root = project([{ clips: [{ id: 'vo', src: 'assets/vo.mp3' }] }], { 'assets/vo.vtt': VTT });
+  const original = readFileSync(join(root, 'assets/vo.vtt'), 'utf8');
+  const manual = vttOf([{ text: '人工译文', startMs: 0, endMs: 1500, timing: 'edited' }], { cut: true });
+  const result = await translateFilmSubtitles(root, 'de', { translate: async (job) => {
+    writeFileSync(join(root, 'assets/vo.de.vtt'), manual);
+    return job.lines.map((line) => `server:${line}`);
+  } });
+  assert.deepEqual(result.translated, []);
+  assert.equal(result.failed.length, 1);
+  assert.match(result.failed[0].error, /changed since/);
+  assert.equal(readFileSync(join(root, 'assets/vo.vtt'), 'utf8'), original);
+  assert.equal(readFileSync(join(root, 'assets/vo.de.vtt'), 'utf8'), manual);
+});
+
+test('translation of an old transcript cannot be attached after a new ASR transcript replaced it', async () => {
+  const root = project([{ clips: [{ id: 'vo', src: 'assets/vo.mp3' }] }], { 'assets/vo.vtt': VTT });
+  const newer = vttOf([{ text: 'A different take.', startMs: 250, endMs: 1800, timing: 'measured',
+    marks: [{ index: 0, startMs: 250 }, { index: 2, startMs: 500 }, { index: 12, startMs: 1100 }] }]);
+  const result = await translateFilmSubtitles(root, 'de', { translate: async (job) => {
+    writeFileSync(join(root, 'assets/vo.vtt'), newer);
+    return job.lines.map((line) => `server:${line}`);
+  } });
+  assert.deepEqual(result.translated, []);
+  assert.equal(result.failed.length, 1);
+  assert.match(result.failed[0].error, /changed since/);
+  assert.equal(readFileSync(join(root, 'assets/vo.vtt'), 'utf8'), newer);
+  assert.equal(existsSync(join(root, 'assets/vo.de.vtt')), false);
 });

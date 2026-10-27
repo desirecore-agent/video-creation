@@ -30,7 +30,10 @@ import { lstat, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from '
 import { tmpdir } from 'node:os';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { FILM_FILE, clipKind } from '../../src/film-doc.mjs';
-import { spokenLines } from './captions.mjs';
+import { spokenLines, transcriptOutlasts } from './captions.mjs';
+import { probe } from './derived.mjs';
+import { withProjectFilmEdit } from './film.mjs';
+import { assertSourceSnapshot, readSourceSnapshot } from './subtitle-edits.mjs';
 import { dropTranscripts, readTranscript, transcriptIsCurrent, transcriptPath, writeTranscript } from './transcripts.mjs';
 import { inside } from './files.mjs';
 import { HttpError, json, readJson } from './http.mjs';
@@ -82,7 +85,7 @@ export const VERBS = /** @type {Record<string, VerbSpec>} */ ({
     options: { out, prompt, sec: { value: 'seconds', min: 3, max: 300 } },
   },
   asr: {
-    help: 'Transcribe a recording in the project. Returns a preview of the text and its transcript: a WebVTT of the whole text in pause-separated cues, each labeled with the pause before it; cut only in pauses of 0.12 s or more. What is transcribed already is not done again (--force redoes a recording; synthesized speech never needs it).',
+    help: 'Transcribe a recording in the project. Returns a preview of the text and its transcript: a WebVTT of the whole text in pause-separated cues, each labeled with the pause before it; cut only in pauses of 0.12 s or more. A current transcript is reused only when it still fits the recording. Subtitles edited by hand are kept unless --force explicitly replaces them; synthesized speech without word timing still needs transcription or alignment.',
     timeoutSec: 900,
     options: { src: { value: 'path', required: true, path: 'speech' }, force: {} },
   },
@@ -281,9 +284,21 @@ export async function runGet(root, verb, given, { via, model, yes = false, ask, 
     try { return await callService(root, service, /** @type {Parameters<typeof callService>[2]} */ (rest), signal); }
     catch (e) { throw /** @type {{ status?: number }} */ (e)?.status === 400 ? usage(/** @type {Error} */ (e).message) : e; }
   }
-  if (verb === 'asr' && args.force !== true && await transcriptIsCurrent(root, String(args.src))) {
-    return show(await speechReceipt(root, 'asr', String(args.src), { skip: true, note: 'It has a transcript already, made since the file last changed (--force makes it again).' }));
+  if (verb === 'asr' && args.force !== true) {
+    const src = String(args.src), transcript = await readTranscript(root, src);
+    // 人工字幕须明确重做，不能因源文件更新或超长而被自动覆盖。
+    if (transcript?.cut || transcript?.lines.some((line) => line.timing === 'edited')) {
+      return show(await speechReceipt(root, 'asr', src, { skip: true, note: 'These subtitles were edited by hand and are kept. --force explicitly replaces them.' }));
+    }
+    if (transcript && await transcriptIsCurrent(root, src)
+      && !transcriptOutlasts(transcript.lines, await probe(root, src).then((p) => p.duration, () => undefined))) {
+      return show(await speechReceipt(root, 'asr', src, { skip: true, note: 'It has a transcript already, made since the file last changed (--force makes it again).' }));
+    }
   }
+  // 网络请求期间不持有写锁；落盘时只接受起跑时的字幕与素材版本。
+  const asrSource = verb === 'asr' ? String(args.src) : null;
+  const asrBefore = asrSource ? await readSourceSnapshot(root, asrSource) : null;
+  const mediaBefore = asrSource ? await stat(inside(root, asrSource)) : null;
   const settings = await providerSettings();
   /* `--via` names one: when it cannot, it says why (no such provider, not this verb, no key) */
   const provider = await chooseProvider(/** @type {Verb} */ (verb), { via: via ?? null, settings }).catch((e) => { throw usage(e.message); });
@@ -324,7 +339,16 @@ export async function runGet(root, verb, given, { via, model, yes = false, ask, 
         ...(words ? { prompt: words.length > 200 ? `${words.slice(0, 199).trimEnd()}…` : words } : {}) });
     }
     const result = await provider.run(/** @type {Verb} */ (verb), args, ctx);
-    await land(root, verb, args, result);
+    await withProjectFilmEdit(root, async () => {
+      if (asrSource) {
+        const mediaNow = await stat(inside(root, asrSource));
+        if (!mediaBefore || mediaNow.size !== mediaBefore.size || mediaNow.mtimeMs !== mediaBefore.mtimeMs) {
+          throw new GetError('The recording changed during transcription. No new subtitles were written; review the current recording before explicitly trying again.');
+        }
+        await assertSourceSnapshot(root, asrSource, asrBefore);
+      }
+      await land(root, verb, args, result);
+    });
     return [...said, show(await receiptFor(root, verb, args, result.receipt))].join('\n');
   } catch (e) {
     if (clock.timedOut()) throw new GetError(`${provider.name} did not finish within ${spec.timeoutSec + 60} s, so Studio stopped waiting. Nothing landed in the project, but the service may have received the request. Check existing files and receipts before explicitly retrying; do not automatically resubmit a paid request.`);
@@ -580,7 +604,12 @@ export async function subtitleTranscriber() {
     if (!(await chooseProvider('asr', { settings: await providerSettings() }).catch(() => null))) {
       throw Object.assign(new Error(notConnected(['asr'])), { code: 'not-connected' });
     }
-    await runGet(root, 'asr', { src }, { yes: true, signal });
+    const transcript = await readTranscript(root, src);
+    if (transcript?.cut || transcript?.lines.some((line) => line.timing === 'edited')) {
+      throw new GetError('These subtitles were edited by hand and are kept. Review the changed recording and use get asr --force only to explicitly replace them.');
+    }
+    // 此入口只接收已判定需要刷新者，不再让mtime缓存把过期字幕当成成功。
+    await runGet(root, 'asr', { src, force: true }, { yes: true, signal });
   };
 }
 
