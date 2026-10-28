@@ -1,10 +1,10 @@
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MediaError, frame, loudness, loudnessOf, poster, probe, soundOf, waveform } from './derived.mjs';
+import { MediaError, factsOfProbe, frame, loudness, loudnessOf, poster, probe, soundOf, waveform } from './derived.mjs';
 
 let root;
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
@@ -16,6 +16,41 @@ before(() => {
   /* two seconds of a test pattern with a tone, and one second of a 440 Hz sound followed by silence */
   execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x180:rate=25:duration=2', '-f', 'lavfi', '-i', 'sine=frequency=220:duration=2', '-shortest', '-pix_fmt', 'yuv420p', join(root, 'assets', 'clip.mp4')]);
   execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-af', 'apad=pad_dur=1', join(root, 'assets', 'tone.wav')]);
+});
+after(() => rmSync(root, { recursive: true, force: true }));
+
+test('probe事实保留手机HDR/旋转和精确音轨起点，不泄漏任意容器标签', () => {
+  const facts = factsOfProbe({ format: { duration: '606.0706', tags: { location: 'private-location' } }, streams: [
+    { codec_type: 'video', codec_name: 'hevc', pix_fmt: 'yuv420p10le', width: 3840, height: 2160, avg_frame_rate: '60/1', start_pts: 0, time_base: '1/90000',
+      color_primaries: 'bt2020', color_transfer: 'arib-std-b67', color_space: 'bt2020nc', color_range: 'tv',
+      side_data_list: [{ rotation: -90 }, { side_data_type: 'DOVI configuration record', dv_profile: 8 }] },
+    { codec_type: 'audio', start_pts: 1598, time_base: '1/48000', start_time: '0.033292' },
+  ] });
+  assert.deepEqual([facts.width, facts.height, facts.codedWidth, facts.codedHeight, facts.rotationDegrees], [2160, 3840, 3840, 2160, -90]);
+  assert.equal(facts.color.hdrTransfer, 'hlg');
+  assert.equal(facts.color.primaries, 'bt2020');
+  assert.deepEqual(facts.dolbyVision, { profile: 8 });
+  assert.equal(facts.audioStartSeconds, 1598 / 48000);
+  assert.deepEqual([facts.audioStartPTS, facts.audioTimeBase], ['1598', '1/48000']);
+  assert.equal(facts.videoStartSeconds, 0);
+  assert.equal(JSON.stringify(facts).includes('private-location'), false);
+  const unknown = factsOfProbe({ streams: [{ codec_type: 'video', width: 10, height: 20 }] });
+  assert.equal(unknown.videoStartSeconds, null, '缺失起点不能猜成零');
+  assert.equal(unknown.color.hdrTransfer, null, '10bit或缺少标签不自动当HDR');
+  assert.equal(unknown.sampleAspectRatio, null, '缺失SAR不能捏造已报告1:1');
+  assert.equal(unknown.displayGeometryBasis, 'square-pixel-default');
+});
+
+test('probe按有效SAR投影方像素显示几何后再处理旋转，无效SAR仍明示未知', () => {
+  const stream = { codec_type: 'video', width: 160, height: 90, sample_aspect_ratio: '2:1' };
+  const wide = factsOfProbe({ streams: [stream] });
+  assert.deepEqual([wide.width, wide.height, wide.codedWidth, wide.codedHeight], [320, 90, 160, 90]);
+  assert.equal(wide.sampleAspectRatio, '2:1');
+  assert.equal(wide.displayGeometryBasis, 'reported-sample-aspect-ratio');
+  const turned = factsOfProbe({ streams: [{ ...stream, side_data_list: [{ rotation: 90 }] }] });
+  assert.deepEqual([turned.width, turned.height], [90, 320]);
+  const unknown = factsOfProbe({ streams: [{ ...stream, sample_aspect_ratio: '0:1' }] });
+  assert.deepEqual([unknown.width, unknown.height, unknown.sampleAspectRatio, unknown.displayGeometryBasis], [160, 90, null, 'square-pixel-default']);
 });
 
 test('probe: length, picture size, frame rate and sound of a video; a sound has no picture', { skip: !hasFfmpeg && 'no ffmpeg' }, async () => {

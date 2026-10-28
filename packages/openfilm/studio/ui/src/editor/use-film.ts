@@ -16,6 +16,8 @@ import { applyOps, EditError } from '../../../server/ops.mjs';
 import { filmHead } from '../../../../src/film-doc.mjs';
 import { api, ApiError, projectEvents, type Film, type Op } from '../api';
 import { inverse } from './undo';
+import { recoverConditionalEdit } from './conditional-edit';
+import type { EditPreconditions } from '../lib/speech-cut';
 
 export type FilmState = { value: Film; rev: string };
 
@@ -40,6 +42,8 @@ export function useFilm(projectId: string, initial: FilmState | null, onChange: 
   const brokenRev = useRef<string | null>(null);
   /** edits applied here and not yet written */
   const pending = useRef(0);
+  // 文稿精剪的预览版本固定；提交期间不在其上乐观排入另一批编辑。
+  const guarded = useRef(false);
   const [steps, setStepsState] = useState<{ done: Step[]; undone: Step[] }>({ done: [], undone: [] });
   /* the steps as they are now, ahead of the render: an undo pressed right after an edit (a nudge written the moment
      before it) undoes that edit, not the one before */
@@ -97,12 +101,14 @@ export function useFilm(projectId: string, initial: FilmState | null, onChange: 
    * the folder's again). Resolves at once with the reason when the film here refuses them.
    */
   /* `quiet`: the caller says why it was refused itself (the inspector, beside its field), so `error` is not set */
-  const run = useCallback((ops: Op[], record: 'do' | 'undo' | 'redo' = 'do', label = 'history.stepEdit', quiet = false): Promise<string | null> => {
+  const run = useCallback((ops: Op[], record: 'do' | 'undo' | 'redo' = 'do', label = 'history.stepEdit', quiet = false, condition?: { base: string; preconditions: EditPreconditions }): Promise<string | null> => {
     const current = ref.current;
-    if (!current || !ops.length) return Promise.resolve(null);
+    if (!current || !ops.length) return Promise.resolve(condition ? '没有可提交的文稿剪辑，请重新读取影片。' : null);
+    if (guarded.current) return Promise.resolve('文稿精剪正在提交，请稍候。');
+    if (condition && (pending.current !== 0 || current.rev !== condition.base)) return Promise.resolve('影片已改变或仍有编辑未写完，请重新预览文稿剪辑。');
     /* film.html cannot be read: the edit could not be written, and shown it would draw the picture again from the
        broken file. Nothing changes; the note on the film already says why (`broken`) */
-    if (brokenRev.current) return Promise.resolve(null);
+    if (brokenRev.current) return Promise.resolve(condition ? '影片当前不可读取，文稿剪辑未提交。' : null);
     let after: Film;
     try { after = applyOps(structuredClone(current.value), ops) as Film; }
     catch (e) {
@@ -110,6 +116,7 @@ export function useFilm(projectId: string, initial: FilmState | null, onChange: 
       if (!quiet) setError(why);
       return Promise.resolve(why);
     }
+    if (condition) guarded.current = true;
     const before = current.value;
     const next = { value: after, rev: current.rev };
     ref.current = next;
@@ -118,12 +125,14 @@ export function useFilm(projectId: string, initial: FilmState | null, onChange: 
     changed.current(after, 'edit');
     pending.current += 1;
     const step: Step = { undo: inverse(before, after, ops), redo: ops, label, at: Date.now() };
-    setSteps((s) => (record === 'do' ? { done: [...s.done.slice(-99), step], undone: [] }
+    if (!condition) setSteps((s) => (record === 'do' ? { done: [...s.done.slice(-99), step], undone: [] }
       : record === 'undo' ? { done: s.done.slice(0, -1), undone: [...s.undone, s.done[s.done.length - 1]] }
         : { done: [...s.done, s.undone[s.undone.length - 1]], undone: s.undone.slice(0, -1) }));
     const written = queue.current.then(async (): Promise<string | null> => {
       try {
-        const done = await api.edit(projectId, ref.current?.rev ?? null, ops);
+        if (condition && ref.current?.rev !== condition.base) throw new Error('影片已改变，请重新预览文稿剪辑。');
+        const done = await api.edit(projectId, condition?.base ?? ref.current?.rev ?? null, ops, condition?.preconditions);
+        if (condition) setSteps((s) => ({ done: [...s.done.slice(-99), step], undone: [] }));
         ours.current.delete(done.rev);
         ours.current.add(done.rev);
         pending.current -= 1;
@@ -144,18 +153,18 @@ export function useFilm(projectId: string, initial: FilmState | null, onChange: 
         pending.current -= 1;
         const why = e instanceof ApiError ? e.message : String(e);
         /* what was not written is not a step to undo */
-        if (record === 'do') setSteps((s) => ({ ...s, done: s.done.filter((x) => x !== step) }));
-        if (!(await fromServer())) {
-          /* the folder's film cannot be read: back to the film as it was before this edit (the note on the film says
-             why, so it is not said again) */
-          ref.current = current;
-          setState(current);
-          changed.current(current.value, 'server');
-          return null;
+        if (!condition && record === 'do') setSteps((s) => ({ ...s, done: s.done.filter((x) => x !== step) }));
+        const restore = () => { ref.current = current; setState(current); changed.current(current.value, 'server'); };
+        const refreshed = condition ? await recoverConditionalEdit(fromServer, restore) : await fromServer();
+        if (!refreshed) {
+          /* 条件提交的刷新也可能断网；恢复原影片但保留原提交错误和原撤销历史。 */
+          if (!condition) restore();
+          if (condition && !quiet) setError(why);
+          return condition ? why : null;
         }
         if (!quiet) setError(why);
         return why;
-      }
+      } finally { if (condition) guarded.current = false; }
     });
     queue.current = written.then(() => {});
     return written;
@@ -193,6 +202,7 @@ export function useFilm(projectId: string, initial: FilmState | null, onChange: 
     while (d.length < done && u.length) { const one = u[u.length - 1]; step(one, 'redo'); d = [...d, one]; u = u.slice(0, -1); }
   }, [step]);
   const edit = useCallback((ops: Op[], label?: string, quiet?: boolean) => run(ops, 'do', label, quiet), [run]);
+  const editConditional = useCallback((base: string, ops: Op[], preconditions: EditPreconditions, label = 'history.stepRemove') => run(ops, 'do', label, true, { base, preconditions }), [run]);
   /** An edit of another file, made already: kept as a step, so ⌘Z undoes it in turn with the film's. */
   const record = useCallback((label: string, outside: OutsideStep) => {
     setSteps((s) => ({ done: [...s.done.slice(-99), { undo: [], redo: [], label, at: Date.now(), outside }], undone: [] }));
@@ -201,7 +211,7 @@ export function useFilm(projectId: string, initial: FilmState | null, onChange: 
   const forget = useCallback(() => setSteps(() => ({ done: [], undone: [] })), [setSteps]);
 
   return {
-    film: state?.value ?? null, rev: state?.rev ?? null, error, broken, edit, record, undo, redo, rollbackTo, forget, steps,
+    film: state?.value ?? null, rev: state?.rev ?? null, error, broken, edit, editConditional, record, undo, redo, rollbackTo, forget, steps,
     canUndo: steps.done.length > 0, canRedo: steps.undone.length > 0, settled: () => queue.current, isSettled: () => pending.current === 0,
   };
 }

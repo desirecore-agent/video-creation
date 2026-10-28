@@ -15,6 +15,7 @@ const noticeManifestPath = join(rootPath, 'desirecore/licenses/manifest.json');
 export function motionBuildInputs() {
   const manifest = JSON.parse(readFileSync(noticeManifestPath, 'utf8'));
   return [
+    ...['timeline-edit.ts', 'timeline-constants.ts'].map((file) => join(rootPath, 'packages/openfilm/studio/ui/src/lib', file)),
     ...['motion.mjs', 'motion-schema.mjs'].map((file) => join(rootPath, 'packages/openfilm/src', file)),
     join(rootPath, 'LICENSE'), noticeManifestPath,
     ...manifest.packages.flatMap((pkg) => pkg.notices.map((notice) => join(rootPath, notice.path))),
@@ -69,6 +70,24 @@ export async function buildMotionSdk({ write = true } = {}) {
   const footer = Buffer.from(await licenseFooter(result.metafile));
   const files = result.outputFiles.map((file) => ({ path: file.path, contents: Buffer.concat([file.contents, footer]) }));
   if (write) for (const file of files) await writeFile(file.path, file.contents);
+  // 服务端和界面调用同一纯剪辑计划器；发布只带 dist，不依赖 UI 源码或 React。
+  const timeline = await buildTimelinePlan({ write });
+  return [...files, ...timeline];
+}
+
+/** 为服务端构建同源纯计划器；无 DOM/React 与运行时依赖。 */
+export async function buildTimelinePlan({ write = true } = {}) {
+  const result = await build({
+    stdin: { contents: "export { planCutRange } from './packages/openfilm/studio/ui/src/lib/timeline-edit.ts';", resolveDir: rootPath },
+    bundle: true, platform: 'neutral', format: 'esm', target: 'es2022', treeShaking: true, write: false,
+    outfile: fileURLToPath(new URL('timeline-plan.mjs', output)), legalComments: 'eof',
+    banner: { js: '// 同源时间线精剪计划器，MIT；由 scripts/build-motion-sdk.mjs 生成。' },
+  });
+  const files = result.outputFiles.map((file) => ({ path: file.path, contents: Buffer.from(file.contents) }));
+  if (write) {
+    await mkdir(output, { recursive: true });
+    for (const file of files) await writeFile(file.path, file.contents);
+  }
   return files;
 }
 export const prepareMotionSamples = prepareSamples;

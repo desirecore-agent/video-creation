@@ -6,6 +6,7 @@ const FILES = typeof navigator !== 'undefined' && /^win/i.test(navigator.platfor
   : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? '访达' : '文件管理器';
 
 export const zhCN: Words = {
+  speechCut: {"select": "精剪这句…", "title": "文稿声画精剪", "last": "结束到这一句", "adjustNote": "成片毫秒微调：负数向前，正数向后。先预听，保留正常气口。", "startAdjust": "删除入点微调（毫秒）", "endAdjust": "删除出点微调（毫秒）", "busy": "正在准备…", "plan": "预览删除区间", "range": "成片 {start}–{end}秒", "sourceRange": "源片 {start}–{end}秒", "affected": "受影响片段条目：{n}", "timingNote": "时间来源，不代表识别正确：", "short": "其他轨道限制了闭合，仍余 {ms}毫秒空隙。", "preview": {"start": "听原片入点", "end": "听原片出点", "join": "预听拟剪接缝"}, "previewNote": "这是播放器预听，seek延迟可能与编码切口不同，最终还需审导出。", "apply": "删除这段声画并闭合空隙", "applyNote": "保留源字幕原文，一次时间线编辑，可一次撤销。"},
   review: {
     overview: '返回总览',
     "pairNote": "两侧是分别选择的观察点，不自动对齐内容或判定修改优劣。",

@@ -276,3 +276,17 @@ VTT cue identifier `openfilm-timing:measured|estimated|edited[:matched/total]` �
 项目鉴权 HTTP `GET captions/source?src=` 返回原 `cues` 及 `snapshot:{files:{path:text|null}}`、`sourceRevision`（完整字幕/译文集合摘要）；`GET captions` 的各 cue 带所读 `sourceRevision`。`PUT captions/source` 的 `{src,cues,from}` 和 `PUT captions/line` 的原参数加 `from` 都要求所读 snapshot；缺失428、变化409且不写。保存前重新GET不代表旧草稿获准覆盖，UI同时比较所见版本。撤回与ASR落盘复用相同源前置检查与已有进程内串行；外部进程仍可能在检查/写入间修改，不是OS CAS或多文件事务。
 
 失效字幕仍可见供核对；自动转写不覆盖人工cut/edited，明确返回failed。普通ASR缓存仅在字幕未失效时skip；识别期间素材或字幕改变拒绝落盘。收费服务配置/授权不变，ASR仍同步请求，不借用导出job持久性；结果未知先读回再决定。
+
+## 手机长口播：工作媒体与条件精剪
+
+`prepare-media --schema` 离线返回 Draft-07 请求；CLI `prepare-media <项目> --args <JSON文件>`、MCP `video_prepare_media` 与原鉴权 `POST /api/projects/:id/media/prepare` 使用同一合同：`{src:"assets/original.mp4",shortEdge:720}`，短边只可720/1080，默认720、不放大，固定30fps/H264/AAC/BT709。只准备整源、不裁段/改速、不自动修改影片；返回 `output.path` 供调用者经已有 patch 显式换源。
+
+产物与 `provenance.json` 在 `assets/working/<源+参数+pipeline摘要>/` 完整后发布。读取前后核源身份/摘要，复用前核输出字节，失败/取消只清本次临时文件；不承诺跨进程或跨文件系统事务。该本地请求沿请求取消，不创建第二套持久作业系统；客户端独立等待上限2小时，断连不以没有回执证明绝无已发布文件。先检查同源结果，不并发重复转码。原片保留，工作副本无继承GPS与HDR动态元信息。
+
+probe补充编码/显示尺寸、旋转、颜色原语及视频/音轨首PTS与整数time_base。仅明确HLG/PQ输入使用显式HDR→SDR转换；缺所需滤镜明确失败，不把10→8bit称tone-map。此策略不是校准调色或Dolby Vision保真。工作媒体共用视频起点归零，晚到的音轨补首静音；`sourceMediaSeconds=workingCopySeconds+mapping.sourceTimeAtWorkingZero`。旧离线ASR若从解码WAV零点开始，`workingCopySeconds=asrWaveformSeconds+mapping.originalAudioWaveformToWorkingOffsetSeconds`。首起点映射不证明任意文件中途时间戳无跳变、识别正确或音素对齐；需实际检查有声窗。
+
+`captions <项目>` / `video_captions` 调用既有 GET `/captions`，返回实际cue的clip/line/part/sourceRevision。`speech-cut --schema` 返回规划与提交Schema。CLI `speech-cut <项目> --args <JSON文件>` / MCP `video_speech_cut_plan` / POST `speech-cut/plan` 仅生成区间提案，参数为 `{base,clip,sourceRevision,first:{line,part?},last:{line,part?},adjust?:{startMs,endMs},follow?:{sync,linkage?}}`。首末句取实际原语言连续cue，属于同片段与源版本；不把任意汉字映射为可自然删除的音素。adjust为成片毫秒有符号微调，默认0，不能越出片段。
+
+回执含base/source/range/timing/affected/ops/shortMs/preconditions；不持久化另一份计划或时间线。共享纯planner由现有构建输出 `ui/dist/timeline-plan.mjs`，界面与服务沿同一时间线原语。CLI `speech-cut-apply --args <原计划JSON>` 仅取base/ops/preconditions，MCP `video_speech_cut_apply` 明确提交这三项；POST仍是既有edit，`preconditions:{strictBase:true,subtitles:[{src,revision}]}` 在同影片串行队列核影片和完整字幕源快照。失败409后重读，不改base重放旧ops。原VTT不改写，字幕按片段trim/at/speed自然跟随。
+
+界面入口选择句子/连续句，展示调整后的源/影片时间、来源及受影响片段；可预听原边界或跳区接缝。后者仅当前播放器近似预览，不是精确编码承诺。提交才删除声画/闭合空隙，成功进入现有一次撤销；CLI/MCP不伪称写进另一个客户端的内存撤销栈，需沿项目版本或显式反向操作恢复。目标、关联锁或受影响人工锁不能悄悄跳过。导演仍决定删保、气口和效果，自主场景不受固定业务流程约束。

@@ -73,28 +73,67 @@ async function cached(/** @type {string} */ root, /** @type {string} */ kind, /*
  * Length and picture size of a media file: `{ duration (s), width, height, fps, audio, codec, pixfmt }`; a still has no
  * duration. The size is the picture as it is shown: a video turned a quarter (a phone's portrait video) has its sides
  * swapped. `codec` and `pixfmt` are its picture's (proxies.mjs tells heavy footage by them).
- * @param {string} root @param {string} rel
+ * @param {string} root @param {string} rel @param {{ fresh?: boolean }} [options]
  */
-export async function probe(root, rel) {
+export async function probe(root, rel, options = {}) {
   const { abs, key } = await source(root, rel);
-  /* `.3`: since the size is as shown (an older answer has a turned video's sides as stored), with the codec */
-  const bytes = await cached(root, 'probe', `${key}.3.json`, async () => {
+  /* `.5` 把有效SAR纳入显示几何；旧缓存只有coded大小，不能当成方像素显示大小。 */
+  const read = async () => {
     const out = JSON.parse((await tool('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', abs])).toString());
-    const video = out.streams?.find((/** @type {{ codec_type: string }} */ s) => s.codec_type === 'video');
-    const audio = out.streams?.some((/** @type {{ codec_type: string }} */ s) => s.codec_type === 'audio');
-    const [n, d] = String(video?.avg_frame_rate ?? '0/1').split('/').map(Number);
-    const duration = Number(out.format?.duration);
-    const turn = Number(video?.side_data_list?.find((/** @type {{ rotation?: number }} */ s) => s.rotation != null)?.rotation ?? video?.tags?.rotate ?? 0);
-    const quarter = Math.abs(Math.round(turn / 90)) % 2 === 1;
-    return Buffer.from(JSON.stringify({
-      ...(Number.isFinite(duration) && duration > 0 && !/image|png|mjpeg/.test(String(out.format?.format_name)) ? { duration } : {}),
-      ...(video ? (quarter ? { width: video.height, height: video.width } : { width: video.width, height: video.height }) : {}),
-      ...(d && n ? { fps: Math.round((n / d) * 100) / 100 } : {}),
-      ...(video?.codec_name ? { codec: String(video.codec_name), pixfmt: String(video.pix_fmt ?? '') } : {}),
-      audio: Boolean(audio),
-    }));
-  });
+    return Buffer.from(JSON.stringify(factsOfProbe(out)));
+  };
+  const bytes = options.fresh ? await read() : await cached(root, 'probe', `${key}.5.json`, read);
   return JSON.parse(bytes.toString());
+}
+
+/** 仅投影媒体事实，不传播拍摄位置、任意标签或其他私有容器元数据。
+ * @param {any} out
+ */
+export function factsOfProbe(out) {
+  const video = out.streams?.find((/** @type {{ codec_type: string }} */ s) => s.codec_type === 'video');
+  const sound = out.streams?.find((/** @type {{ codec_type: string }} */ s) => s.codec_type === 'audio');
+  const [n, d] = String(video?.avg_frame_rate ?? '0/1').split('/').map(Number);
+  const duration = Number(out.format?.duration);
+  const turn = Number(video?.side_data_list?.find((/** @type {{ rotation?: number }} */ s) => s.rotation != null)?.rotation ?? video?.tags?.rotate ?? 0);
+  const rotationDegrees = Number.isFinite(turn) ? turn : 0;
+  const quarter = Math.abs(Math.round(rotationDegrees / 90)) % 2 === 1;
+  const ratio = /^(\d+):(\d+)$/.exec(String(video?.sample_aspect_ratio ?? ''));
+  const sarNum = Number(ratio?.[1]), sarDen = Number(ratio?.[2]);
+  const knownSar = Number.isFinite(sarNum) && Number.isFinite(sarDen) && sarNum > 0 && sarDen > 0;
+  /* 缺少/无效SAR时沿FFmpeg常规方像素缺省；事实仍为null，不能写成已报告1:1。 */
+  const displayWidth = Math.round(Number(video?.width) * (knownSar ? sarNum / sarDen : 1));
+  const displayHeight = Number(video?.height);
+  const transfer = typeof video?.color_transfer === 'string' ? video.color_transfer : null;
+  const dovi = video?.side_data_list?.find((/** @type {any} */ side) => side.side_data_type === 'DOVI configuration record');
+  /** 原始整数 ticks 与 time_base 一并保留；start_time 的小数打印可能已舍入。
+   * @param {any} stream
+   */
+  const start = (stream) => {
+    const ticks = stream?.start_pts;
+    const timeBase = typeof stream?.time_base === 'string' ? stream.time_base : null;
+    const [num, den] = String(timeBase ?? '').split('/').map(Number);
+    const exact = ticks !== undefined && /^-?\d+$/.test(String(ticks)) && num > 0 && den > 0 ? Number(ticks) * num / den : NaN;
+    const printed = stream?.start_time !== undefined ? Number(stream.start_time) : NaN;
+    return { seconds: Number.isFinite(exact) ? exact : Number.isFinite(printed) ? printed : null,
+      ticks: ticks !== undefined && /^-?\d+$/.test(String(ticks)) ? String(ticks) : null, timeBase };
+  };
+  const videoStart = start(video), audioStart = start(sound);
+  return {
+    ...(Number.isFinite(duration) && duration > 0 && !/image|png|mjpeg/.test(String(out.format?.format_name)) ? { duration } : {}),
+    ...(video ? { ...(quarter ? { width: displayHeight, height: displayWidth } : { width: displayWidth, height: displayHeight }),
+      codedWidth: video.width, codedHeight: video.height, rotationDegrees,
+      sampleAspectRatio: knownSar ? `${sarNum}:${sarDen}` : null,
+      displayGeometryBasis: knownSar ? 'reported-sample-aspect-ratio' : 'square-pixel-default',
+      color: { primaries: typeof video.color_primaries === 'string' ? video.color_primaries : null, transfer,
+        matrix: typeof video.color_space === 'string' ? video.color_space : null, range: typeof video.color_range === 'string' ? video.color_range : null,
+        hdrTransfer: transfer === 'arib-std-b67' ? 'hlg' : transfer === 'smpte2084' ? 'pq' : null },
+      dolbyVision: dovi ? { profile: Number.isFinite(Number(dovi.dv_profile)) ? Number(dovi.dv_profile) : null } : null,
+      videoStartSeconds: videoStart.seconds, videoStartPTS: videoStart.ticks, videoTimeBase: videoStart.timeBase } : {}),
+    ...(d && n ? { fps: Math.round((n / d) * 100) / 100 } : {}),
+    ...(video?.codec_name ? { codec: String(video.codec_name), pixfmt: String(video.pix_fmt ?? '') } : {}),
+    audio: Boolean(sound),
+    ...(sound ? { audioStartSeconds: audioStart.seconds, audioStartPTS: audioStart.ticks, audioTimeBase: audioStart.timeBase } : {}),
+  };
 }
 
 /** A video's poster: one frame a second in (or its first), 480 px wide, as JPEG. */

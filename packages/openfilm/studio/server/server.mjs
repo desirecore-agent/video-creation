@@ -49,6 +49,8 @@ import { FILM_FILE, clipKind, isPage } from '../../src/film-doc.mjs';
 import { listSkills, skillOrigins } from '../../src/skills.mjs';
 import { providersRoute } from './providers/index.mjs';
 import { captionRoutes } from './captions.mjs';
+import { prepareWorkingMedia } from './working-media.mjs';
+import { planSpeechCut } from './speech-cut.mjs';
 import { projectSettingsRoute } from './project-settings.mjs';
 import { markersRoute } from './markers.mjs';
 import { transitionPageRoutes } from './transition-pages.mjs';
@@ -495,6 +497,27 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
       res.writeHead(200, { 'content-type': 'image/png', 'content-length': data.length, 'cache-control': 'no-store', etag: `"sha256-${frame.sha256}"` });
       return res.end(data);
     }
+    // 工作媒体只准备本项目素材，不改时间线；客户端断开只取消本次转码。
+    if (rest === 'media/prepare' && req.method === 'POST') {
+      const body = await readJson(req);
+      const controller = new AbortController();
+      res.once('close', () => { if (!res.writableEnded) controller.abort(); });
+      try { return json(res, 200, await prepareWorkingMedia(project.path, body, { signal: controller.signal })); }
+      catch (error) {
+        if (controller.signal.aborted) return;
+        if (Number.isInteger(error.status) && error.status >= 400 && error.status < 600) throw new HttpError(error.status, error.message, { code: error.code });
+        throw error;
+      }
+    }
+    if (rest === 'speech-cut/plan' && req.method === 'POST') {
+      try { return json(res, 200, await planSpeechCut(project.path, await readJson(req), { duration: async (src) => isPage(src)
+        ? (await pageFacts(project.path, pages.folderUrl(project), src)).duration : (await probe(project.path, src)).duration })); }
+      catch (error) {
+        if (error instanceof EditError) throw new HttpError(error.kind === 'conflict' ? 409 : 422, error.message);
+        if (Number.isInteger(error.status) && error.status >= 400 && error.status < 600) throw new HttpError(error.status, error.message, { code: error.code });
+        throw error;
+      }
+    }
     /* ── subtitles: the film's lines, the person's subtitle style, translation (see captions.mjs) ── */
     if (await captionRoutes(req, res, project.path, rest, { translate: subtitleTranslator, transcribe: await subtitleTranscriber() })) return;
     /* ── end subtitles ── */
@@ -651,9 +674,9 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
       }
     }
     if (rest === 'edit' && req.method === 'POST') {
-      const { base = null, ops } = /** @type {{ base?: string | null, ops?: import('./film.mjs').Op[] }} */ (await readJson(req));
+      const { base = null, ops, preconditions } = /** @type {{ base?: string | null, ops?: import('./film.mjs').Op[], preconditions?: import('./speech-cut-types.mjs').EditPreconditions }} */ (await readJson(req));
       try {
-        return json(res, 200, await editProjectFilm(project.path, base, ops ?? []));
+        return json(res, 200, await editProjectFilm(project.path, base, ops ?? [], preconditions));
       } catch (e) {
         if (!(e instanceof EditError)) throw e;
         /* the person's view is out of date or the edit cannot be: send the film as it is now with the reason */

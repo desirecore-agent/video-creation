@@ -5,6 +5,7 @@ import type { ReviewRecord, ReviewSummary, ReviewTarget } from '@/lib/reviews';
  */
 import type { MotionChange, MotionInstance, MotionManifest } from '@/lib/motion-editor';
 import type { ExportJob } from '@/lib/export-jobs';
+import type { EditPreconditions, SpeechCutPlan, SpeechCutRequest } from '@/lib/speech-cut';
 import { watchStudioVersion } from '@/lib/studio-version';
 
 /** `working`: an agent of the app's chat is working in it right now (it cannot be deleted meanwhile). */
@@ -125,7 +126,8 @@ export const api = {
   reviewTarget: (id: string, review: string, kind: string, index: number, verify = false) => call<ReviewTarget>(`${p(id)}/reviews/${encodeURIComponent(review)}/target?kind=${encodeURIComponent(kind)}&index=${index}&verify=${verify ? 1 : 0}`),
   /** the person opened it here: the one `openfilm open` alone comes back to */
   opened: (id: string) => call<{ project: Project }>(`${p(id)}/opened`, { method: 'POST' }),
-  edit: (id: string, base: string | null, ops: Op[]) => call<{ text: string; rev: string; value: Film; doc: Film; rebased: boolean }>(`${p(id)}/edit`, { method: 'POST', json: { base, ops } }),
+  edit: (id: string, base: string | null, ops: Op[], preconditions?: EditPreconditions) => call<{ text: string; rev: string; value: Film; doc: Film; rebased: boolean }>(`${p(id)}/edit`, { method: 'POST', json: { base, ops, ...(preconditions ? { preconditions } : {}) } }),
+  speechCutPlan: (id: string, ask: SpeechCutRequest) => call<SpeechCutPlan>(`${p(id)}/speech-cut/plan`, { method: 'POST', json: ask }),
   motionCatalog: (id: string) => call<MotionCatalog>(`${p(id)}/motion/catalog`),
   takeMotion: (id: string, base: string, component: string) => call<{ rev: string; clip: Clip; component: string }>(`${p(id)}/motion/take`, { method: 'POST', json: { base, component } }),
   files: (id: string) => call<Listing>(`${p(id)}/files`),

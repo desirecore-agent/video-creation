@@ -58,6 +58,13 @@ export async function projectClient(config, folder, options) {
   const base = `/api/projects/${encodeURIComponent(project.id)}`;
   return { ...studio, project, base,
     inspect: () => studio.call(base),
+    captions: () => studio.call(`${base}/captions`),
+    prepareMedia: (ask) => studio.call(`${base}/media/prepare`, ask, 'POST', { timeoutMs: 2 * 60 * 60_000 }),
+    speechCutPlan: (ask) => studio.call(`${base}/speech-cut/plan`, ask),
+    applySpeechCut: (plan) => {
+      if (!plan || plan.preconditions?.strictBase !== true || !Array.isArray(plan.preconditions.subtitles) || !plan.preconditions.subtitles.length) throw new Error('文稿剪辑必须携带原计划的影片与字幕前置版本；请先重新规划切口。');
+      return studio.call(`${base}/edit`, { base: plan.base, ops: plan.ops, preconditions: plan.preconditions });
+    },
     mediaCatalog: (verb) => studio.call(`/api/get${verb ? `?verb=${encodeURIComponent(verb)}` : ''}`),
     getMedia: async (verb, args, { via, model } = {}) => {
       try {
@@ -73,10 +80,10 @@ export async function projectClient(config, folder, options) {
     motionInstall: (revision) => studio.call(`${base}/motion/sdk`, { base: revision }),
     motionTake: (revision, component) => studio.call(`${base}/motion/take`, { base: revision, component }),
     motionPatch: (revision, clip, changes) => studio.call(`${base}/motion`, { base: revision, clip, changes }, 'PATCH'),
-    patch: (revision, ops) => {
+    patch: (revision, ops, preconditions) => {
       if (typeof revision !== 'string' || !/^[a-f0-9]{16}$/.test(revision)) throw new Error('patch 必须携带 inspect 返回的真实 revision。');
       if (!Array.isArray(ops) || !ops.length || ops.length > 1000) throw new Error('patch 需要 1 到 1000 项明确操作。');
-      return studio.call(`${base}/edit`, { base: revision, ops });
+      return studio.call(`${base}/edit`, { base: revision, ops, ...(preconditions ? { preconditions } : {}) });
     },
     sceneRead: (ask) => studio.call(`${base}/scene/read`, ask),
     sceneRevise: async (ask) => {

@@ -8,6 +8,8 @@ import { reviewRequestSchema } from '../packages/openfilm/studio/server/reviews.
 import { SCENE_READ_SCHEMA, SCENE_REVISE_SCHEMA, projectSceneSourceErrorReceipt } from '../packages/openfilm/studio/server/scene-source.mjs';
 import { timelineOpsSchema } from '../packages/openfilm/studio/server/op-schema.mjs';
 import { motionChangesSchema } from '../packages/openfilm/studio/server/motion-edits.mjs';
+import { workingMediaRequestSchema } from '../packages/openfilm/studio/server/working-media.mjs';
+import { speechCutRequestSchema, speechCutApplySchema } from '../packages/openfilm/studio/server/speech-cut.mjs';
 
 const packageVersion = JSON.parse(readFileSync(new URL('../packages/openfilm/package.json', import.meta.url), 'utf8')).version;
 
@@ -15,6 +17,10 @@ const revision = { type: 'string', pattern: '^[a-f0-9]{16}$', description: 'insp
 const jobId = { type: 'string', pattern: '^[a-f0-9]{12}$', description: '此项目的真实导出记录 ID。' };
 export const tools = [
   { name: 'video_inspect', description: '读取绑定影片的项目路径、revision、时间线和检查问题。', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'video_captions', description: '读取所见字幕句、clip、源时间、line/part与sourceRevision；不猜测转写词时间真值。', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'video_prepare_media', description: '将本项目整源媒体准备为可追溯的SDR工作副本，保留源时钟与原声关系；不自动修改影片、不调用模型服务。', inputSchema: workingMediaRequestSchema },
+  { name: 'video_speech_cut_plan', description: '基于实际字幕和影片版本规划整句/连续句的声画删除，返回切口、影响范围与条件编辑；不提交、不机械删除停顿。先预听并确认内容取舍。', inputSchema: speechCutRequestSchema },
+  { name: 'video_speech_cut_apply', description: '提交已预览剪辑提案中的base/ops/preconditions，严格核影片和字幕源版本；过期返回冲突，不把旧计划重放到新内容。', inputSchema: speechCutApplySchema },
   { name: 'video_motion_catalog', description: '发现当前项目和固定应用材料中的可编辑动效构件，读取真实参数 Schema；不要求字幕或口播。', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'video_motion_inspect', description: '读取页面片段的动效参数、属性轨、事件、人工锁与场景契约，以及真实影片 revision；自由场景仍可不声明 manifest。', inputSchema: { type: 'object', properties: { clip: { type: 'string', minLength: 1, maxLength: 200, description: '可选真实片段 ID；不提供时读取全部页面片段。' } }, additionalProperties: false } },
   { name: 'video_motion_install', description: '将本应用固定 MIT 动效 SDK 复制为项目本地可复现依赖；不联网，不覆盖已有不同版本。', inputSchema: { type: 'object', required: ['base'], properties: { base: revision }, additionalProperties: false } },
@@ -43,6 +49,10 @@ export async function callTool(config, folder, name, args = {}) {
     return summary;
   }
   if (name === 'video_motion_catalog') return client.motionCatalog();
+  if (name === 'video_captions') return client.captions();
+  if (name === 'video_prepare_media') return client.prepareMedia(args);
+  if (name === 'video_speech_cut_plan') return client.speechCutPlan(args);
+  if (name === 'video_speech_cut_apply') return client.applySpeechCut(args);
   if (name === 'video_motion_inspect') return client.motionInspect(args.clip);
   if (name === 'video_motion_install') return client.motionInstall(args.base);
   if (name === 'video_motion_take') return client.motionTake(args.base, args.component);

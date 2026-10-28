@@ -14,9 +14,10 @@
  * Fixed width (`00:` even under an hour): a timecode is read while it changes, and a changing width makes it jitter.
  */
 import { useSyncExternalStore } from 'react';
+import { DEFAULT_DISPLAY_FPS } from './timeline-constants.ts';
 
 /** The frame rate before a project says otherwise, and the grid the ruler's steps are counted in. */
-export const DISPLAY_FPS = 30;
+export const DISPLAY_FPS = DEFAULT_DISPLAY_FPS;
 
 /**
  * The rates a project can be set to and a video exported at, as editors name them: Premiere's and DaVinci Resolve's
