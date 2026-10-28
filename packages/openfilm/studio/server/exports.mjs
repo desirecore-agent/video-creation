@@ -532,7 +532,10 @@ async function burnFilm(root, stage, frame, fill, cues, style, transparent = fal
   const box = frameBox(stage, frame, fill);
   const dir = join(root, '.film', 'cache', 'export', `burn-${randomBytes(4).toString('hex')}`);
   await mkdir(dir, { recursive: true });
-  await copyFile(fileURLToPath(new URL('./film-subtitle.mjs', import.meta.url)), join(dir, 'film-subtitle.mjs'));
+  /* 缓存页面离开服务端源码目录运行，必须带齐共享字幕模块的静态依赖。 */
+  for (const file of ['film-subtitle.mjs', 'subtitle-emphasis.mjs']) {
+    await copyFile(fileURLToPath(new URL(`./${file}`, import.meta.url)), join(dir, file));
+  }
   const entry = existsSync(join(root, FILM_FILE)) ? `/${FILM_FILE}` : '/index.html';
   const x = (box.w - stage.w * box.scale) / 2, y = (box.h - stage.h * box.scale) / 2;
   const json = (/** @type {unknown} */ v) => JSON.stringify(v).replace(/</g, '\\u003c');

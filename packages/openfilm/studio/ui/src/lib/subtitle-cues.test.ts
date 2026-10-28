@@ -123,3 +123,22 @@ test('manual text and time edits invalidate measured provenance while no-ops pre
   assert.equal(moved.alignment, undefined);
   assert.deepEqual(retimeSource([measured], 0, measured.startMs, measured.endMs), [measured]);
 });
+
+test('语义范围随来源拆分裁切、合并右移，改字清除，改时保留', () => {
+  const marked: SourceCue = { ...SOURCE[0]!, emphasis: [{ from: 4, to: 13 }] };
+  const [left, right] = splitSource([marked], 0, 500);
+  assert.deepEqual(left!.emphasis, [{ from: 4, to: 7 }]);
+  assert.deepEqual(right!.emphasis, [{ from: 0, to: 5 }]);
+  assert.deepEqual(left!.marks, [{ index: 0, startMs: 0 }, { index: 4, startMs: 300 }]);
+  assert.deepEqual(right!.marks, [{ index: 0, startMs: 600 }]);
+  const [merged] = mergeSource([left!, right!], 0);
+  assert.equal(merged!.text, marked.text);
+  assert.deepEqual(merged!.emphasis, [{ from: 4, to: 7 }, { from: 8, to: 13 }]);
+  assert.deepEqual(textSource([marked], 0, marked.text), [marked]);
+  assert.equal(textSource([marked], 0, 'New words')[0]!.emphasis, undefined);
+  assert.deepEqual(retimeSource([marked], 0, 100, 1100)[0]!.emphasis, marked.emphasis);
+  const [emoji] = mergeSource([{ startMs: 0, endMs: 500, text: '😀', emphasis: [{ from: 0, to: 2 }] },
+    { startMs: 500, endMs: 1000, text: 'a', emphasis: [{ from: 0, to: 1 }] }], 0);
+  assert.equal(emoji!.text, '😀 a');
+  assert.deepEqual(emoji!.emphasis, [{ from: 0, to: 2 }, { from: 3, to: 4 }]);
+});

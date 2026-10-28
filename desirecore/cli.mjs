@@ -16,6 +16,7 @@ import { normalizeVideoExportOptions } from '../packages/openfilm/studio/server/
 import { reviewLocalOptionsOf, reviewCopyRoot, copyReviewImages } from './review-local.mjs';
 import { workingMediaRequestSchema } from '../packages/openfilm/studio/server/working-media.mjs';
 import { speechCutContract } from '../packages/openfilm/studio/server/speech-cut.mjs';
+import { CAPTION_SOURCE_READ_SCHEMA, CAPTION_SOURCE_SAVE_SCHEMA } from '../packages/openfilm/studio/server/subtitle-edits.mjs';
 
 export const HELP = `视频创作 — 本地影片编辑与视频导演协作
 
@@ -24,6 +25,9 @@ node desirecore/cli.mjs <命令> [项目目录] [选项]
   setup-runtime                                    准备本机 FFmpeg 与 Chromium
   inspect <项目>                                    读取影片、片段和真实 revision
   captions <项目>                                   读取真实字幕句、源时间与字幕版本
+  captions-source <项目> <素材相对路径>               读取完整源字幕及原文件 snapshot
+  captions-save <项目> --args <JSON文件>              用原 snapshot 作为 from 保存完整源字幕/局部强调
+  captions-source --schema | captions-save --schema  离线读取源字幕参数合同
   prepare-media <项目> --args <JSON文件>             准备整源 SDR 工作媒体与来源回执，不自动换片段
   prepare-media --schema                            离线读取工作媒体参数合同
   speech-cut <项目> --args <JSON文件>                按所见影片/字幕规划选句声画删除，不提交
@@ -195,6 +199,7 @@ export async function command(args, output = (value) => process.stdout.write(`${
   if (name === 'patch' && values.schema) return output(timelineOpsSchema);
   if (name === 'prepare-media' && values.schema) return output({ contractVersion: 1, requestSchema: workingMediaRequestSchema });
   if (['speech-cut', 'speech-cut-apply'].includes(name) && values.schema) return output(speechCutContract());
+  if (['captions-source', 'captions-save'].includes(name) && values.schema) return output(name === 'captions-source' ? CAPTION_SOURCE_READ_SCHEMA : CAPTION_SOURCE_SAVE_SCHEMA);
   if (name === 'patch' && values.help) {
     process.stdout.write('patch <项目> --base <inspect真实revision> --ops <JSON数组文件>\n先运行 patch --schema 离线读取完整 Op/字段与例子，无需项目、服务或 home。只换 src 使用 set/clip/field/value；保留其他人工字段，原 #t 范围按 inspect 确认。\n');
     return;
@@ -210,15 +215,16 @@ export async function command(args, output = (value) => process.stdout.write(`${
     if (!values.project && !folder) throw new Error('MCP 必须绑定明确的 --project。');
     return (await import('./mcp.mjs')).serveMcp(config, resolve(values.project ?? folder));
   }
-  if (!['inspect', 'captions', 'prepare-media', 'speech-cut', 'speech-cut-apply', 'patch', 'check', 'review', 'scene-read', 'scene-revise', 'get', 'render', 'jobs', 'retry', 'cancel', 'motion-catalog', 'motion-inspect', 'motion-install', 'motion-take', 'motion-patch'].includes(name)) throw new Error(`未知命令：${name}；运行 --help 查看用法。`);
+  if (!['inspect', 'captions', 'captions-source', 'captions-save', 'prepare-media', 'speech-cut', 'speech-cut-apply', 'patch', 'check', 'review', 'scene-read', 'scene-revise', 'get', 'render', 'jobs', 'retry', 'cancel', 'motion-catalog', 'motion-inspect', 'motion-install', 'motion-take', 'motion-patch'].includes(name)) throw new Error(`未知命令：${name}；运行 --help 查看用法。`);
   const client = await projectClient(config, folder);
   if (name === 'inspect') return output(await client.inspect());
   if (name === 'captions') return output(await client.captions());
-  if (['prepare-media', 'speech-cut', 'speech-cut-apply'].includes(name)) {
+  if (name === 'captions-source') return output(await client.captionSource(target));
+  if (['prepare-media', 'speech-cut', 'speech-cut-apply', 'captions-save'].includes(name)) {
     if (!values.args) throw new Error(`${name} 需要 --args JSON 文件；先运行 ${name} --schema。`);
     const ask = JSON.parse(readFileSync(resolve(values.args), 'utf8'));
     if (!ask || typeof ask !== 'object' || Array.isArray(ask)) throw new Error(`${name} --args 必须是 JSON 对象。`);
-    return output(await (name === 'prepare-media' ? client.prepareMedia(ask) : name === 'speech-cut' ? client.speechCutPlan(ask) : client.applySpeechCut(ask)));
+    return output(await (name === 'prepare-media' ? client.prepareMedia(ask) : name === 'speech-cut' ? client.speechCutPlan(ask) : name === 'captions-save' ? client.saveCaptionSource(ask) : client.applySpeechCut(ask)));
   }
   if (name === 'scene-read') {
     if (!target) throw new Error('scene-read 需要 inspect 中真实的片段 ID。');

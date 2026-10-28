@@ -583,6 +583,23 @@ test('burned-in subtitles: drawn over the frame, bars included; a subtitle file 
   assert.match(readFileSync(video.outputs[1], 'utf8'), /^WEBVTT\n\n00:00:00\.000 --> 00:00:00\.800\n<v Ann>Hello there\n\n00:00:00\.800 --> 00:00:01\.000\nAnd welcome\n$/);
   assert.equal(frameCount(video.out), 5);
   assert.deepEqual(existsSync(join(root, '.film', 'cache', 'export')) ? readdirSync(join(root, '.film', 'cache', 'export')) : [], [], 'the page drawing them is gone');
+  /* 实际缓存 wrapper 必须能加载强调 helper，并在同一帧保留普通白字与局部黄色重点。 */
+  const emphasisExports = createExports({ captions: async () => ({
+    cues: [{ startMs: 0, durMs: 1000, text: 'Normal focus', emphasis: [{ from: 7, to: 12 }] }],
+    style: parseFilmSubtitleStyle(null),
+  }) });
+  const emphasized = await ended(emphasisExports, emphasisExports.start(project('Emphasis'), { kind: 'poster', at: 0.25, shortEdge: 360, burnSubtitles: true }));
+  assert.equal(emphasized.status, 'done', emphasized.error);
+  assert.ok(bright(emphasized.out) > 20, '未标记文字仍是普通白字');
+  const [w, h] = probe(emphasized.out, 'stream=width,height').split(',').map(Number);
+  const rgb = execFileSync('ffmpeg', ['-v', 'error', '-i', emphasized.out, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
+  let yellow = 0;
+  for (let y = Math.floor(h * 0.85); y < h; y++) for (let x = 0; x < w; x++) {
+    const [r, g, b] = rgb.subarray((y * w + x) * 3, (y * w + x) * 3 + 3);
+    if (r > 200 && g > 160 && b < 80) yellow++;
+  }
+  assert.ok(yellow > 10, '缓存模块闭包实际绘出局部强调色');
+  assert.deepEqual(existsSync(join(root, '.film', 'cache', 'export')) ? readdirSync(join(root, '.film', 'cache', 'export')) : [], [], '带 helper 的缓存同样清理');
 });
 
 test('a zip of many files, readable', async () => {

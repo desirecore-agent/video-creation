@@ -30,6 +30,7 @@ import { filmSubtitleLanguageOf, filmSubtitleLanguagesIn, isFilmSubtitleLanguage
 import { writeAtomic } from './atomic.mjs';
 import { inProject } from './files.mjs';
 import { alignTranslation, segmentLine, subtitleEnd } from './subtitle-segments.mjs';
+import { normalizeEmphasis, sliceEmphasis } from './subtitle-emphasis.mjs';
 import { readTranscript, transcriptIsCurrent, transcriptPath, translationsOf, writeTranscript } from './transcripts.mjs';
 import { assertSourceSnapshot, readSourceSnapshot, sourceSnapshotRevision, subtitleEditRoutes, writeSubtitleLine } from './subtitle-edits.mjs';
 
@@ -79,30 +80,78 @@ const HALF_PUNCT = /(?<=[\u3400-\u9fff])\s*([,;:?!])(?=\s*(?:[\u3400-\u9fff\u201
 /** @type {Record<string, string>} */
 const FULL_PUNCT = { ',': '\uff0c', ';': '\uff1b', ':': '\uff1a', '?': '\uff1f', '!': '\uff01' };
 
+/** @typedef {{ text: string, emphasis?: import('./subtitle-emphasis.mjs').SubtitleEmphasis[] }} EmphasizedText */
+
+/** 字幕清理每次只保留明确的原字符片段；不靠重复文本搜索重新猜测强调位置。
+ * @param {EmphasizedText} value @param {RegExp} pattern
+ * @param {(match: RegExpMatchArray) => { text: string, from?: number }} replacement @returns {EmphasizedText} */
+function rewriteCaption(value, pattern, replacement) {
+  let text = '', from = 0;
+  /** @type {import('./subtitle-emphasis.mjs').SubtitleEmphasis[]} */
+  const emphasis = [];
+  const append = (/** @type {number} */ a, /** @type {number} */ b, /** @type {string} */ shown = value.text.slice(a, b)) => {
+    const offset = text.length;
+    emphasis.push(...sliceEmphasis(value.emphasis, a, b).map((r) => ({ from: offset + r.from, to: offset + r.to })));
+    text += shown;
+  };
+  for (const match of value.text.matchAll(new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`))) {
+    const index = match.index ?? 0;
+    append(from, index);
+    const changed = replacement(match), begin = index + (changed.from ?? 0);
+    append(begin, begin + changed.text.length, changed.text);
+    from = index + match[0].length;
+  }
+  append(from, value.text.length);
+  const ranges = normalizeEmphasis(text, emphasis);
+  return { text, ...(ranges.length ? { emphasis: ranges } : {}) };
+}
+
+/** @param {EmphasizedText} value @param {number} from @param {number} to @returns {EmphasizedText} */
+function captionSlice(value, from, to) {
+  const emphasis = sliceEmphasis(value.emphasis, from, to);
+  return { text: value.text.slice(from, to), ...(emphasis.length ? { emphasis } : {}) };
+}
+
+/** @param {EmphasizedText} value @returns {EmphasizedText} */
+function printedCaption(value) {
+  let out = rewriteCaption(value, FALSE_START, (m) => ({ text: String(m[3]).toLowerCase().startsWith(String(m[2]).toLowerCase()) ? m[1] : m[0] }));
+  out = rewriteCaption(out, HALF_PUNCT, (m) => ({ text: FULL_PUNCT[m[1]] ?? m[1], from: m[0].length - m[1].length }));
+  out = rewriteCaption(out, FILLER, (m) => ({ text: m[1] }));
+  out = rewriteCaption(out, /\s+(?:\.{2,}|…+)\s*$/u, () => ({ text: '' }));
+  out = rewriteCaption(out, /\s{2,}/g, () => ({ text: ' ' }));
+  out = rewriteCaption(out, LEAD_PUNCT, () => ({ text: '' }));
+  out = captionSlice(out, 0, subtitleEnd(out.text).length);
+  const from = out.text.length - out.text.trimStart().length;
+  out = captionSlice(out, from, out.text.trimEnd().length);
+  return /[\p{L}\p{N}]/u.test(out.text) ? out : { text: '' };
+}
+
 /**
  * A subtitle as it is printed: no fillers, no false starts, no punctuation it starts with, and its end set by the
  * convention of its script (subtitleEnd: Chinese drops a trailing ，。, Latin keeps its own); '' when nothing is left.
  * @param {string} t
  */
 export function captionText(t) {
-  const out = subtitleEnd(t.replace(FALSE_START, (all, lead, stub, next) => (String(next).toLowerCase().startsWith(String(stub).toLowerCase()) ? lead : all))
-    .replace(HALF_PUNCT, (_all, mark) => FULL_PUNCT[mark] ?? mark)
-    .replace(FILLER, '$1').replace(/\s+(?:\.{2,}|…+)\s*$/u, '').replace(/\s{2,}/g, ' ').replace(LEAD_PUNCT, '')).trim();
-  return /[\p{L}\p{N}]/u.test(out) ? out : '';
+  return printedCaption({ text: t }).text;
 }
 
 /** The part of a line whose words start inside [fromMs, untilMs) (source ms). @param {SpokenLine} line @param {number} fromMs @param {number} untilMs */
 export function trimToWindow(line, fromMs, untilMs) {
+  return trimmedCaption(line, fromMs, untilMs).text;
+}
+
+/** @param {SpokenLine} line @param {number} fromMs @param {number} untilMs @returns {EmphasizedText} */
+function trimmedCaption(line, fromMs, untilMs) {
   const marks = line.marks;
-  if (!marks?.length || (line.startMs >= fromMs - SLACK_MS && line.endMs <= untilMs + SLACK_MS)) return line.text;
+  if (!marks?.length || (line.startMs >= fromMs - SLACK_MS && line.endMs <= untilMs + SLACK_MS)) return line;
   const first = marks.findIndex((m) => m.startMs >= fromMs - SLACK_MS);
-  if (first < 0) return '';
+  if (first < 0) return { text: '' };
   let last = marks.length - 1;
   while (last >= first && marks[last].startMs >= untilMs - SLACK_MS) last -= 1;
-  if (last < first) return '';
+  if (last < first) return { text: '' };
   const begin = first === 0 ? 0 : marks[first].index;
   const end = last === marks.length - 1 ? line.text.length : marks[last + 1].index;
-  return line.text.slice(begin, end).replace(EDGE_PUNCT, '');
+  return rewriteCaption(captionSlice(line, begin, end), EDGE_PUNCT, () => ({ text: '' }));
 }
 
 /** Translations of a source's lines, by the line's start (source ms): language → text. @typedef {Map<number, Record<string, string>>} AltLines */
@@ -110,6 +159,7 @@ export function trimToWindow(line, fromMs, untilMs) {
 /** A line as one subtitle piece (segmentLine's shape). @param {SpokenLine} line */
 export const wholeLine = (line) => ({
   text: line.text, startMs: line.startMs, endMs: line.endMs, ...(line.marks?.length ? { marks: [...line.marks] } : {}),
+  ...(line.emphasis?.length ? { emphasis: [...line.emphasis] } : {}),
   ...(line.timing ? { timing: line.timing } : {}), ...(line.alignment ? { alignment: line.alignment } : {}), part: 0, from: 0, to: line.text.length,
 });
 
@@ -142,7 +192,7 @@ export function clipCues(lines, span, extra = {}) {
       const mine = piece.marks?.length
         ? piece.marks.some((m) => m.startMs >= span.fromMs - SLACK_MS && m.startMs < until - SLACK_MS)
         : (piece.startMs + piece.endMs) / 2 >= span.fromMs && (piece.startMs + piece.endMs) / 2 < until;
-      const said = captionText(trimToWindow(piece, span.fromMs, until));
+      const printed = printedCaption(trimmedCaption(piece, span.fromMs, until)), said = printed.text;
       /* what a trim leaves of a piece can be a scrap; a piece itself is as long as segmentLine made it */
       const cut = from > piece.startMs || to < piece.endMs;
       if (!mine || !said || to <= from || (cut && (to - from) / speed < MIN_CAPTION_MS)) continue;
@@ -161,6 +211,7 @@ export function clipCues(lines, span, extra = {}) {
         startMs: film(from),
         durMs: Math.round((to - from) / speed),
         text: said,
+        ...(printed.emphasis?.length ? { emphasis: printed.emphasis } : {}),
         ...(piece.timing ? { timing: piece.timing } : {}), ...(piece.alignment ? { alignment: piece.alignment } : {}),
         ...(words.length > 1 ? { words } : {}),
         ...(extra.speaker ? { speaker: extra.speaker } : {}),

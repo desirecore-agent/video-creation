@@ -190,3 +190,9 @@ node desirecore/cli.mjs review <项目> --source review-pair --before-review <�
 字幕面板的“精剪这句”可选择同片段的连续句、微调气口并预听边界或跳区接缝，随后明确删除声画并闭合空隙，一次撤销。试听是当前播放器预览，最终切口仍需实际编码听看。删除字幕原文仍仅修改字幕。导演使用 `captions` 读取真实句标识和源版本，`speech-cut` 生成提案，`speech-cut-apply` 以提案原影片/字幕版本提交；过期提案冲突后重读，不把旧操作贴到新内容。原 VTT 不因剪片重写；相关锁保持，不能借删段绕过人工锁。
 
 `pnpm test:speech-edit` 只运行指定的工作媒体、时间线和公共传输回归，默认 CI 同时执行；真实手机素材、切口自然度及最终效果另外验证。
+
+## 字幕局部强调
+
+字幕可用 `emphasis:[{from,to}]` 标记当句纯文本的少量重点，索引是 UTF-16 半开范围。标准 VTT 的 `<b>` / `<c.emphasis>` 读为同一强调，写回规范为 `<c.emphasis>`；文字、词时间与时间来源保持。预览和烧录共用分段/样式；拆分、合并及裁剪同步映射范围，改字清除失效标记，译文不套用原文范围。VTT旁文件保留强调与词时间，SRT降级纯文本。它独立于逐词跟读karaoke，不自动决定关键词。
+
+导演可用 `captions-source <项目> <素材相对路径>` 读完整源字幕与snapshot，`captions-save <项目> --args <JSON文件>` 以 `{src,cues,from:原snapshot}` 条件保存；必须保留其余源句与词时间，过期409后重读合并，不能替旧稿换新from。两入口 `--schema` 可离线发现合同。强调外观沿 `.film/subtitles.json` 的可选 `emphasis:{color,weight}`；缺失用默认暖黄/粗体，null关闭强调外观。场景边距、构图和重点选择仍由导演自主判断，并在最终编码和实际观看尺寸检查。

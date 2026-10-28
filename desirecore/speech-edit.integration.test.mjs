@@ -133,6 +133,43 @@ test('口播工作媒体与文稿精剪的真实HTTP、CLI、stdio传输及条�
       assert.deepEqual(toolData(replies[1]).cues, captions.cues);
     });
 
+    await t.test('源字幕强调经真实CLI和stdio条件保存，保留原词时间并拒绝过期或越界范围', async () => {
+      await reset();
+      const filmBefore = await fs.readFile(filmPath, 'utf8');
+      const read = await runCli(['captions-source', project, 'assets/source.mp4']);
+      assert.equal(read.code, 0, read.stderr);
+      const before = JSON.parse(read.stdout);
+      assert.equal(before.cues.length, 2);
+      assert.equal((await fetch(route('captions/source?src=assets/source.mp4'))).status, 401);
+      const changed = before.cues.map((cue, i) => ({ ...cue, ...(i === 0 ? { emphasis: [{ from: 0, to: 2 }] } : {}) }));
+      const args = await jsonArgs('源字幕强调.json', { src: before.src, cues: changed, from: before.snapshot });
+      const saved = await runCli(['captions-save', project, '--args', args]);
+      assert.equal(saved.code, 0, saved.stderr);
+      const replies = await runMcp([message('video_captions_source', { src: before.src }, '强调源')]);
+      const after = toolData(replies[0]);
+      assert.deepEqual(after.cues[0].emphasis, [{ from: 0, to: 2 }]);
+      assert.deepEqual(after.cues.map(({ emphasis, ...cue }) => cue), before.cues);
+      assert.match(await fs.readFile(vttPath, 'utf8'), /<c\.emphasis>/);
+      const preserved = await fs.readFile(vttPath, 'utf8');
+      const stale = await runMcp([message('video_captions_save', { src: before.src, cues: changed, from: before.snapshot }, '旧强调')]);
+      assert.equal(stale[0].result.isError, true);
+      assert.equal(toolData(stale[0]).status, 409);
+      assert.equal(await fs.readFile(vttPath, 'utf8'), preserved);
+      const invalid = await fetch(route('captions/source'), { method: 'PUT', headers, body: JSON.stringify({ src: after.src, from: after.snapshot, cues: after.cues.map((cue, i) => i === 0 ? { ...cue, emphasis: [{ from: 0, to: 999 }] } : cue) }) });
+      assert.equal(invalid.status, 400);
+      const noSnapshot = await fetch(route('captions/source'), { method: 'PUT', headers, body: JSON.stringify({ src: after.src, cues: after.cues }) });
+      assert.equal(noSnapshot.status, 428);
+      assert.equal(await fs.readFile(vttPath, 'utf8'), preserved);
+      assert.equal(await fs.readFile(filmPath, 'utf8'), filmBefore);
+      assert.equal(digest(await fs.readFile(source)), sourceSha);
+      for (const name of ['captions-source', 'captions-save']) {
+        const schema = await runCli([name, '--schema']);
+        assert.equal(schema.code, 0, schema.stderr);
+        assert.equal(JSON.parse(schema.stdout).$schema, 'http://json-schema.org/draft-07/schema#');
+      }
+      await reset();
+    });
+
     await t.test('HTTP提案不写影片，CLI提交原计划一次联动精剪声画且原字幕不变', async () => {
       await reset();
       const before = await fs.readFile(filmPath, 'utf8');

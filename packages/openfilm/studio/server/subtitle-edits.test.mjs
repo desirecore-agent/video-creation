@@ -4,9 +4,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { Ajv } from 'ajv';
 import { captionRoutes, filmCaptions } from './captions.mjs';
 import { HttpError, json } from './http.mjs';
-import { cleanCues, readSourceSnapshot, restoreSourceFiles, sourceSnapshotRevision, sourceSubtitles, writeSourceSubtitles } from './subtitle-edits.mjs';
+import { CAPTION_SOURCE_READ_SCHEMA, CAPTION_SOURCE_SAVE_SCHEMA, cleanCues, readSourceSnapshot, restoreSourceFiles, sourceSnapshotRevision, sourceSubtitles, writeSourceSubtitles } from './subtitle-edits.mjs';
 import { CUT_NOTE, readTranscript, vttOf } from './transcripts.mjs';
 import { filmHtml } from '../../src/film-doc.mjs';
 
@@ -205,4 +206,69 @@ test('字幕保存保留未改实测来源，改字或改时不能继续冒称�
   assert.equal(edited.timing, 'edited');
   assert.equal(edited.alignment, undefined);
   assert.equal((await readTranscript(root, 'assets/vo.mp3', 'fr')).lines[0].timing, 'estimated');
+});
+
+test('源字幕合同公开完整字段与所读快照，强调范围结构由同源 Draft-07 校验', () => {
+  const ajv = new Ajv({ allErrors: true });
+  const read = ajv.compile(CAPTION_SOURCE_READ_SCHEMA), save = ajv.compile(CAPTION_SOURCE_SAVE_SCHEMA);
+  assert.equal(read({ src: 'assets/vo.mp3' }), true);
+  const body = { src: 'assets/vo.mp3', cues: [{ startMs: 0, endMs: 1000, text: '😀word', marks: [{ index: 0, startMs: 0 }],
+    emphasis: [{ from: 0, to: 2 }], line: 0, part: 0, timing: 'measured', alignment: { matchedWords: 1, totalWords: 1 }, alt: { fr: 'mot' } }],
+  from: { files: { 'assets/vo.vtt': null } } };
+  assert.equal(save(body), true);
+  assert.equal(save({ ...body, from: undefined }), false);
+  assert.equal(save({ ...body, cues: [{ ...body.cues[0], emphasis: [{ from: 0, to: 2, css: 'color:red' }] }] }), false);
+  assert.equal(save({ ...body, cues: [{ ...body.cues[0], emphasis: [{ from: 0.5, to: 2 }] }] }), false);
+  assert.ok(CAPTION_SOURCE_SAVE_SCHEMA.properties.cues.items.properties.emphasis.description.includes('UTF-16'));
+});
+
+test('源强调范围随空白规范化投影，越界、倒序、额外字段与代理断裂全部拒绝', () => {
+  const cue = { startMs: 0, endMs: 1000, text: '  A  😀  B ', emphasis: [{ from: 5, to: 10 }] };
+  const before = structuredClone(cue);
+  assert.deepEqual(cleanCues([cue]), [{ startMs: 0, endMs: 1000, text: 'A 😀 B', emphasis: [{ from: 2, to: 6 }] }]);
+  assert.deepEqual(cue, before);
+  for (const emphasis of [null, {}, [{ from: -1, to: 2 }], [{ from: 1, to: 1 }], [{ from: 3, to: 2 }],
+    [{ from: 0, to: 5 }], [{ from: 0.1, to: 2 }], [{ from: '0', to: 2 }], [{ from: 1, to: 2 }], [{ from: 0, to: 2, class: 'emphasis' }]]) {
+    assert.throws(() => cleanCues([{ startMs: 0, endMs: 1000, text: '😀ab', emphasis }]), (e) => e.status === 400, JSON.stringify(emphasis));
+  }
+});
+
+test('只改强调保留实测正文与词时间，缺快照和旧快照仍拒绝且可逐字节撤销', async () => {
+  const line = { text: 'One 😀 two.', startMs: 0, endMs: 1500, marks: [{ index: 0, startMs: 0 }, { index: 7, startMs: 700 }],
+    timing: 'measured', alignment: { matchedWords: 2, totalWords: 2 } };
+  const original = vttOf([line]);
+  const root = project([], { 'assets/vo.mp3': 'x', 'assets/vo.vtt': original });
+  const read = await sourceSubtitles(root, 'assets/vo.mp3');
+  const cues = [{ ...read.cues[0], emphasis: [{ from: 4, to: 6 }] }];
+  await assert.rejects(writeSourceSubtitles(root, 'assets/vo.mp3', cues), (e) => e.status === 428);
+  const saved = await writeSourceSubtitles(root, 'assets/vo.mp3', cues, read.snapshot);
+  const after = (await sourceSubtitles(root, 'assets/vo.mp3')).cues[0];
+  assert.deepEqual(after.marks, line.marks);
+  assert.deepEqual(after.emphasis, [{ from: 4, to: 6 }]);
+  assert.equal(after.text, line.text);
+  assert.equal(after.timing, 'measured');
+  assert.deepEqual(after.alignment, line.alignment);
+  const raw = readFileSync(join(root, 'assets/vo.vtt'), 'utf8');
+  await assert.rejects(writeSourceSubtitles(root, 'assets/vo.mp3', read.cues, read.snapshot), (e) => e.status === 409);
+  assert.equal(readFileSync(join(root, 'assets/vo.vtt'), 'utf8'), raw);
+  await restoreSourceFiles(root, 'assets/vo.mp3', saved.after, saved.before);
+  assert.equal(readFileSync(join(root, 'assets/vo.vtt'), 'utf8'), original);
+});
+
+test('HTTP 源保存拒绝无效强调而不写源，也不消费正文中的任意标签', async () => {
+  const root = project([], { 'assets/vo.mp3': 'x', 'assets/vo.vtt': ONE_LINE });
+  const { base, close } = await serve(root);
+  const put = (body) => fetch(`${base}/captions/source`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  try {
+    const read = await sourceSubtitles(root, 'assets/vo.mp3');
+    const body = { src: 'assets/vo.mp3', from: read.snapshot, cues: [{ startMs: 0, endMs: 1000, text: '😀ok', emphasis: [{ from: 1, to: 3 }] }] };
+    assert.equal((await put(body)).status, 400);
+    assert.equal(readFileSync(join(root, 'assets/vo.vtt'), 'utf8'), ONE_LINE);
+    const text = '<span style="color:red">literal</span>';
+    assert.equal((await put({ ...body, cues: [{ startMs: 0, endMs: 1000, text }] })).status, 200);
+    const cue = (await sourceSubtitles(root, 'assets/vo.mp3')).cues[0];
+    assert.equal(cue.text, text);
+    assert.equal(cue.emphasis, undefined);
+    assert.match(readFileSync(join(root, 'assets/vo.vtt'), 'utf8'), /&lt;span/);
+  } finally { close(); }
 });

@@ -1,15 +1,74 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Ajv } from 'ajv';
 import { parseVtt } from './transcripts.mjs';
 import { clipCues } from './captions.mjs';
 import {
-  FILM_SUBTITLE_DEFAULT, FILM_SUBTITLE_HOME_Y, FILM_SUBTITLE_LOOKS, FILM_SUBTITLE_PORTRAIT_Y, FILM_SUBTITLE_SIZE_PCT,
+  FILM_SUBTITLE_DEFAULT, FILM_SUBTITLE_EMPHASIS_DEFAULT, FILM_SUBTITLE_EMPHASIS_SCHEMA, FILM_SUBTITLE_HOME_Y, FILM_SUBTITLE_LOOKS, FILM_SUBTITLE_PORTRAIT_Y, FILM_SUBTITLE_SIZE_PCT,
   filmSubtitleAt, filmSubtitleCss, filmSubtitleCssText, filmSubtitleFrameHtml, filmSubtitleLanguageOf,
-  filmSubtitleShown, filmSubtitleSrt, filmSubtitleStyleFor, filmSubtitleVtt, filmSubtitleWords, matchFilmSubtitleLook,
+  filmSubtitleDisplayRuns, filmSubtitleEmphasisCss, filmSubtitleRuns, filmSubtitleShown, filmSubtitleSrt, filmSubtitleStyleFor, filmSubtitleVtt, filmSubtitleWords, matchFilmSubtitleLook,
   parseFilmSubtitleStyle, sameFilmSubtitleLanguage,
 } from './film-subtitle.mjs';
 
 const D = FILM_SUBTITLE_DEFAULT;
+
+test('语义强调外观有受限Schema，旧样式使用默认且不会接收任意CSS', () => {
+  const validate = new Ajv().compile(FILM_SUBTITLE_EMPHASIS_SCHEMA);
+  assert.equal(validate({ color: '#ffcc00', weight: 800 }), true);
+  assert.equal(validate(null), true);
+  assert.equal(validate({ color: 'red;position:fixed', weight: 800 }), false);
+  assert.equal(validate({ color: '#ffd400', weight: 901 }), false);
+  assert.equal(validate({ color: '#ffd400', html: '<b>' }), false);
+  assert.deepEqual(parseFilmSubtitleStyle({}).emphasis, FILM_SUBTITLE_EMPHASIS_DEFAULT);
+  assert.deepEqual(parseFilmSubtitleStyle({ emphasis: { color: 'red;position:fixed', weight: NaN } }).emphasis, FILM_SUBTITLE_EMPHASIS_DEFAULT);
+  assert.deepEqual(filmSubtitleEmphasisCss(parseFilmSubtitleStyle({ emphasis: { color: '#abc', weight: 800 } })), { color: '#abc', fontWeight: '800' });
+  assert.deepEqual(filmSubtitleEmphasisCss({ ...D, font: { ...D.font, weight: 900 } }), { color: '#ffd400', fontWeight: '900' });
+  assert.deepEqual(filmSubtitleEmphasisCss(parseFilmSubtitleStyle({ emphasis: null })), {});
+});
+
+test('共享分段只强调指定UTF16范围，保留重复词、emoji和karaoke原有空白', () => {
+  const text = 'a  a 😀!';
+  const cue = { startMs: 0, durMs: 1000, text, speaker: 'a', emphasis: [{ from: 3, to: 4 }, { from: 5, to: 7 }],
+    words: [{ text: 'a', startMs: 0, durMs: 500 }, { text: 'a', startMs: 500, durMs: 500 }] };
+  const runs = filmSubtitleDisplayRuns(cue, 700, true);
+  assert.equal(runs.map((run) => run.text).join(''), `a：${text}`);
+  assert.equal(runs.flatMap((run) => run.parts).filter((part) => part.emphasis).map((part) => part.text).join(''), 'a😀');
+  assert.equal(runs[0].parts.some((part) => part.emphasis), false, '说话人不是原文中的第一个同名词');
+  assert.deepEqual(runs.filter((run) => run.active).map((run) => run.text), ['a']);
+  const bad = [{ from: 1, to: 3 }, { from: -1, to: 1 }, { from: 2, to: 99 }, { from: 0.5, to: 2 }, null];
+  assert.deepEqual(filmSubtitleRuns('😀<x>', bad).filter((part) => part.emphasis), []);
+  assert.deepEqual(filmSubtitleDisplayRuns({ ...cue, text: '😀abc', emphasis: [{ from: 1, to: 3 }], words: [{ text: 'abc', startMs: 0, durMs: 1000 }] }, 500, true)
+    .flatMap((run) => run.parts).filter((part) => part.emphasis), [], '裁片不能使原本非法的代理对范围重新变合法');
+});
+
+test('局部强调烧录安全转义，且与独立karaoke高亮叠加而非全句强调', () => {
+  const cue = { startMs: 0, durMs: 1000, text: 'Tom & <Jerry>', emphasis: [{ from: 7, to: 12 }] };
+  const html = filmSubtitleFrameHtml([cue], D, { w: 1080, h: 1920 }, 500);
+  const css = filmSubtitleCssText(filmSubtitleEmphasisCss(D));
+  assert.ok(html.includes(`Tom &amp; &lt;<span data-emphasis="true" style="${css}">Jerry</span>&gt;`));
+  assert.equal((html.match(/data-emphasis=/g) ?? []).length, 1);
+  assert.doesNotMatch(html, /<Jerry>/);
+  const style = { ...D, karaoke: { mode: 'box', color: '#ffd400' } };
+  const active = filmSubtitleFrameHtml([{ ...cue, text: 'aa bb', emphasis: [{ from: 1, to: 2 }] }], style, { w: 100, h: 100 }, 100);
+  assert.match(active, /color:#000000/);
+  assert.match(active, /a<span data-emphasis="true" style="font-weight:700">a<\/span><\/span> bb/);
+  assert.deepEqual(filmSubtitleEmphasisCss(style, true), { fontWeight: '700' });
+});
+
+test('VTT强调保留词时间和纯文本，SRT降级为纯文本，译文去除原文范围', () => {
+  const cue = { startMs: 1000, durMs: 2000, text: 'a a 😀', emphasis: [{ from: 2, to: 3 }, { from: 4, to: 6 }], timing: 'measured',
+    alignment: { matchedWords: 3, totalWords: 3 }, words: [{ text: 'a', startMs: 1000, durMs: 500 }, { text: 'a', startMs: 1500, durMs: 500 }, { text: '😀', startMs: 2000, durMs: 1000 }], alt: { en: 'other words' } };
+  const output = filmSubtitleVtt([cue]);
+  assert.match(output, /a <00:00:01\.500><c\.emphasis>a<\/c> <00:00:02\.000><c\.emphasis>😀<\/c>/);
+  const [line] = parseVtt(output).lines;
+  assert.equal(line.text, cue.text);
+  assert.deepEqual(line.emphasis, cue.emphasis);
+  assert.deepEqual(line.marks, [{ index: 0, startMs: 1000 }, { index: 2, startMs: 1500 }, { index: 4, startMs: 2000 }]);
+  assert.equal(line.timing, 'measured');
+  assert.equal(filmSubtitleSrt([cue]), '1\n00:00:01,000 --> 00:00:03,000\na a 😀\n');
+  for (const bilingual of [false, true]) assert.equal(filmSubtitleShown([cue], { language: 'en', bilingual })[0].emphasis, undefined);
+  assert.deepEqual(filmSubtitleShown([cue], { language: null, bilingual: false })[0].emphasis, cue.emphasis);
+});
 
 test('a stored style is read field by field; the earlier { look, size } shape still reads', () => {
   assert.deepEqual(parseFilmSubtitleStyle(null), D);

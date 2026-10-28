@@ -62,6 +62,11 @@ export async function projectClient(config, folder, options) {
   return { ...studio, project, base,
     inspect: () => studio.call(base),
     captions: () => studio.call(`${base}/captions`),
+    captionSource: (src) => {
+      if (typeof src !== 'string' || !src) throw new Error('请指定项目内的字幕媒体源路径。');
+      return studio.call(`${base}/captions/source?src=${encodeURIComponent(src)}`);
+    },
+    saveCaptionSource: (ask) => studio.call(`${base}/captions/source`, ask, 'PUT'),
     prepareMedia: (ask) => studio.call(`${base}/media/prepare`, ask, 'POST', { timeoutMs: 2 * 60 * 60_000, localLongResponse: true }),
     speechCutPlan: (ask) => studio.call(`${base}/speech-cut/plan`, ask),
     applySpeechCut: (plan) => {

@@ -17,9 +17,9 @@ import * as React from 'react';
 
 import {
   cueAt,
-  cueText,
+  filmSubtitleDisplayRuns,
+  filmSubtitleEmphasisCss,
   filmSubtitleWordCss,
-  filmSubtitleWords,
   snapAxis,
   SNAP_X,
   SNAP_Y,
@@ -120,13 +120,14 @@ export function SubtitleOverlay({
             ...(dragging ? { outline: '1px dashed rgba(255,255,255,0.7)', outlineOffset: 3 } : {}),
           }}
         >
-          {style.karaoke ? (
-            filmSubtitleWords(cue, timeMs).map((w, i) => (
-              w.active
-                ? <span key={i} style={filmSubtitleWordCss(style) as React.CSSProperties}>{w.text}</span>
-                : <React.Fragment key={i}>{w.text}</React.Fragment>
-            ))
-          ) : cueText(cue)}
+          {filmSubtitleDisplayRuns(cue, timeMs, Boolean(style.karaoke)).map((run, i) => {
+            const content = run.parts.map((part, j) => part.emphasis
+              ? <span key={j} data-emphasis="true" style={filmSubtitleEmphasisCss(style, run.active) as React.CSSProperties}>{part.text}</span>
+              : <React.Fragment key={j}>{part.text}</React.Fragment>);
+            return run.active
+              ? <span key={i} style={filmSubtitleWordCss(style) as React.CSSProperties}>{content}</span>
+              : <React.Fragment key={i}>{content}</React.Fragment>;
+          })}
         </span>
       </div>
     </>
