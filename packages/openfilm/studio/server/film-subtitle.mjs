@@ -1,4 +1,5 @@
 // @ts-check
+import { emphasisParts, normalizeEmphasis, sliceEmphasis } from './subtitle-emphasis.mjs';
 /**
  * Subtitle styles: one table, one function, every place that draws them.
  *
@@ -40,6 +41,8 @@
  * @typedef {'color' | 'box' | 'pop'} FilmSubtitleKaraokeMode
  * @typedef {{ mode: FilmSubtitleKaraokeMode, color: string }} FilmSubtitleKaraoke
  */
+/** 语义重点的通用外观；范围由字幕自己声明，不自动选择关键词。
+ * @typedef {{ color: string, weight: number }} FilmSubtitleEmphasis */
 /**
  * How a project's subtitles look and where they sit. The person's look, kept with the project but not in film.html
  * (studio/server/captions.mjs: `.film/subtitles.json`): an agent rewriting the film never touches it.
@@ -59,6 +62,7 @@
  *   shadow: FilmSubtitleShadow | null,
  *   box: FilmSubtitleBox | null,
  *   karaoke: FilmSubtitleKaraoke | null,
+ *   emphasis?: FilmSubtitleEmphasis | null,
  *   language: string | null,
  *   bilingual: boolean,
  * }} FilmSubtitleStyle
@@ -68,6 +72,21 @@
 export const FILM_SUBTITLE_KARAOKE_MODES = ['color', 'box', 'pop'];
 /** @type {FilmSubtitleKaraoke} */
 export const FILM_SUBTITLE_KARAOKE_DEFAULT = { mode: 'box', color: '#ffd400' };
+
+/** 缺省沿用现有字幕强调色；不会改变未标记的普通文字。 @type {FilmSubtitleEmphasis} */
+export const FILM_SUBTITLE_EMPHASIS_DEFAULT = { color: FILM_SUBTITLE_KARAOKE_DEFAULT.color, weight: 700 };
+
+/** 新外观字段的 Draft-07 合同；颜色只允许十六进制值，不接收任意 CSS。 */
+export const FILM_SUBTITLE_EMPHASIS_SCHEMA = {
+  $schema: 'http://json-schema.org/draft-07/schema#',
+  description: '字幕语义强调外观；省略时使用默认黄色和字重，null 表示沿用普通文字外观，范围仍保留在字幕中。',
+  type: ['object', 'null'],
+  additionalProperties: false,
+  properties: {
+    color: { type: 'string', pattern: '^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$', description: '语义重点的十六进制文字颜色；karaoke 正在高亮时沿用其颜色以保持可读性。' },
+    weight: { type: 'number', minimum: 100, maximum: 900, description: '语义重点的字体字重，100 至 900；不会降低整行原有字重。' },
+  },
+};
 
 /**
  * The languages subtitles can be translated into, named in their own language so whoever picks one recognizes it.
@@ -237,6 +256,7 @@ export const FILM_SUBTITLE_DEFAULT = {
   align: 'center',
   ...FILM_SUBTITLE_LOOKS.outline,
   karaoke: null,
+  emphasis: FILM_SUBTITLE_EMPHASIS_DEFAULT,
   language: null,
   bilingual: false,
 };
@@ -407,6 +427,7 @@ export function filmSubtitleFontSizePx(/** @type {FilmSubtitleStyle} */ style, /
  *   alignment?: import('./transcripts.mjs').WordAlignment,
  *   sourceRevision?: string,
  *   words?: readonly { text: string, startMs: number, durMs: number }[],
+ *   emphasis?: readonly import('./subtitle-emphasis.mjs').SubtitleEmphasis[],
  *   alt?: Readonly<Record<string, string>>,
  *   clip?: string,
  *   src?: string,
@@ -437,7 +458,7 @@ export function filmSubtitleShown(cues, style) {
       out[out.length - 1] = { ...prev, durMs: Math.max(prev.durMs, cue.startMs + cue.durMs - prev.startMs) };
       continue;
     }
-    const { words: _words, alignment: _alignment, ...rest } = cue;
+    const { words: _words, alignment: _alignment, emphasis: _emphasis, ...rest } = cue;
     out.push(/** @type {T} */ ({ ...rest, timing: 'estimated', text: style.bilingual ? `${cue.text}\n${alt}` : alt }));
   }
   return out;
@@ -490,6 +511,55 @@ export function filmSubtitleWords(cue, timeMs) {
     t += len;
   }
   return out;
+}
+
+/** 同一纯文本分段供编辑器与烧录使用；索引与字幕的 UTF-16 半开范围一致。
+ * @param {string} text @param {FilmSubtitleCue['emphasis']} [emphasis] */
+export function filmSubtitleRuns(text, emphasis) {
+  return emphasisParts(text, emphasis);
+}
+
+/** @typedef {{ text: string, active: boolean, parts: ReturnType<typeof filmSubtitleRuns> }} FilmSubtitleDisplayRun */
+
+/** 保留原文每个字符，在已有逐词高亮外层中叠加语义重点；说话人前缀不参与原文索引。
+ * @param {FilmSubtitleCue} cue @param {number} timeMs @param {boolean} [karaoke]
+ * @returns {FilmSubtitleDisplayRun[]} */
+export function filmSubtitleDisplayRuns(cue, timeMs, karaoke = false) {
+  /** @type {FilmSubtitleDisplayRun[]} */
+  const out = [];
+  const emphasis = normalizeEmphasis(cue.text, cue.emphasis);
+  const append = (/** @type {string} */ text, /** @type {number} */ from, /** @type {boolean} */ active) => {
+    if (text) out.push({ text, active, parts: filmSubtitleRuns(text, sliceEmphasis(emphasis, from, from + text.length)) });
+  };
+  if (cue.speaker) {
+    const text = `${cue.speaker}：`;
+    out.push({ text, active: false, parts: filmSubtitleRuns(text) });
+  }
+  if (!karaoke) {
+    append(cue.text, 0, false);
+    return out;
+  }
+  let cursor = 0;
+  for (const word of filmSubtitleWords({ ...cue, speaker: undefined }, timeMs)) {
+    const index = cue.text.indexOf(word.text, cursor);
+    if (index < 0) continue;
+    append(cue.text.slice(cursor, index), cursor, false);
+    append(cue.text.slice(index, index + word.text.length), index, word.active);
+    cursor = index + word.text.length;
+  }
+  append(cue.text.slice(cursor), cursor, false);
+  return out;
+}
+
+/** 只影响声明的范围；逐词颜色优先，避免黄色语义重点落在黄色 karaoke 背景上。
+ * @param {FilmSubtitleStyle} style @param {boolean} [active] @returns {Record<string, string>} */
+export function filmSubtitleEmphasisCss(style, active = false) {
+  const emphasis = style.emphasis === undefined ? FILM_SUBTITLE_EMPHASIS_DEFAULT : style.emphasis;
+  if (!emphasis) return {};
+  return {
+    ...(!active || !style.karaoke ? { color: emphasis.color } : {}),
+    fontWeight: String(Math.max(style.font.weight, emphasis.weight)),
+  };
 }
 
 /** @param {string} text @returns {{ text: string, word: boolean }[]} */
@@ -642,6 +712,11 @@ export function parseFilmSubtitleStyle(raw) {
         : FILM_SUBTITLE_KARAOKE_DEFAULT.mode,
       color: str(o.color, FILM_SUBTITLE_KARAOKE_DEFAULT.color),
     })),
+    emphasis: layer(v.emphasis, base.emphasis ?? FILM_SUBTITLE_EMPHASIS_DEFAULT, (o) => ({
+      color: typeof o.color === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(o.color)
+        ? o.color : FILM_SUBTITLE_EMPHASIS_DEFAULT.color,
+      weight: num(o.weight, FILM_SUBTITLE_EMPHASIS_DEFAULT.weight, 100, 900),
+    })),
     language: isFilmSubtitleLanguage(v.language) ? v.language : null,
     bilingual: bool(v.bilingual, false),
   };
@@ -674,11 +749,12 @@ export function filmSubtitleFrameHtml(cues, style, frame, timeMs) {
   if (!cue) return '';
   const fitted = filmSubtitleStyleFor(style, frame);
   const css = filmSubtitleCss(fitted, { fontSize: `${filmSubtitleFontSizePx(fitted, frame)}px` });
-  const body = fitted.karaoke
-    ? filmSubtitleWords(cue, timeMs).map((w) => (w.active
-      ? `<span style="${escapeHtml(filmSubtitleCssText(filmSubtitleWordCss(fitted)))}">${escapeHtml(w.text)}</span>`
-      : escapeHtml(w.text))).join('')
-    : escapeHtml(filmSubtitleText(cue));
+  const body = filmSubtitleDisplayRuns(cue, timeMs, Boolean(fitted.karaoke)).map((run) => {
+    const content = run.parts.map((part) => part.emphasis
+      ? `<span data-emphasis="true" style="${escapeHtml(filmSubtitleCssText(filmSubtitleEmphasisCss(fitted, run.active)))}">${escapeHtml(part.text)}</span>`
+      : escapeHtml(part.text)).join('');
+    return run.active ? `<span style="${escapeHtml(filmSubtitleCssText(filmSubtitleWordCss(fitted)))}">${content}</span>` : content;
+  }).join('');
   return `<div style="position:absolute;left:0;top:0;width:${frame.w}px;height:${frame.h}px;overflow:hidden;pointer-events:none">`
     + `<div data-timing-origin="${escapeHtml(cue.timing ?? 'unknown')}" style="${escapeHtml(filmSubtitleCssText(css.box))}"><span style="${escapeHtml(filmSubtitleCssText(css.text))}">${body}</span></div></div>`;
 }
@@ -714,6 +790,7 @@ function sequencedCues(cues) {
 /**
  * An SRT file of the cues (pass them through `filmSubtitleShown` first for the shown language). The speaker takes an
  * ASCII colon here: players and translation tools read this file, and some choke on full-width punctuation.
+ * 语义强调在 SRT 中明确降级为纯文本，原文不包含任何新增标记。
  * @param {readonly FilmSubtitleCue[]} cues
  */
 export function filmSubtitleSrt(cues) {
@@ -727,16 +804,25 @@ export function filmSubtitleSrt(cues) {
 /** A WebVTT file; the speaker as `<v name>`, VTT's own voice tag. @param {readonly FilmSubtitleCue[]} cues */
 export function filmSubtitleVtt(cues) {
   const blocks = sequencedCues(cues).map(({ cue, end }) => {
-    const text = cue.text.trim().replace(/-->/g, '→');
+    const raw = cue.text.trim();
+    const lead = cue.text.length - cue.text.trimStart().length;
+    const text = raw.replace(/-->/g, '→');
+    /* 箭头替换可能改变 UTF-16 长度，逐字符映射强调，不把原索引套在新文本上。 */
+    const emphasis = normalizeEmphasis(text, sliceEmphasis(normalizeEmphasis(cue.text, cue.emphasis), lead, lead + raw.length).map((range) => ({
+      from: raw.slice(0, range.from).replace(/-->/g, '→').length,
+      to: raw.slice(0, range.to).replace(/-->/g, '→').length,
+    })));
     const escapeVtt = (/** @type {string} */ value) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const marked = (/** @type {number} */ from, /** @type {number} */ to) => filmSubtitleRuns(text.slice(from, to), sliceEmphasis(emphasis, from, to))
+      .map((part) => part.emphasis ? `<c.emphasis>${escapeVtt(part.text)}</c>` : escapeVtt(part.text)).join('');
     let cursor = 0, payload = '', lastMs = Math.round(cue.startMs);
     const mapped = Boolean(cue.words?.length) && cue.words?.every((word, i) => {
       const index = text.indexOf(word.text, cursor), wordMs = Math.round(word.startMs);
       if (!word.text || index < 0 || /[\p{L}\p{N}]/u.test(text.slice(cursor, index)) || !Number.isFinite(wordMs)
         || wordMs < lastMs || (i > 0 && wordMs === lastMs) || wordMs >= end) return false;
-      payload += escapeVtt(text.slice(cursor, index));
+      payload += marked(cursor, index);
       if (wordMs > lastMs) payload += `<${srtStamp(wordMs).replace(',', '.')}>`;
-      payload += escapeVtt(word.text);
+      payload += marked(index, index + word.text.length);
       cursor = index + word.text.length;
       lastMs = wordMs;
       return true;
@@ -744,7 +830,7 @@ export function filmSubtitleVtt(cues) {
     /* 导出仍是影片时间：保留实际词锚点；纯文本降级不能携更强的逐词测量声明。 */
     const timing = cue.timing === 'measured' && !mapped ? 'estimated' : cue.timing;
     const alignment = mapped ? cue.alignment : undefined;
-    const words = mapped ? payload + escapeVtt(text.slice(cursor)) : escapeVtt(text);
+    const words = mapped ? payload + marked(cursor, text.length) : marked(0, text.length);
     const line = cue.speaker ? `<v ${cue.speaker.replace(/[<>]/g, '')}>${words}` : words;
     const origin = timing ? `openfilm-timing:${timing}${alignment ? `:${alignment.matchedWords}/${alignment.totalWords}` : ''}\n` : '';
     return `${origin}${srtStamp(cue.startMs).replace(',', '.')} --> ${srtStamp(end).replace(',', '.')}\n${line}`;

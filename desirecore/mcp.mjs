@@ -10,6 +10,7 @@ import { timelineOpsSchema } from '../packages/openfilm/studio/server/op-schema.
 import { motionChangesSchema } from '../packages/openfilm/studio/server/motion-edits.mjs';
 import { workingMediaRequestSchema } from '../packages/openfilm/studio/server/working-media.mjs';
 import { speechCutRequestSchema, speechCutApplySchema } from '../packages/openfilm/studio/server/speech-cut.mjs';
+import { CAPTION_SOURCE_READ_SCHEMA, CAPTION_SOURCE_SAVE_SCHEMA } from '../packages/openfilm/studio/server/subtitle-edits.mjs';
 
 const packageVersion = JSON.parse(readFileSync(new URL('../packages/openfilm/package.json', import.meta.url), 'utf8')).version;
 
@@ -18,6 +19,8 @@ const jobId = { type: 'string', pattern: '^[a-f0-9]{12}$', description: '此项�
 export const tools = [
   { name: 'video_inspect', description: '读取绑定影片的项目路径、revision、时间线和检查问题。', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'video_captions', description: '读取所见字幕句、clip、源时间、line/part与sourceRevision；不猜测转写词时间真值。', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'video_captions_source', description: '读取一个媒体源的完整字幕 cues 和原文件 snapshot，供保留文字、词时间和人工修订后条件保存。', inputSchema: CAPTION_SOURCE_READ_SCHEMA },
+  { name: 'video_captions_save', description: '保存完整源字幕 cues（含可选局部强调范围），from必须是原读取的snapshot；不自动换成最新快照。过期冲突后重读，不丢其他句或词时间。', inputSchema: CAPTION_SOURCE_SAVE_SCHEMA },
   { name: 'video_prepare_media', description: '将本项目整源媒体准备为可追溯的SDR工作副本，保留源时钟与原声关系；不自动修改影片、不调用模型服务。', inputSchema: workingMediaRequestSchema },
   { name: 'video_speech_cut_plan', description: '基于实际字幕和影片版本规划整句/连续句的声画删除，返回切口、影响范围与条件编辑；不提交、不机械删除停顿。先预听并确认内容取舍。', inputSchema: speechCutRequestSchema },
   { name: 'video_speech_cut_apply', description: '提交已预览剪辑提案中的base/ops/preconditions，严格核影片和字幕源版本；过期返回冲突，不把旧计划重放到新内容。', inputSchema: speechCutApplySchema },
@@ -50,6 +53,8 @@ export async function callTool(config, folder, name, args = {}) {
   }
   if (name === 'video_motion_catalog') return client.motionCatalog();
   if (name === 'video_captions') return client.captions();
+  if (name === 'video_captions_source') return client.captionSource(args.src);
+  if (name === 'video_captions_save') return client.saveCaptionSource(args);
   if (name === 'video_prepare_media') return client.prepareMedia(args);
   if (name === 'video_speech_cut_plan') return client.speechCutPlan(args);
   if (name === 'video_speech_cut_apply') return client.applySpeechCut(args);

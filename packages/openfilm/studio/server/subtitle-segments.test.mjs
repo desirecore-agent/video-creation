@@ -195,3 +195,33 @@ test('subtitle segmentation preserves declared timing origin and transcript-leve
   assert.ok(pieces.every((piece) => piece.timing === 'estimated'));
   assert.ok(pieces.every((piece) => piece.alignment.matchedWords === 1 && piece.alignment.totalWords === 3));
 });
+
+test('强调跨分句边界和 emoji 时按原字符裁分，不改变字幕切点与时间', () => {
+  const text = 'One two three. Four 😀 five six.';
+  const from = text.indexOf('three'), to = text.indexOf(' five');
+  const line = { text, startMs: 0, endMs: 5000, timing: 'measured', alignment: { matchedWords: 7, totalWords: 7 },
+    emphasis: [{ from, to }] };
+  const pieces = segmentLine(line);
+  assert.deepEqual(pieces.map((p) => p.text), ['One two three.', 'Four 😀 five six.']);
+  assert.deepEqual(pieces.map((p) => (p.emphasis ?? []).map((r) => p.text.slice(r.from, r.to))), [['three.'], ['Four 😀']]);
+  assert.deepEqual(pieces.map(({ emphasis: _emphasis, ...p }) => p), segmentLine({ ...line, emphasis: undefined }));
+  const trimmed = segmentLine({ text: '  😀重点  ', startMs: 0, endMs: 1000, emphasis: [{ from: 2, to: 6 }] });
+  assert.deepEqual(trimmed[0].emphasis, [{ from: 0, to: 4 }]);
+});
+
+test('改写与删除仅移位仍存在的原强调，未改文字保留范围', () => {
+  const line = { text: 'One two. Three 😀 four.', startMs: 0, endMs: 3000,
+    emphasis: [{ from: 0, to: 3 }, { from: 9, to: 17 }] };
+  const piece = { from: 0, to: 8 };
+  assert.deepEqual(replacePiece(line, piece, 'One two.').emphasis, line.emphasis);
+  const replaced = replacePiece(line, piece, 'A.');
+  assert.equal(replaced.text, 'A. Three 😀 four.');
+  assert.deepEqual(replaced.emphasis, [{ from: 3, to: 11 }]);
+  assert.equal(replaced.text.slice(replaced.emphasis[0].from, replaced.emphasis[0].to), 'Three 😀');
+  const deleted = replacePiece(line, piece, '');
+  assert.equal(deleted.text, 'Three 😀 four.');
+  assert.deepEqual(deleted.emphasis, [{ from: 0, to: 8 }]);
+  const spanning = replacePiece({ ...line, emphasis: [{ from: 4, to: 17 }] }, piece, 'Different.');
+  assert.deepEqual(spanning.emphasis, [{ from: 10, to: 19 }]);
+  assert.equal(spanning.text.slice(10, 19), ' Three 😀');
+});

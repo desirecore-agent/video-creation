@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import {
-  CaptionError, SUBTITLE_STYLE_FILE, captionRoutes, captionText, filmCaptions, readSubtitleStyle, spokenLines,
+  CaptionError, SUBTITLE_STYLE_FILE, captionRoutes, captionText, clipCues, filmCaptions, readSubtitleStyle, spokenLines,
   transcriptOutlasts, translateFilmSubtitles, writeSubtitleStyle,
 } from './captions.mjs';
 import { FILM_SUBTITLE_DEFAULT, filmSubtitleShown, filmSubtitleSrt, filmSubtitleVtt } from './film-subtitle.mjs';
@@ -72,6 +72,31 @@ test('word starts alone also keep a slow line visible through its final mark', (
 test('subtitles leave out fillers and false starts', () => {
   assert.equal(captionText('uh, so we th- the plan'), 'so we the plan');
   assert.equal(captionText('um...'), '');
+});
+
+test('源 trim 与 speed 只裁剪并移位原强调，不改变词时间或标点正文', () => {
+  const line = { text: 'alpha 😀 beta gamma', startMs: 0, endMs: 2000,
+    marks: [{ index: 0, startMs: 0 }, { index: 6, startMs: 500 }, { index: 9, startMs: 1000 }, { index: 14, startMs: 1500 }],
+    emphasis: [{ from: 6, to: 13 }], timing: 'measured', alignment: { matchedWords: 4, totalWords: 4 } };
+  const span = { fromMs: 600, startMs: 5000, durMs: 700, speed: 2 };
+  const [cue] = clipCues([line], span, { cut: true });
+  assert.equal(cue.text, 'beta gamma');
+  assert.deepEqual(cue.emphasis, [{ from: 0, to: 4 }]);
+  const { emphasis: _emphasis, ...plain } = cue;
+  assert.deepEqual(plain, clipCues([{ ...line, emphasis: undefined }], span, { cut: true })[0]);
+  const [withEmoji] = clipCues([line], { fromMs: 400, startMs: 0, durMs: 1600, speed: 1 }, { cut: true });
+  assert.equal(withEmoji.text, '😀 beta gamma');
+  assert.deepEqual(withEmoji.emphasis, [{ from: 0, to: 7 }]);
+});
+
+test('清理口头词、重复词的假起音和中文标点时只跟随实际保留字符', () => {
+  const text = 'uh, red th- the red 😀重点, 后面。';
+  const from = text.lastIndexOf('red'), to = from + 'red 😀重点'.length;
+  const [cue] = clipCues([{ text, startMs: 0, endMs: 3000, emphasis: [{ from: 0, to: 3 }, { from, to }] }],
+    { fromMs: 0, startMs: 0, durMs: 3000, speed: 1 }, { cut: true });
+  assert.equal(cue.text, 'red the red 😀重点， 后面');
+  assert.deepEqual(cue.emphasis, [{ from: 8, to: 16 }]);
+  assert.equal(cue.text.slice(cue.emphasis[0].from, cue.emphasis[0].to), 'red 😀重点');
 });
 
 test('a voice clip says its transcript\'s lines where it sits on the film, each word timed, each line traced to its source', async () => {

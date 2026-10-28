@@ -34,6 +34,7 @@
  *
  * Plain JavaScript, no dependencies, no I/O.
  */
+import { normalizeEmphasis, sliceEmphasis } from './subtitle-emphasis.mjs';
 
 export const SUBTITLE_SEGMENT_RULES = Object.freeze({
   /** Longest subtitle when the line has CJK, in cells: a full-width character is 1, anything else ½ (16 ≈ a phone's width). */
@@ -78,11 +79,11 @@ export const SUBTITLE_SEGMENT_RULES = Object.freeze({
 });
 
 /** @typedef {typeof SUBTITLE_SEGMENT_RULES} SubtitleSegmentRules */
-/** @typedef {{ text: string, startMs: number, endMs: number, marks?: readonly { index: number, startMs: number }[], timing?: import('./transcripts.mjs').TimingOrigin, alignment?: import('./transcripts.mjs').WordAlignment }} SegmentLine */
+/** @typedef {{ text: string, startMs: number, endMs: number, marks?: readonly { index: number, startMs: number }[], emphasis?: readonly import('./subtitle-emphasis.mjs').SubtitleEmphasis[], timing?: import('./transcripts.mjs').TimingOrigin, alignment?: import('./transcripts.mjs').WordAlignment }} SegmentLine */
 /**
  * One subtitle cut from a line: its text (as the line has it, trimmed), its times, its timed words (indexes in `text`),
  * which piece of the line it is, and where its text sits in the line's (`from`/`to`, for putting a correction back).
- * @typedef {{ text: string, startMs: number, endMs: number, marks?: { index: number, startMs: number }[], part: number, from: number, to: number, timing?: import('./transcripts.mjs').TimingOrigin, alignment?: import('./transcripts.mjs').WordAlignment }} SubtitlePiece
+ * @typedef {{ text: string, startMs: number, endMs: number, marks?: { index: number, startMs: number }[], emphasis?: import('./subtitle-emphasis.mjs').SubtitleEmphasis[], part: number, from: number, to: number, timing?: import('./transcripts.mjs').TimingOrigin, alignment?: import('./transcripts.mjs').WordAlignment }} SubtitlePiece
  */
 
 /* ── characters ──────────────────────────────────────────────────────────── */
@@ -412,7 +413,12 @@ function cutLong(s, e, bounds, m, R) {
 export function segmentLine(line, R = SUBTITLE_SEGMENT_RULES) {
   const t = line.text;
   const origin = { ...(line.timing ? { timing: line.timing } : {}), ...(line.alignment ? { alignment: line.alignment } : {}) };
-  const whole = () => [{ text: t.trim(), startMs: line.startMs, endMs: line.endMs, ...(line.marks?.length ? { marks: [...line.marks] } : {}), part: 0, from: t.length - t.trimStart().length, to: t.trimEnd().length, ...origin }];
+  const whole = () => {
+    const from = t.length - t.trimStart().length, to = t.trimEnd().length;
+    const emphasis = sliceEmphasis(line.emphasis, from, to);
+    return [{ text: t.trim(), startMs: line.startMs, endMs: line.endMs, ...(line.marks?.length ? { marks: [...line.marks] } : {}),
+      ...(emphasis.length ? { emphasis } : {}), part: 0, from, to, ...origin }];
+  };
   const times = timeline(line, R);
   const { atoms, bounds } = analyse(t, R, times, Boolean(line.marks?.length));
   if (atoms.length < 2) return whole();
@@ -483,7 +489,9 @@ export function segmentLine(line, R = SUBTITLE_SEGMENT_RULES) {
     const to = p.b === atoms.length ? t.trimEnd().length : from + t.slice(from, atoms[p.b].from).trimEnd().length;
     const own = marks.filter((mk) => mk.index >= from && mk.index < to).map((mk) => ({ index: mk.index - from, startMs: mk.startMs }));
     const timed = marks.length ? (own[0]?.index === 0 ? own : [{ index: 0, startMs: p.startMs }, ...own]) : [];
-    return { text: t.slice(from, to), startMs: p.startMs, endMs: p.endMs, ...(timed.length ? { marks: timed } : {}), part, from, to, ...origin };
+    const emphasis = sliceEmphasis(line.emphasis, from, to);
+    return { text: t.slice(from, to), startMs: p.startMs, endMs: p.endMs, ...(timed.length ? { marks: timed } : {}),
+      ...(emphasis.length ? { emphasis } : {}), part, from, to, ...origin };
   });
 }
 
@@ -570,7 +578,7 @@ export function alignTranslation(text, pieces, R = SUBTITLE_SEGMENT_RULES) {
  * with the space after it. Timed words outside the piece keep their times (so the other subtitles stay as they were);
  * the piece's own are one mark at its start (`startMs`): a changed piece is timed as a whole.
  * @param {SegmentLine} line @param {{ from: number, to: number }} piece @param {string} text @param {number} [startMs]
- * @returns {{ text: string, marks?: { index: number, startMs: number }[] }}
+ * @returns {{ text: string, marks?: { index: number, startMs: number }[], emphasis?: import('./subtitle-emphasis.mjs').SubtitleEmphasis[] }}
  */
 export function replacePiece(line, piece, text, startMs) {
   const t = line.text;
@@ -599,5 +607,11 @@ export function replacePiece(line, piece, text, startMs) {
   const lead = out.length - out.trimStart().length;
   out = out.trim();
   marks = marks.map((mk) => ({ index: mk.index - lead, startMs: mk.startMs })).filter((mk) => mk.index >= 0 && mk.index < out.length);
-  return { text: out, ...(marks.length ? { marks } : {}) };
+  // 未变的字面片段保留强调；改写部分不猜测关键词，仅投影两侧仍存在的原字符。
+  const retained = insert === t.slice(piece.from, end) ? line.emphasis ?? [] : (line.emphasis ?? []).flatMap((r) => [
+    ...(r.from < piece.from ? [{ from: r.from, to: Math.min(r.to, piece.from) }] : []),
+    ...(r.to > end ? [{ from: Math.max(r.from, end) + delta, to: r.to + delta }] : []),
+  ]);
+  const emphasis = normalizeEmphasis(out, sliceEmphasis(retained, lead, lead + out.length));
+  return { text: out, ...(marks.length ? { marks } : {}), ...(emphasis.length ? { emphasis } : {}) };
 }

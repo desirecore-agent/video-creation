@@ -290,3 +290,11 @@ probe补充编码/显示尺寸、旋转、颜色原语及视频/音轨首PTS与�
 回执含base/source/range/timing/affected/ops/shortMs/preconditions；不持久化另一份计划或时间线。共享纯planner由现有构建输出 `ui/dist/timeline-plan.mjs`，界面与服务沿同一时间线原语。CLI `speech-cut-apply --args <原计划JSON>` 仅取base/ops/preconditions，MCP `video_speech_cut_apply` 明确提交这三项；POST仍是既有edit，`preconditions:{strictBase:true,subtitles:[{src,revision}]}` 在同影片串行队列核影片和完整字幕源快照。失败409后重读，不改base重放旧ops。原VTT不改写，字幕按片段trim/at/speed自然跟随。
 
 界面入口选择句子/连续句，展示调整后的源/影片时间、来源及受影响片段；可预听原边界或跳区接缝。后者仅当前播放器近似预览，不是精确编码承诺。提交才删除声画/闭合空隙，成功进入现有一次撤销；CLI/MCP不伪称写进另一个客户端的内存撤销栈，需沿项目版本或显式反向操作恢复。目标、关联锁或受影响人工锁不能悄悄跳过。导演仍决定删保、气口和效果，自主场景不受固定业务流程约束。
+
+## 源字幕局部强调与条件保存
+
+`captions-source <项目> <素材相对路径>` / `video_captions_source {src}` 薄封装现有鉴权 `GET captions/source?src=`，返回完整源 `cues`、原文件 `snapshot`、`sourceRevision`。它与已裁剪到影片时钟的 `captions` 不同。`captions-save <项目> --args <JSON文件>` / `video_captions_save {src,cues,from}` 薄封装同一路径PUT，`from` 必须取自原读取的snapshot；不提供返回428、过期409，不自动读取最新from重试。原HTTP源字幕编辑队列/双快照仍为事实源，不新增事务或状态机。保存完整源句，不能把所见裁片列表当完整源覆盖。`--schema` 离线返回同源Draft-07请求Schema。
+
+`SourceCue` / 派生字幕可有 `emphasis:[{from,to}]`，针对其plain text的UTF-16半开范围，不能切开代理对，不能越界或反向。原VTT的 `<b>` 与 `<c.emphasis>` 被读取，统一写为 `<c.emphasis>`；任意HTML/CSS仍不执行。仅增标记不改正文、marks、时标时保留原timing来源。范围随规范化/分句/裁剪/拆合映射；改字后失效范围清除，翻译清原文范围。UI和烧录共用纯run/CSS函数，支持和原karaoke独立叠加；强调外观为可选 `style.emphasis:{color,weight}`（受限hex、100至900，Draft07含description），缺失用默认值，null停用强调外观。VTT导出仍有词时间和强调，SRT是明确纯文本降级。
+
+平台不选重点词、不固定场景边距；导演基于实际素材/人工锁选择构图和语义强调，再读最终编码的180/360px图与连续画面。源字幕保存不提供新的外观锁或跨进程CAS承诺；原有人工整行/位置/时间约束必须继续遵守。

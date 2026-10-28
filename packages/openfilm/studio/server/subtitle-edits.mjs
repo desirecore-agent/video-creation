@@ -19,19 +19,21 @@
 import { createHash } from 'node:crypto';
 import { readFile, rm } from 'node:fs/promises';
 import { basename, dirname, extname } from 'node:path';
+import { Ajv } from 'ajv';
 import { writeAtomic } from './atomic.mjs';
 import { withProjectFilmEdit } from './film.mjs';
 import { isFilmSubtitleLanguage } from './film-subtitle.mjs';
 import { inProject, inside } from './files.mjs';
 import { HttpError, json, readJson } from './http.mjs';
 import { alignTranslation, segmentLine } from './subtitle-segments.mjs';
+import { normalizeEmphasis, normalizeSubtitleText, sliceEmphasis, subtitleTextBoundary } from './subtitle-emphasis.mjs';
 import { readTranscript, setLine, transcriptPath, translationsOf, vttOf } from './transcripts.mjs';
 
 /** @typedef {import('./transcripts.mjs').SpokenLine} SpokenLine */
 /**
  * One subtitle of a source, in its milliseconds. `line` and `part` say which it is as captions.mjs names it (a cue's
  * `line` and `part`), so the row finds the one a cue on the film shows.
- * @typedef {{ startMs: number, endMs: number, text: string, marks?: { index: number, startMs: number }[],
+ * @typedef {{ startMs: number, endMs: number, text: string, marks?: { index: number, startMs: number }[], emphasis?: import('./subtitle-emphasis.mjs').SubtitleEmphasis[],
  *   alt?: Record<string, string>, line?: number, part?: number,
  *   timing?: 'measured' | 'estimated' | 'edited', alignment?: {matchedWords: number, totalWords: number} }} SourceCue
  * @typedef {{ src: string, cut: boolean, speaker?: string, cues: SourceCue[], snapshot: Snapshot, sourceRevision: string }} SourceSubtitles
@@ -42,6 +44,64 @@ import { readTranscript, setLine, transcriptPath, translationsOf, vttOf } from '
 /** A source's text is at most this long: a transcript, not a book. */
 const MAX_CUES = 5000;
 const MAX_TEXT = 2000;
+const sourcePathSchema = { type: 'string', minLength: 1, description: '项目内真实媒体源路径；字幕使用相同目录与文件名的 VTT，路径边界由服务端校验。' };
+const snapshotSchema = {
+  type: 'object', additionalProperties: false, required: ['files'], description: '读取字幕时取得的完整原字节快照；包括源 VTT 与该源所有翻译 VTT，缺失文件以 null 表示。',
+  properties: { files: { type: 'object', additionalProperties: { type: ['string', 'null'] }, description: '该媒体源的字幕路径到原始文件全文或 null 的映射；不能用摘要或新读的快照替换旧草稿来源。' } },
+};
+const emphasisSchema = {
+  type: 'array', maxItems: MAX_TEXT, description: '所给纯文本的 UTF-16 半开强调范围；空白规范化时随原字符投影，重叠或相邻范围合并。不包含 HTML/CSS；边界须为完整码点，且 0 <= from < to <= text.length。',
+  items: { type: 'object', additionalProperties: false, required: ['from', 'to'], properties: {
+    from: { type: 'integer', minimum: 0, description: '强调起点，包含此 UTF-16 索引对应的完整码点。' },
+    to: { type: 'integer', minimum: 1, description: '强调终点，不包含此 UTF-16 索引；不得超出所给文本或切断代理对。' },
+  } },
+};
+const sourceCueSchema = {
+  type: 'object', additionalProperties: false, required: ['startMs', 'endMs', 'text'], description: '一条源媒体字幕，时标属于源媒体毫秒；人工切分后每项独立保存为一个 VTT cue。',
+  properties: {
+    startMs: { type: 'number', minimum: 0, description: '源媒体中的字幕起点毫秒；保存时取整。' },
+    endMs: { type: 'number', minimum: 0, description: '源媒体中的字幕终点毫秒；必须晚于起点，重叠部分按既有规则收窄。' },
+    text: { type: 'string', maxLength: MAX_TEXT, description: '字幕纯文本，不解析任意标签；保存时折叠空白并裁去首尾，最多保留 2000 个 UTF-16 码元且不截断代理对。' },
+    emphasis: emphasisSchema,
+    marks: { type: 'array', description: '原词在纯文本中的 UTF-16 起点与源媒体时间；与语义强调独立。', items: {
+      type: 'object', additionalProperties: false, required: ['index', 'startMs'], properties: {
+        index: { type: 'integer', minimum: 0, description: '词在纯文本中的 UTF-16 起点。' },
+        startMs: { type: 'number', description: '词在源媒体中的开始毫秒；保存时约束到 cue 时间内。' },
+      },
+    } },
+    alt: { type: 'object', additionalProperties: { type: 'string', maxLength: MAX_TEXT }, description: '语言标签到译文纯文本的映射；译文按同一 cue 时标保存，时间来源为 estimated。' },
+    line: { type: 'number', description: '读取时原整句的源起点，用于 UI 回指；不作为写入身份或锁。' },
+    part: { type: 'integer', minimum: 0, description: '读取时该整句的切分序号；保存后按人工 cue 保留，不作为版本前置条件。' },
+    timing: { type: 'string', enum: ['measured', 'estimated', 'edited'], description: '时间来源；只改强调保留 measured，改字或改时不能冒称原实测。省略表示旧文件未知。' },
+    alignment: { type: 'object', additionalProperties: false, required: ['matchedWords', 'totalWords'], description: '整段转写的字面词匹配计数，不代表本 cue 的识别正确率。', properties: {
+      matchedWords: { type: 'integer', minimum: 0, description: '整段实际字面匹配的输入词数，不能超过 totalWords。' },
+      totalWords: { type: 'integer', minimum: 1, description: '整段转写输入的总词数。' },
+    } },
+  },
+};
+export const CAPTION_SOURCE_READ_SCHEMA = {
+  $schema: 'http://json-schema.org/draft-07/schema#', $id: 'urn:desirecore:video-creation:caption-source-read:v1',
+  type: 'object', additionalProperties: false, required: ['src'], description: '读取源字幕与 snapshot/sourceRevision；修改时必须把该次 snapshot 原样放入保存请求的 from。',
+  properties: { src: sourcePathSchema },
+};
+export const CAPTION_SOURCE_SAVE_SCHEMA = {
+  $schema: 'http://json-schema.org/draft-07/schema#', $id: 'urn:desirecore:video-creation:caption-source-save:v1',
+  type: 'object', additionalProperties: false, required: ['src', 'cues', 'from'], description: '以所读原字节快照保存源字幕；缺 from 返回 428，旧快照返回 409，服务端不自动更新前置条件。',
+  properties: { src: sourcePathSchema, cues: { type: 'array', maxItems: MAX_CUES, items: sourceCueSchema, description: '明确的完整 cue 列表；空列表明确删除该源所有字幕。' }, from: snapshotSchema },
+};
+const validEmphasis = new Ajv({ allErrors: true }).compile(emphasisSchema);
+
+/** 新增范围严格校验，不能由写入清洗把坏索引变成另一段文字的强调。
+ * @param {unknown} raw @param {string} text @returns {import('./subtitle-emphasis.mjs').SubtitleEmphasis[]} */
+function cleanEmphasis(raw, text) {
+  if (raw === undefined) return [];
+  if (!validEmphasis(raw)) throw new HttpError(400, 'emphasis must contain only integer UTF-16 { from, to } ranges');
+  const ranges = /** @type {import('./subtitle-emphasis.mjs').SubtitleEmphasis[]} */ (raw);
+  if (ranges.some((r) => r.from >= r.to || r.to > text.length || !subtitleTextBoundary(text, r.from) || !subtitleTextBoundary(text, r.to))) {
+    throw new HttpError(400, 'emphasis ranges must stay inside the text and cannot split a Unicode code point');
+  }
+  return normalizeEmphasis(text, ranges);
+}
 
 /**
  * The subtitles of `src` (a path in the project) as the film shows them, or none when it has no transcript.
@@ -85,6 +145,7 @@ export async function sourceSubtitles(root, src) {
 
 /** @param {SpokenLine} line */
 const lineOf = (line) => ({ text: line.text, startMs: line.startMs, endMs: line.endMs, ...(line.marks?.length ? { marks: line.marks } : {}),
+  ...(line.emphasis?.length ? { emphasis: line.emphasis } : {}),
   ...(line.timing ? { timing: line.timing } : {}), ...(line.alignment ? { alignment: line.alignment } : {}) });
 
 /** @param {unknown} v @returns {v is Record<string, unknown>} */
@@ -103,7 +164,11 @@ export function cleanCues(raw) {
   for (const one of raw) {
     if (!isRecord(one)) throw new HttpError(400, 'a subtitle is { startMs, endMs, text }');
     const startMs = Math.max(0, whole(one.startMs)), endMs = whole(one.endMs);
-    const text = typeof one.text === 'string' ? one.text.replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT) : '';
+    const rawText = typeof one.text === 'string' ? one.text : '';
+    const normalized = normalizeSubtitleText(rawText, cleanEmphasis(one.emphasis, rawText));
+    let text = normalized.text.slice(0, MAX_TEXT);
+    if (!subtitleTextBoundary(normalized.text, text.length)) text = text.slice(0, -1);
+    const emphasis = sliceEmphasis(normalized.emphasis, 0, text.length);
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) throw new HttpError(400, 'a subtitle\'s times are milliseconds');
     if (!text || endMs <= startMs) continue;
     /** @type {Record<string, string>} */
@@ -120,7 +185,7 @@ export function cleanCues(raw) {
     const alignment = isRecord(a) && Number.isInteger(a.matchedWords) && Number.isInteger(a.totalWords)
       && /** @type {number} */ (a.matchedWords) >= 0 && /** @type {number} */ (a.totalWords) >= /** @type {number} */ (a.matchedWords)
       ? { matchedWords: /** @type {number} */ (a.matchedWords), totalWords: /** @type {number} */ (a.totalWords) } : undefined;
-    cues.push({ startMs, endMs, text, ...(marks.length ? { marks } : {}), ...(Object.keys(alt).length ? { alt } : {}),
+    cues.push({ startMs, endMs, text, ...(marks.length ? { marks } : {}), ...(emphasis.length ? { emphasis } : {}), ...(Object.keys(alt).length ? { alt } : {}),
       ...(timing ? { timing } : {}), ...(alignment ? { alignment } : {}) });
   }
   cues.sort((a, b) => a.startMs - b.startMs);

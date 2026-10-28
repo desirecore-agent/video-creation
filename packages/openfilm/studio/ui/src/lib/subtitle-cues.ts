@@ -14,6 +14,7 @@
  */
 import type { Clip } from '../api.ts';
 import type { SubtitleCue } from './subtitles.ts';
+import { normalizeEmphasis, sliceEmphasis } from '../../../server/subtitle-emphasis.mjs';
 
 /** The shortest a cue can be made (ms): a frame or two at most is not a subtitle. */
 export const MIN_CUE_MS = 100;
@@ -103,7 +104,7 @@ export const toFilmMs = (span: ClipSpan, sourceMs: number) => Math.round(span.at
 
 export type Mark = { index: number; startMs: number };
 /** A subtitle of a source, in its ms (GET captions/source); `line` and `part` name it as a film cue does. */
-export type SourceCue = { startMs: number; endMs: number; text: string; marks?: Mark[]; timing?: SubtitleCue['timing']; alignment?: SubtitleCue['alignment']; alt?: Record<string, string>; line?: number; part?: number };
+export type SourceCue = { startMs: number; endMs: number; text: string; marks?: Mark[]; emphasis?: SubtitleCue['emphasis']; timing?: SubtitleCue['timing']; alignment?: SubtitleCue['alignment']; alt?: Record<string, string>; line?: number; part?: number };
 
 /** The source subtitle a film cue shows, or -1. */
 export const findSourceCue = (list: readonly SourceCue[], cue: Pick<SubtitleCue, 'line' | 'part'>) =>
@@ -164,6 +165,12 @@ const withMarks = (cue: SourceCue, marks: Mark[] | undefined): SourceCue => {
   return marks?.length ? { ...rest, marks } : rest;
 };
 
+/** 改字必须丢弃旧范围，拆分与合并则投影到新的纯文本索引。 */
+const withEmphasis = (cue: SourceCue, emphasis: SourceCue['emphasis']): SourceCue => {
+  const { emphasis: _old, ...rest } = cue;
+  return emphasis?.length ? { ...rest, emphasis } : rest;
+};
+
 /** The room source cue `i` has between its neighbors. */
 function sourceRoom(list: readonly SourceCue[], i: number) {
   return { lo: i > 0 ? list[i - 1]!.endMs : 0, hi: i < list.length - 1 ? list[i + 1]!.startMs : Infinity };
@@ -194,6 +201,7 @@ export function splitSource(list: readonly SourceCue[], i: number, atMs: number)
   const leftText = k ? cue.text.slice(0, k).trim() : cue.text;
   const rightRaw = k ? cue.text.slice(k) : cue.text;
   const rightText = rightRaw.trim();
+  const leftLead = k ? cue.text.slice(0, k).length - cue.text.slice(0, k).trimStart().length : 0;
   const lead = k ? k + (rightRaw.length - rightRaw.trimStart().length) : 0;
   const leftMarks = k ? cue.marks?.filter((m) => m.index < leftText.length) : cue.marks?.filter((m) => m.startMs < at);
   const rightMarks = (k ? cue.marks?.filter((m) => m.index >= lead).map((m) => ({ index: m.index - lead, startMs: Math.max(at, m.startMs) })) : undefined);
@@ -205,8 +213,10 @@ export function splitSource(list: readonly SourceCue[], i: number, atMs: number)
     altRight[language] = c ? text.slice(c).trim() : text;
   }
   const { line: _line, part: _part, alt: _alt, ...base } = cue;
-  const left = withMarks(editedCue({ ...base, endMs: at, text: leftText, ...(cue.alt ? { alt: altLeft } : {}) }), leftMarks);
-  const right = withMarks(editedCue({ ...base, startMs: at, text: rightText, ...(cue.alt ? { alt: altRight } : {}) }), rightMarks);
+  const left = withEmphasis(withMarks(editedCue({ ...base, endMs: at, text: leftText, ...(cue.alt ? { alt: altLeft } : {}) }), leftMarks),
+    sliceEmphasis(normalizeEmphasis(cue.text, cue.emphasis), leftLead, leftLead + leftText.length));
+  const right = withEmphasis(withMarks(editedCue({ ...base, startMs: at, text: rightText, ...(cue.alt ? { alt: altRight } : {}) }), rightMarks),
+    sliceEmphasis(normalizeEmphasis(cue.text, cue.emphasis), lead, lead + rightText.length));
   return [...list.slice(0, i), left, right, ...list.slice(i + 1)];
 }
 
@@ -222,7 +232,8 @@ export function mergeSource(list: readonly SourceCue[], i: number): SourceCue[] 
   const alt: Record<string, string> = {};
   for (const language of new Set([...Object.keys(a.alt ?? {}), ...Object.keys(b.alt ?? {})])) alt[language] = joinText(a.alt?.[language] ?? '', b.alt?.[language] ?? '');
   const { line: _line, part: _part, alt: _alt, ...base } = a;
-  const one = withMarks(editedCue({ ...base, endMs: Math.max(a.endMs, b.endMs), text, ...(Object.keys(alt).length ? { alt } : {}) }), marks);
+  const emphasis = normalizeEmphasis(text, [...normalizeEmphasis(a.text, a.emphasis), ...normalizeEmphasis(b.text, b.emphasis).map((r) => ({ from: r.from + offset, to: r.to + offset }))]);
+  const one = withEmphasis(withMarks(editedCue({ ...base, endMs: Math.max(a.endMs, b.endMs), text, ...(Object.keys(alt).length ? { alt } : {}) }), marks), emphasis);
   return [...list.slice(0, i), one, ...list.slice(i + 2)];
 }
 
@@ -241,5 +252,5 @@ export function addSource(list: readonly SourceCue[], cue: SourceCue): SourceCue
 /** Cue `i`'s words typed again: timed as a whole (its word times went with the words). */
 export function textSource(list: readonly SourceCue[], i: number, text: string): SourceCue[] {
   const said = text.replace(/\s+/g, ' ').trim();
-  return list.map((c, j) => (j === i && c.text !== said ? withMarks(editedCue({ ...c, text: said }), undefined) : c));
+  return list.map((c, j) => (j === i && c.text !== said ? withEmphasis(withMarks(editedCue({ ...c, text: said }), undefined), undefined) : c));
 }

@@ -30,7 +30,7 @@ test('the preview sizes subtitles by the frame box, never below 11px', () => {
 test('保存发送读取到的完整快照，409保留调用者的草稿', async () => {
   const oldFetch = globalThis.fetch;
   const from = { files: { 'voice.vtt': 'Original VTT', 'voice.fr.vtt': null } };
-  const cues = [{ startMs: 0, endMs: 1000, text: 'My draft' }];
+  const cues = [{ startMs: 0, endMs: 1000, text: 'My draft', emphasis: [{ from: 3, to: 8 }], marks: [{ index: 0, startMs: 0 }], timing: 'measured' as const }];
   let sent: unknown;
   globalThis.fetch = async (_url, options) => {
     sent = JSON.parse(String(options?.body));
@@ -40,6 +40,8 @@ test('保存发送读取到的完整快照，409保留调用者的草稿', async
     await assert.rejects(saveSourceSubtitles('project', 'voice.wav', cues, from), /changed elsewhere/);
     assert.deepEqual(sent, { src: 'voice.wav', cues, from });
     assert.equal(cues[0]!.text, 'My draft');
+    assert.deepEqual(cues[0]!.emphasis, [{ from: 3, to: 8 }]);
+    assert.equal(cues[0]!.timing, 'measured');
   } finally { globalThis.fetch = oldFetch; }
 });
 

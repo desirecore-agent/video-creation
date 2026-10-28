@@ -19,6 +19,7 @@ import { basename, dirname, extname, join } from 'node:path';
 import { writeAtomic } from './atomic.mjs';
 import { inProject, inside, trashFile } from './files.mjs';
 import { alignTranslation, replacePiece, segmentLine } from './subtitle-segments.mjs';
+import { emphasisParts, normalizeEmphasis, normalizeSubtitleText, sliceEmphasis } from './subtitle-emphasis.mjs';
 
 /** @typedef {{ token: string, startSec: number, endSec?: number }} Word */
 
@@ -28,7 +29,7 @@ import { alignTranslation, replacePiece, segmentLine } from './subtitle-segments
 
 /**
  * A subtitle line, in its source's milliseconds. `marks`: where each timed word starts in `text`, and when.
- * @typedef {{ text: string, startMs: number, endMs: number, marks?: { index: number, startMs: number }[], timing?: TimingOrigin, alignment?: WordAlignment }} SpokenLine
+ * @typedef {{ text: string, startMs: number, endMs: number, marks?: { index: number, startMs: number }[], emphasis?: import('./subtitle-emphasis.mjs').SubtitleEmphasis[], timing?: TimingOrigin, alignment?: WordAlignment }} SpokenLine
  * `cut`: each line is one subtitle as it is (CUT_NOTE).
  * @typedef {{ lines: SpokenLine[], speaker?: string, cut?: boolean }} Transcript
  */
@@ -62,8 +63,7 @@ const unescape = (/** @type {string} */ s) => s.replace(/&lt;/g, '<').replace(/&
 const escape = (/** @type {string} */ s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /**
- * A WebVTT's lines. Tags other than timestamps and voices (`<b>`, `<c.x>`, `<lang>`) are dropped; a cue's own lines
- * are one subtitle line.
+ * WebVTT 的标准 b/c.emphasis 仅转为纯文本范围；其他标签不作为 HTML 消费，词时间与说话人独立保留。
  * @param {string} body @returns {Transcript}
  */
 export function parseVtt(body) {
@@ -83,19 +83,29 @@ export function parseVtt(body) {
     let raw = '';
     /** @type {{ index: number, startMs: number }[]} */
     const timed = [];
+    /** @type {import('./subtitle-emphasis.mjs').SubtitleEmphasis[]} */
+    const emphasis = [];
+    /** @type {{ name: string, emphasis: boolean }[]} */
+    const tags = [];
     let pending = /** @type {number | null} */ (null);
-    for (const [, tag, chunk] of rows.slice(timing + 1).join(' ').matchAll(/<([^>]*)>|([^<]+)/g)) {
-      if (tag !== undefined) {
+    for (const [token, tag, chunk] of rows.slice(timing + 1).join(' ').matchAll(/<([^>]*)>|([^<]+)|</g)) {
+      if (tag !== undefined && (/^\/?[A-Za-z][A-Za-z0-9]*(?:[.\s][^<>]*)?$/.test(tag) || Number.isFinite(msOf(tag)))) {
         const at = msOf(tag);
         if (Number.isFinite(at)) pending = at;
         else if (/^v[\s.]/.test(tag)) speaker ??= tag.replace(/^v(\.\S*)?\s+/, '').trim() || undefined;
+        else if (/^(b|c(?:\.[^\s.]+)*)$/.test(tag)) tags.push({ name: tag.split('.')[0], emphasis: tag === 'b' || tag.split('.').slice(1).includes('emphasis') });
+        else if (/^\/(b|c)$/.test(tag)) {
+          const name = tag.slice(1), at = tags.findLastIndex((t) => t.name === name);
+          if (at >= 0) tags.splice(at);
+        }
         continue;
       }
-      const piece = unescape(chunk);
+      const piece = unescape(chunk ?? token);
       if (pending !== null && piece.trim()) { timed.push({ index: raw.length + piece.length - piece.trimStart().length, startMs: pending }); pending = null; }
+      if (tags.some((t) => t.emphasis)) emphasis.push({ from: raw.length, to: raw.length + piece.length });
       raw += piece;
     }
-    const said = raw.replace(/\s+/g, ' ').trim();
+    const normalized = normalizeSubtitleText(raw, emphasis), said = normalized.text;
     if (!said) continue;
     const marks = remapMarks(raw, said, timed);
     /* a line whose words are timed: its first word starts with the cue */
@@ -107,7 +117,7 @@ export function parseVtt(body) {
     const alignment = Number.isSafeInteger(matchedWords) && Number.isSafeInteger(totalWords) && matchedWords >= 0 && totalWords > 0 && matchedWords <= totalWords
       ? { matchedWords, totalWords } : undefined;
     lines.push({ text: said, startMs, endMs: Math.max(endMs, startMs + 1), ...(all.length ? { marks: all } : timingOrigin === 'measured' ? { marks: [{ index: 0, startMs }] } : {}),
-      ...(timingOrigin ? { timing: timingOrigin } : {}), ...(alignment ? { alignment } : {}) });
+      ...(normalized.emphasis ? { emphasis: normalized.emphasis } : {}), ...(timingOrigin ? { timing: timingOrigin } : {}), ...(alignment ? { alignment } : {}) });
   }
   return { lines, ...(speaker ? { speaker } : {}), ...(cut ? { cut: true } : {}) };
 }
@@ -139,12 +149,14 @@ function remapMarks(raw, said, marks) {
 export function vttOf(lines, { speaker, cut } = {}) {
   const cues = lines.map((line) => {
     const marks = (line.marks ?? []).filter((m) => m.index >= 0 && m.index < line.text.length && (m.index > 0 || m.startMs > line.startMs));
+    const payloadSlice = (/** @type {number} */ from, /** @type {number} */ to) => emphasisParts(line.text.slice(from, to), sliceEmphasis(line.emphasis, from, to))
+      .map((part) => part.emphasis ? `<c.emphasis>${escape(part.text)}</c>` : escape(part.text)).join('');
     let payload = '', from = 0;
     for (const m of marks) {
-      payload += `${escape(line.text.slice(from, m.index))}<${stampOf(m.startMs)}>`;
+      payload += `${payloadSlice(from, m.index)}<${stampOf(m.startMs)}>`;
       from = m.index;
     }
-    payload += escape(line.text.slice(from));
+    payload += payloadSlice(from, line.text.length);
     const origin = line.timing ? `openfilm-timing:${line.timing}${line.alignment ? `:${line.alignment.matchedWords}/${line.alignment.totalWords}` : ''}\n` : '';
     return `${origin}${stampOf(line.startMs)} --> ${stampOf(line.endMs)}\n${speaker ? `<v ${speaker}>` : ''}${payload}`;
   });
@@ -194,12 +206,15 @@ function wordCues(lines) {
 function linesOfWords(cues) {
   const words = cues.map((c) => ({ token: c.text, startSec: c.startMs / 1000, endSec: c.endMs / 1000 }));
   let text = '';
+  /** @type {import('./subtitle-emphasis.mjs').SubtitleEmphasis[]} */
+  const emphasis = [];
   cues.forEach((c, i) => {
     const letters = c.text.length === 1 && cues[i - 1]?.text.length === 1;
     text = letters ? text + c.text : joinParts([text, c.text].filter(Boolean));
+    emphasis.push(...(c.emphasis ?? []).map((r) => ({ from: text.length - c.text.length + r.from, to: text.length - c.text.length + r.to })));
   });
   /* 外部逐词 VTT 只说明有时间标签；没有持久来源时仍为未知。 */
-  return spokenLines(text, words, cues.at(-1)?.endMs).map(({ timing: _timing, alignment: _alignment, ...line }) => line);
+  return spokenLines(text, words, cues.at(-1)?.endMs, emphasis).map(({ timing: _timing, alignment: _alignment, ...line }) => line);
 }
 
 /** Keep `src`'s transcript (or its translation into `language`). @param {string} root @param {string} src @param {Transcript} transcript @param {string} [language] */
@@ -345,7 +360,38 @@ function cells(t) {
 
 /** @param {string} t */
 export function stripAudioTags(t) {
-  return t.replace(AUDIO_TAG, '').replace(/ {2,}/g, ' ').trim();
+  return stripAudioText(t).text;
+}
+
+/** 同一轮明确删除与空白映射供分句和强调共用，不通过子串二次定位。
+ * @param {string} source @param {readonly import('./subtitle-emphasis.mjs').SubtitleEmphasis[]} [ranges]
+ * @returns {{ text: string, emphasis?: import('./subtitle-emphasis.mjs').SubtitleEmphasis[] }} */
+function stripAudioText(source, ranges) {
+  if (!ranges?.length) return { text: source.replace(AUDIO_TAG, '').replace(/ {2,}/g, ' ').trim() };
+  let raw = '', from = 0;
+  /** @type {import('./subtitle-emphasis.mjs').SubtitleEmphasis[]} */
+  const kept = [];
+  const append = (/** @type {number} */ a, /** @type {number} */ b) => {
+    kept.push(...sliceEmphasis(ranges, a, b).map((r) => ({ from: raw.length + r.from, to: raw.length + r.to })));
+    raw += source.slice(a, b);
+  };
+  for (const match of source.matchAll(AUDIO_TAG)) {
+    append(from, match.index);
+    from = match.index + match[0].length;
+  }
+  append(from, source.length);
+  const collapsed = raw.replace(/ {2,}/g, ' '), text = collapsed.trim();
+  const lead = collapsed.length - collapsed.trimStart().length;
+  const at = new Array(raw.length + 1).fill(0);
+  let j = 0, previousSpace = false;
+  for (let i = 0; i < raw.length; i += 1) {
+    at[i] = Math.max(0, Math.min(text.length, j - lead));
+    if (raw[i] !== ' ' || !previousSpace) j += 1;
+    previousSpace = raw[i] === ' ';
+  }
+  at[raw.length] = text.length;
+  const emphasis = normalizeEmphasis(text, kept.map((r) => ({ from: at[r.from], to: at[r.to] })));
+  return { text, ...(emphasis.length ? { emphasis } : {}) };
 }
 
 /** A half-width full stop ends a sentence only before a space or the end, and not after a digit (1.21, 0.5%). @param {string} t @param {number} i */
@@ -443,10 +489,11 @@ function firstAfter(marks, at) {
  * as). `marks`: each matched word's place in the line and its start. `durMs`: the source's length (the last line's
  * end), if known.
  * @param {string | undefined} source @param {readonly Word[] | undefined} words @param {number | undefined} durMs
+ * @param {readonly import('./subtitle-emphasis.mjs').SubtitleEmphasis[]} [emphasis]
  * @returns {SpokenLine[]}
  */
-export function spokenLines(source, words, durMs) {
-  const said = stripAudioTags(source ?? '');
+export function spokenLines(source, words, durMs, emphasis) {
+  const normalized = stripAudioText(source ?? '', emphasis), said = normalized.text;
   if (!said) return [];
   const total = durMs !== undefined && Number.isFinite(durMs) ? durMs : undefined;
   const timedWords = (words ?? []).filter((w) => w.token && Number.isFinite(w.startSec) && w.startSec >= 0);
@@ -474,11 +521,12 @@ export function spokenLines(source, words, durMs) {
     };
     return chunks(said).map((piece) => {
       const raw = said.slice(piece.from, piece.to), lead = raw.length - raw.trimStart().length;
+      const ownEmphasis = sliceEmphasis(normalized.emphasis, piece.from + lead, piece.from + lead + raw.trim().length);
       const startMs = Math.round(atIndex(piece.from)), endMs = Math.round(atIndex(piece.to));
       const own = marks.filter((m) => m.index >= piece.from && m.index < piece.to)
         .map((m) => ({ index: m.index - piece.from - lead, startMs: Math.round(m.startSec * 1000) }));
       return { text: raw.trim(), startMs, endMs: Math.max(startMs + 1, endMs), timing: /** @type {const} */ ('estimated'),
-        ...(alignment ? { alignment } : {}), ...(own.length ? { marks: own } : {}) };
+        ...(alignment ? { alignment } : {}), ...(own.length ? { marks: own } : {}), ...(ownEmphasis.length ? { emphasis: ownEmphasis } : {}) };
     });
   }
   const pauseAt = (/** @type {number} */ from, /** @type {number} */ to) => {
@@ -495,8 +543,10 @@ export function spokenLines(source, words, durMs) {
     const inPiece = marks.slice(firstAfter(marks, piece.from - 1), firstAfter(marks, piece.to - 1));
     const raw = said.slice(piece.from, piece.to);
     const lead = raw.length - raw.trimStart().length;
+    const ownEmphasis = sliceEmphasis(normalized.emphasis, piece.from + lead, piece.from + lead + raw.trim().length);
     return {
       text: raw.trim(),
+      ...(ownEmphasis.length ? { emphasis: ownEmphasis } : {}),
       /* a piece with no matched word (all digits or marks) follows the one before */
       startMs: inPiece[0] ? Math.round(inPiece[0].startSec * 1000) : 0,
       spokenUntilMs: inPiece.reduce((end, m) => Math.max(end, Math.round((m.endSec ?? m.startSec) * 1000)), 0),
@@ -513,6 +563,7 @@ export function spokenLines(source, words, durMs) {
     const spoken = Math.max(500, cells(one.text) * FALLBACK_MS_PER_CELL);
     return {
       text: one.text,
+      ...(one.emphasis?.length ? { emphasis: one.emphasis } : {}),
       startMs: one.startMs,
       endMs: Math.min(until, Math.max(one.startMs + spoken, one.spokenUntilMs) + GAP_MS),
       ...(one.marks.length ? { marks: one.marks } : {}), timing: /** @type {const} */ ('measured'), ...(alignment ? { alignment } : {}),

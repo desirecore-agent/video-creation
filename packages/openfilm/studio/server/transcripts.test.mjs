@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFil
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseVtt, projectSpeech, readTranscript, spokenLines, setLine, transcriptIsCurrent, translationsOf, vttOf, writeTranscript } from './transcripts.mjs';
+import { emphasisParts, normalizeEmphasis, normalizeSubtitleText } from './subtitle-emphasis.mjs';
 
 const LINES = [{ text: 'Hello there.', startMs: 0, endMs: 1000 }];
 
@@ -113,4 +114,65 @@ test('known short cues are not mistaken for legacy word-cue files and keep their
   const body = vttOf([single]);
   assert.doesNotMatch(body, /\n<00:00:10\.000>/, 'the implicit first mark needs no start-equal timestamp tag');
   assert.deepEqual(parseVtt(body).lines, [single]);
+});
+
+test('标准嵌套强调跨词时标与 emoji 归一化，正文和时间来源往返不变', () => {
+  const body = 'WEBVTT\n\nopenfilm-timing:measured:2/2\n00:00:00.000 --> 00:00:03.000\n<v Voice>  <b>A <c.other>😀</c> <c.emphasis>B<00:00:01.000>C</c></b> <span style="color:red">plain</span> &lt;b&gt; 1 < 2\n';
+  const parsed = parseVtt(body);
+  assert.equal(parsed.speaker, 'Voice');
+  assert.deepEqual(parsed.lines, [{ text: 'A 😀 BC plain <b> 1 < 2', startMs: 0, endMs: 3000,
+    marks: [{ index: 0, startMs: 0 }, { index: 6, startMs: 1000 }], emphasis: [{ from: 0, to: 7 }],
+    timing: 'measured', alignment: { matchedWords: 2, totalWords: 2 } }]);
+  const saved = vttOf(parsed.lines, parsed);
+  assert.match(saved, /<c\.emphasis>/);
+  assert.doesNotMatch(saved, /<b>|<span|style=/);
+  assert.match(saved, /&lt;b&gt; 1 &lt; 2/);
+  assert.deepEqual(parseVtt(saved), parsed);
+});
+
+test('只有标准 b 与 emphasis 类提供强调，未知标签和裸小于号保留纯文本语义', () => {
+  const line = parseVtt('WEBVTT\n\n00:00:00.000 --> 00:00:02.000\n<b>a<b>b</b>c</b>d<c.other.emphasis>e</c><c.other>f</c><b style="color:red">g</b> < 3 > &lt;c.emphasis&gt; <tail\n').lines[0];
+  assert.equal(line.text, 'abcdefg < 3 > <c.emphasis> <tail');
+  assert.deepEqual(line.emphasis, [{ from: 0, to: 3 }, { from: 4, to: 5 }]);
+  assert.equal(line.marks, undefined);
+});
+
+test('共享范围函数按 UTF-16 投影空白、拒绝代理对中间位置并分成纯文本', () => {
+  const raw = '  重  😀  点  ';
+  assert.deepEqual(normalizeSubtitleText(raw, [{ from: 2, to: 3 }, { from: 5, to: 10 }]), {
+    text: '重 😀 点', emphasis: [{ from: 0, to: 1 }, { from: 2, to: 6 }],
+  });
+  assert.deepEqual(normalizeEmphasis('a😀b', [{ from: 2, to: 3 }, { from: 1, to: 3 }, { from: 3, to: 4 }]), [{ from: 1, to: 4 }]);
+  assert.deepEqual(emphasisParts('a😀b', [{ from: 1, to: 3 }]), [
+    { text: 'a', from: 0, to: 1, emphasis: false }, { text: '😀', from: 1, to: 3, emphasis: true }, { text: 'b', from: 3, to: 4, emphasis: false },
+  ]);
+});
+
+test('旧逐词 VTT 合句时保留第二个重复词的强调与原词时间', async () => {
+  const { root } = folders();
+  const cues = [
+    { text: 'red', startMs: 0, endMs: 300 },
+    { text: 'red', startMs: 400, endMs: 700, emphasis: [{ from: 0, to: 3 }] },
+    { text: 'green', startMs: 800, endMs: 1100 },
+  ];
+  writeFileSync(join(root, 'assets/vo.vtt'), vttOf(cues));
+  const read = await readTranscript(root, 'assets/vo.mp3');
+  assert.equal(read.lines[0].text, 'red red green');
+  assert.deepEqual(read.lines[0].emphasis, [{ from: 4, to: 7 }]);
+  assert.deepEqual(read.lines[0].marks, [{ index: 0, startMs: 0 }, { index: 4, startMs: 400 }, { index: 8, startMs: 800 }]);
+  assert.equal(read.lines[0].timing, undefined);
+});
+
+test('旧逐词合句删除表演标签后，后词强调依原字符映射而非子串回搜', async () => {
+  const { root } = folders();
+  writeFileSync(join(root, 'assets/vo.vtt'), vttOf([
+    { text: 'alpha', startMs: 0, endMs: 300 },
+    { text: '[pause]', startMs: 400, endMs: 700, emphasis: [{ from: 0, to: 7 }] },
+    { text: 'omega', startMs: 800, endMs: 1100, emphasis: [{ from: 0, to: 5 }] },
+  ]));
+  const read = await readTranscript(root, 'assets/vo.mp3');
+  assert.equal(read.lines[0].text, 'alpha omega');
+  assert.deepEqual(read.lines[0].emphasis, [{ from: 6, to: 11 }]);
+  assert.deepEqual(read.lines[0].marks, [{ index: 0, startMs: 0 }, { index: 6, startMs: 800 }]);
+  assert.equal(read.lines[0].timing, undefined);
 });
