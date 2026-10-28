@@ -51,8 +51,8 @@
     },
     {
       "path": "desirecore/RUNTIME.md",
-      "sha256": "eac7c8e78545050b4e961c8f2cd23f53d19c1618fd3e27d8f5e53a1977f57ac9",
-      "size": 46260,
+      "sha256": "0cf46fd075dc4b3f938e2ccd9b317420c46749271aeb89977d5a4ca51ce47309",
+      "size": 46482,
       "role": "documentation"
     },
     {
@@ -69,8 +69,8 @@
     },
     {
       "path": "desirecore/client.mjs",
-      "sha256": "dd46ba8dd72fd7f07a010cff5c447f02f63c09c148a32ce8896aee39dbd39ab9",
-      "size": 8111,
+      "sha256": "25fa4f181546e12fb0397b536d678eb73dbe37c91e5559a87faa0250e0b317f9",
+      "size": 8434,
       "role": "runtime"
     },
     {
@@ -192,6 +192,12 @@
       "sha256": "a77a1c089806b39ad339535bdf3677f636c91d96693e8ad7b11fe733f650ea64",
       "size": 101176,
       "role": "license"
+    },
+    {
+      "path": "desirecore/local-json-request.mjs",
+      "sha256": "2dd17935775ba6903982aeaee0866d369b0a3e069bb169cbcb0807766ffa65a6",
+      "size": 3226,
+      "role": "runtime"
     },
     {
       "path": "desirecore/mcp.mjs",
@@ -321,8 +327,8 @@
     },
     {
       "path": "package.json",
-      "sha256": "0746b089a3e7f6e0501d9ace4bb8274f1012ff5fc4eeb6ef750185119529a3bd",
-      "size": 4655,
+      "sha256": "52536c94861967348a99281ea4326d5f21607c9d413fb981adfc00f2460e03e8",
+      "size": 4694,
       "role": "dependency"
     },
     {
@@ -1137,8 +1143,8 @@
     },
     {
       "path": "packages/openfilm/studio/server/server.mjs",
-      "sha256": "fb31d098de965cdb20873591915cea7ed9ac96b9fa7fdb336a21fa4e38bc7de6",
-      "size": 80718,
+      "sha256": "b0ad351b0fbcd90162286ca0124c47a3e955745e63092c6f9e080859aa105e95",
+      "size": 80505,
       "role": "runtime"
     },
     {
@@ -1155,8 +1161,8 @@
     },
     {
       "path": "packages/openfilm/studio/server/speech-cut.mjs",
-      "sha256": "fbc704fe306578b78a07ab1deef2671a861bc7e42dc438f63a274d2ed855fc5b",
-      "size": 9760,
+      "sha256": "3716136e2bc048550ddfa349d448709b13144b13cc9fdf8d1c5f8e1a28603e1e",
+      "size": 10448,
       "role": "runtime"
     },
     {
@@ -1282,7 +1288,7 @@
   ],
   "source": {
     "kind": "worktree",
-    "sha256": "83d8a114370659a04a2a60460e58d6426ca18cf62925fdf0c8eddf0678c77402"
+    "sha256": "ec81338421fc1e55542eab9142d1fd41487d2f8046e0934261c1cd0d13e3e050"
   },
   "supportedPlatforms": [
     "darwin",
@@ -1315,5 +1321,5 @@
     "restoreInstructionsPath": "desirecore/RUNTIME.md"
   },
   "instructionsPath": "desirecore/RUNTIME.md",
-  "releaseDigest": "7ac8802b0bd703b667b4d8499dae1848aa5e43c1905792a4f1332232e8fe447b"
+  "releaseDigest": "6d4cff161d67bdb3e34836dd7baf12a2f37ac48935b3f93a47ddb208c6c0944b"
 }

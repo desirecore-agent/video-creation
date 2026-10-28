@@ -1,6 +1,6 @@
 // @ts-check
 /** 文稿只选择声画区间；复用同源时间线计划器和既有 edit/撤销，不写第二份工程。 */
-import Ajv from 'ajv';
+import { Ajv } from 'ajv';
 import { clipSpan, kindOf } from '../../src/film-doc.mjs';
 import { readProjectFilm, EditError } from './film.mjs';
 import { filmCaptions } from './captions.mjs';
@@ -49,7 +49,14 @@ export const speechCutApplySchema = {
   properties: { base: revision, ops: timelineOpsSchema, preconditions: speechCutPreconditionsSchema },
 };
 export const speechCutContract = () => ({ contractVersion: 1, requestSchema: speechCutRequestSchema, applySchema: speechCutApplySchema });
-const validate = new Ajv({ allErrors: true }).compile(speechCutRequestSchema);
+const ajv = new Ajv({ allErrors: true });
+const validate = ajv.compile(speechCutRequestSchema);
+// 构建产物的JS不保留TS字面量类型；在同源边界按实际支持的完整Op合同核验并收窄。
+/** @type {import('ajv').ValidateFunction<import('./speech-cut-types.mjs').SpeechCutPlan['ops']>} */
+const validatePlannedOps = ajv.compile({
+  ...timelineOpsSchema, $id: 'urn:desirecore:video-creation:speech-cut-ops:v1',
+  items: { allOf: [timelineOpsSchema.items, { type: 'object', required: ['op'], properties: { op: { enum: ['split', 'props', 'remove'] } } }] },
+});
 const invalid = (/** @type {string} */ message) => new EditError(message, 'invalid');
 const conflict = (/** @type {string} */ message) => new EditError(message, 'conflict');
 
@@ -59,7 +66,7 @@ const conflict = (/** @type {string} */ message) => new EditError(message, 'conf
  * @returns {Promise<import('./speech-cut-types.mjs').SpeechCutPlan>}
  */
 export async function planSpeechCut(root, ask, options = {}) {
-  if (!validate(ask)) throw invalid(`文稿精剪参数无效：${new Ajv().errorsText(validate.errors)}`);
+  if (!validate(ask)) throw invalid(`文稿精剪参数无效：${ajv.errorsText(validate.errors)}`);
   const current = await readProjectFilm(root);
   if (!current.doc) throw invalid(current.problems.join('\n') || '影片不可读取。');
   if (current.rev !== ask.base) throw conflict('影片已改变，请重读影片和文稿后重新选择。');
@@ -102,6 +109,8 @@ export async function planSpeechCut(root, ask, options = {}) {
   const { planCutRange } = await import('../ui/dist/timeline-plan.mjs');
   const planned = planCutRange(model, ask.clip, startMs, endMs, ask.follow ?? { sync: true });
   if (!planned || !planned.ops.length) throw invalid('该区间不能精剪：检查范围、最小片长以及目标/关联轨道是否锁定。');
+  const rawOps = /** @type {unknown} */ (planned.ops);
+  if (!validatePlannedOps(rawOps)) throw invalid(`精剪计划器返回了无效操作：${ajv.errorsText(validatePlannedOps.errors)}`);
   const affected = [...planned.placed.keys()];
   for (const clip of doc.tracks.flatMap((t) => t.clips)) {
     if (affected.includes(clip.id) && (clip.overrides?.some((o) => o.lock) || clip.motion?.locked?.length))
@@ -114,7 +123,7 @@ export async function planSpeechCut(root, ask, options = {}) {
   return {
     base: ask.base, clip: ask.clip, text: selected.map((c) => c.text).join(' '), source: { src: target.src, revision: ask.sourceRevision },
     range: { sourceStartMs: sourceAt(startMs), sourceEndMs: sourceAt(endMs), filmStartMs: startMs, filmEndMs: endMs },
-    timing: [...new Set(selected.map((c) => c.timing ?? 'unknown'))], affected, ops: planned.ops, shortMs: planned.shortMs,
+    timing: [...new Set(selected.map((c) => c.timing ?? 'unknown'))], affected, ops: rawOps, shortMs: planned.shortMs,
     preconditions: { strictBase: true, subtitles: [{ src: target.src, revision: ask.sourceRevision }] },
   };
 }

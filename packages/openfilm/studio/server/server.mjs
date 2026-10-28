@@ -505,7 +505,7 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
       try { return json(res, 200, await prepareWorkingMedia(project.path, body, { signal: controller.signal })); }
       catch (error) {
         if (controller.signal.aborted) return;
-        if (Number.isInteger(error.status) && error.status >= 400 && error.status < 600) throw new HttpError(error.status, error.message, { code: error.code });
+        // MediaError沿已有服务边界返回状态；不把未知异常强制当成带status的对象。
         throw error;
       }
     }
@@ -514,7 +514,6 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
         ? (await pageFacts(project.path, pages.folderUrl(project), src)).duration : (await probe(project.path, src)).duration })); }
       catch (error) {
         if (error instanceof EditError) throw new HttpError(error.kind === 'conflict' ? 409 : 422, error.message);
-        if (Number.isInteger(error.status) && error.status >= 400 && error.status < 600) throw new HttpError(error.status, error.message, { code: error.code });
         throw error;
       }
     }

@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { normalizeVideoExportOptions } from '../packages/openfilm/studio/server/video-export-options.mjs';
 import { REVIEW_MAX_FRAME_BYTES } from '../packages/openfilm/src/review-frames.mjs';
+import { localJsonRequest } from './local-json-request.mjs';
 
 export async function connectStudio(config, request = fetch) {
   let run;
@@ -12,11 +13,13 @@ export async function connectStudio(config, request = fetch) {
   const origin = new URL(run.origin);
   if (origin.protocol !== 'http:' || origin.hostname !== '127.0.0.1' || !origin.port || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash
     || typeof run.key !== 'string' || !/^[a-f0-9]{48}$/.test(run.key)) throw new Error('本地运行记录无效，请重新启动视频创作。');
-  const call = async (path, body, method = body === undefined ? 'GET' : 'POST', { timeoutMs = 30_000, unknownReceipt = false } = {}) => {
+  const call = async (path, body, method = body === undefined ? 'GET' : 'POST', { timeoutMs = 30_000, unknownReceipt = false, localLongResponse = false } = {}) => {
     if (!path.startsWith('/api/')) throw new Error('无效的视频创作操作路径。');
     let response;
     try {
-      response = await request(new URL(path, origin), {
+      // 自定义 request 继续拥有其传输语义；仅默认媒体准备避开 fetch 更短的响应头等待上限。
+      const send = localLongResponse && request === fetch ? localJsonRequest : request;
+      response = await send(new URL(path, origin), {
         method, redirect: 'error', signal: AbortSignal.timeout(timeoutMs),
         headers: { 'x-studio-key': run.key, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -59,7 +62,7 @@ export async function projectClient(config, folder, options) {
   return { ...studio, project, base,
     inspect: () => studio.call(base),
     captions: () => studio.call(`${base}/captions`),
-    prepareMedia: (ask) => studio.call(`${base}/media/prepare`, ask, 'POST', { timeoutMs: 2 * 60 * 60_000 }),
+    prepareMedia: (ask) => studio.call(`${base}/media/prepare`, ask, 'POST', { timeoutMs: 2 * 60 * 60_000, localLongResponse: true }),
     speechCutPlan: (ask) => studio.call(`${base}/speech-cut/plan`, ask),
     applySpeechCut: (plan) => {
       if (!plan || plan.preconditions?.strictBase !== true || !Array.isArray(plan.preconditions.subtitles) || !plan.preconditions.subtitles.length) throw new Error('文稿剪辑必须携带原计划的影片与字幕前置版本；请先重新规划切口。');

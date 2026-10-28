@@ -281,7 +281,7 @@ VTT cue identifier `openfilm-timing:measured|estimated|edited[:matched/total]` �
 
 `prepare-media --schema` 离线返回 Draft-07 请求；CLI `prepare-media <项目> --args <JSON文件>`、MCP `video_prepare_media` 与原鉴权 `POST /api/projects/:id/media/prepare` 使用同一合同：`{src:"assets/original.mp4",shortEdge:720}`，短边只可720/1080，默认720、不放大，固定30fps/H264/AAC/BT709。只准备整源、不裁段/改速、不自动修改影片；返回 `output.path` 供调用者经已有 patch 显式换源。
 
-产物与 `provenance.json` 在 `assets/working/<源+参数+pipeline摘要>/` 完整后发布。读取前后核源身份/摘要，复用前核输出字节，失败/取消只清本次临时文件；不承诺跨进程或跨文件系统事务。该本地请求沿请求取消，不创建第二套持久作业系统；客户端独立等待上限2小时，断连不以没有回执证明绝无已发布文件。先检查同源结果，不并发重复转码。原片保留，工作副本无继承GPS与HDR动态元信息。
+产物与 `provenance.json` 在 `assets/working/<源+参数+pipeline摘要>/` 完整后发布。读取前后核源身份/摘要，复用前核输出字节，失败/取消只清本次临时文件；不承诺跨进程或跨文件系统事务。该本地请求沿请求取消，不创建第二套持久作业系统；默认CLI/MCP仅对此本机准备请求使用内置HTTP长JSON传输，仍复用原鉴权/状态解析、拒绝重定向、限制256KiB回执和2小时Abort上限，避免默认fetch独立的响应头等待先到期；自定义request注入保持原传输。断连不以没有回执证明绝无已发布文件。先检查同源结果，不并发重复转码。原片保留，工作副本无继承GPS与HDR动态元信息。
 
 probe补充编码/显示尺寸、旋转、颜色原语及视频/音轨首PTS与整数time_base。仅明确HLG/PQ输入使用显式HDR→SDR转换；缺所需滤镜明确失败，不把10→8bit称tone-map。此策略不是校准调色或Dolby Vision保真。工作媒体共用视频起点归零，晚到的音轨补首静音；`sourceMediaSeconds=workingCopySeconds+mapping.sourceTimeAtWorkingZero`。旧离线ASR若从解码WAV零点开始，`workingCopySeconds=asrWaveformSeconds+mapping.originalAudioWaveformToWorkingOffsetSeconds`。首起点映射不证明任意文件中途时间戳无跳变、识别正确或音素对齐；需实际检查有声窗。
 
