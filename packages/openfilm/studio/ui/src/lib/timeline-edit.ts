@@ -18,14 +18,13 @@
  */
 import type { Op, PropValue } from '../api.ts';
 import type { TimelineTrack } from './timeline-layout';
-import { MIN_BLOCK_MS } from './timeline-drag.ts';
-import { frameMs } from './timecode.ts';
+import { MIN_BLOCK_MS, DEFAULT_DISPLAY_FPS } from './timeline-constants.ts';
 
 /** Clips closer than this are touching: film.html rounds each time alone, to the millisecond. */
 export const TOUCH_MS = 1;
 
 /** What an overwrite leaves of a clip shorter than this goes with the rest: a sliver of a frame is not a shot. */
-const PIECE_MIN_MS = frameMs(1);
+const PIECE_MIN_MS = 1000 / DEFAULT_DISPLAY_FPS;
 
 /** A clip as an edit sees it. */
 export interface EditClip {
@@ -1141,4 +1140,30 @@ export function soundTrackFor(model: EditModel, range: { startMs: number; endMs:
   const sounds = model.filter((t) => t.role === 'audio');
   const last = Math.max(-1, ...model.map((t) => t.index));
   return { insert: sounds.length ? Math.max(...sounds.map((t) => t.index)) + 1 : last + 1 };
+}
+
+/**
+ * 文稿精剪沿既有覆盖/联动/波纹算术删除一个成片区间。目标和关联声轨有锁时拒绝；
+ * sync 开启时同时清除其他未锁轨道的该时间段，避免被删声音或画面留在切口中。
+ * 不选择词、不判断是否应删；调用者须让人预听并确认范围。
+ */
+export function planCutRange(model: EditModel, id: string, startMs: number, endMs: number, opts: Follow): EditPlan | null {
+  const targetTrack = model.find((t) => t.clips.some((c) => c.id === id));
+  const target = targetTrack?.clips.find((c) => c.id === id);
+  if (!targetTrack || !target || targetTrack.locked || !Number.isFinite(startMs) || !Number.isFinite(endMs)
+    || endMs - startMs < MIN_BLOCK_MS || startMs < target.startMs - TOUCH_MS || endMs > target.endMs + TOUCH_MS) return null;
+  const a = Math.max(target.startMs, startMs), b = Math.min(target.endMs, endMs);
+  const linkedTracks = model.filter((t) => t.clips.some((c) => target.link && c.link === target.link && c.endMs > a && c.startMs < b));
+  if (linkedTracks.some((t) => t.locked)) return null;
+  const own = [...new Set([targetTrack.index, ...linkedTracks.map((t) => t.index)])];
+  const d = draftOf(model);
+  if (opts.sync) {
+    for (const track of d.tracks) if (!track.locked) clearRange(d, track, a, b);
+  } else {
+    clearLinked(d, [targetTrack.index], a, b);
+    clearRange(d, trackAt(d, targetTrack.index)!, a, b);
+  }
+  const f = follow(d, own, opts);
+  rippleAt(d, b, -(b - a), f.tracks, undefined, f.bound);
+  return planOf(d);
 }

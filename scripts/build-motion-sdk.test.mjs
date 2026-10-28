@@ -4,7 +4,7 @@ import { readFile, copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { transform } from 'esbuild';
-import { buildMotionSdk } from './build-motion-sdk.mjs';
+import { buildMotionSdk, buildTimelinePlan } from './build-motion-sdk.mjs';
 
 test('自包含 SDK 及单文件副本保留实际五项依赖的完整许可，声明不改变可执行代码', async () => {
   const [file] = await buildMotionSdk({ write: false });
@@ -28,4 +28,16 @@ test('自包含 SDK 及单文件副本保留实际五项依赖的完整许可，
     await copyFile(join(dir, 'motion.mjs'), join(dir, 'saved-copy.mjs'));
     assert.equal(await readFile(join(dir, 'saved-copy.mjs'), 'utf8'), text);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+
+test('服务端精剪bundle无React/DOM依赖，单文件加载后沿同源波纹规则计划', async () => {
+  const [file] = await buildTimelinePlan({ write: false });
+  const text = file.contents.toString('utf8');
+  assert.ok(!/from ["'](?:react|[^.][^"']*)["']/.test(text));
+  assert.ok(!text.includes('document.') && !text.includes('useSyncExternalStore'));
+  const { planCutRange } = await import(`data:text/javascript;base64,${file.contents.toString('base64')}`);
+  const plan = planCutRange([{ index: 0, clips: [{ id: 'voice', startMs: 0, endMs: 10000, inMs: 0, speed: 1, sourceMs: 10000 }] }], 'voice', 2000, 3000, { sync: true });
+  assert.equal(plan.shortMs, 0);
+  assert.equal(plan.ops[0].op, 'split');
 });

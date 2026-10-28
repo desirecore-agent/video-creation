@@ -8,6 +8,8 @@
  *   · a clip never snaps to itself, or it could not move at all.
  */
 import { snapToFrame } from './timecode.ts';
+import { MIN_BLOCK_MS } from './timeline-constants.ts';
+export { MIN_BLOCK_MS } from './timeline-constants.ts';
 
 /** Past this many pixels a press is a drag; under it, a click. */
 export const DRAG_THRESHOLD_PX = 5;
@@ -27,7 +29,7 @@ export function dragLifted(mode: 'move' | 'trim-start' | 'trim-end' | 'roll' | '
 export const SNAP_THRESHOLD_PX = 8;
 
 /** The shortest a clip can be. A zero-length clip cannot be seen, and usually means a negative number got written. */
-export const MIN_BLOCK_MS = 100;
+
 
 export interface SnapTarget {
   ms: number;

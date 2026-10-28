@@ -193,11 +193,28 @@ export async function writeProjectFilm(root, value, before = '') {
  * operations by clip id. Returns the new text, revision, the value written and the checked edit. Throws EditError:
  * `conflict` when an operation names a clip that is gone, `invalid` when the result is not a film.
  * @param {string} root @param {string | null} base @param {Op[]} ops
+ * @param {import('./speech-cut-types.mjs').EditPreconditions} [preconditions]
  */
-export async function editProjectFilm(root, base, ops) {
+export async function editProjectFilm(root, base, ops, preconditions) {
   if (!Array.isArray(ops) || !ops.length || ops.length > 1000 || ops.some((op) => !op || typeof op !== 'object' || typeof op.op !== 'string')) throw new EditError('an edit needs 1 to 1000 operation objects', 'invalid');
   const key = await projectKey(root);
-  return serial(key, () => editProjectFilmCore(root, key, base, ops));
+  if (preconditions !== undefined) {
+    if (!preconditions || preconditions.strictBase !== true || !Array.isArray(preconditions.subtitles) || !preconditions.subtitles.length
+      || preconditions.subtitles.length > 64 || preconditions.subtitles.some((x) => !x || typeof x.src !== 'string' || !x.src || !/^[a-f0-9]{64}$/.test(x.revision))
+      || typeof base !== 'string' || !/^[a-f0-9]{16}$/.test(base)) throw new EditError('文稿精剪必须携带严格影片版本和所见字幕版本。', 'invalid');
+  }
+  return serial(key, async () => {
+    const verify = async () => {
+      if (!preconditions) return;
+      const { readSourceSnapshot, sourceSnapshotRevision } = await import('./subtitle-edits.mjs');
+      for (const source of preconditions.subtitles) {
+        if (sourceSnapshotRevision(await readSourceSnapshot(root, source.src)) !== source.revision)
+          throw new EditError('字幕已改变，旧文稿剪辑提案未应用；请重读后重新选择。', 'conflict');
+      }
+    };
+    await verify();
+    return editProjectFilmCore(root, key, base, ops, { strict: preconditions?.strictBase, verify });
+  });
 }
 
 /** 队列内复用既有编辑核心；源码发布只提供严格 base 和提交前核验，不递归公开队列。

@@ -6,6 +6,7 @@ const FILES = typeof navigator !== 'undefined' && /^win/i.test(navigator.platfor
   : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? 'Finder' : 'Files';
 
 export const en = {
+  speechCut: {"select": "Cut this sentence…", "title": "Cut speech and picture", "last": "Through this sentence", "adjustNote": "Signed film milliseconds: negative moves earlier, positive later. Preview breaths before applying.", "startAdjust": "In point adjustment (ms)", "endAdjust": "Out point adjustment (ms)", "busy": "Preparing…", "plan": "Preview deletion range", "range": "Film {start}–{end}s", "sourceRange": "Source {start}–{end}s", "affected": "Affected clip entries: {n}", "timingNote": "Timing source, not recognition accuracy:", "short": "Other tracks limit closure; {ms}ms of gap remains.", "preview": {"start": "Hear original in point", "end": "Hear original out point", "join": "Hear proposed join"}, "previewNote": "Live player preview; seek latency can differ from the encoded cut. Check the final export.", "apply": "Delete this speech and picture, then close gap", "applyNote": "Source subtitles stay unchanged. One timeline edit, one undo."},
   review: {
     overview: 'Overview',
     "pairNote": "The two observations were chosen separately. Their content is not automatically aligned or judged.",

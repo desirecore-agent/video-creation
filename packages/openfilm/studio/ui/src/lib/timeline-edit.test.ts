@@ -12,6 +12,7 @@ import {
   linkedIds,
   magnetOn,
   mainTrackOf,
+  planCutRange,
   planCloseGap,
   planCloseMainGaps,
   planCloseTrackGaps,
@@ -659,4 +660,36 @@ test('no plan makes two clips on a track overlap', () => {
     planSpeed(m, ['d'], 0.25, { ripple: true, sync: true }),
   ];
   for (const plan of plans) apart(after(m, plan!));
+});
+
+
+test('文稿删区间保留两侧源时间，声画联动同步闭合，未关联素材保留', () => {
+  const m = model(
+    [['picture', 0, 10, { inMs: 1000, link: 'pair' }]],
+    { role: 'audio', clips: [['voice', 0, 10, { inMs: 1000, link: 'pair' }]] },
+    [['other', 12, 14]],
+  );
+  const plan = planCutRange(m, 'picture', 2000, 3000, { sync: false });
+  assert.ok(plan);
+  const next = applyOps(filmOf(m), plan.ops) as FilmValue;
+  assert.deepEqual(next.tracks.slice(0, 2).map((t) => t.clips.map((c) => [c.at ?? 0, c.time])), [
+    [[0, [1, 3]], [2, [4, 11]]], [[0, [1, 3]], [2, [4, 11]]],
+  ]);
+  assert.equal(next.tracks[2].clips[0].at, 12);
+});
+
+test('文稿同步删除会剪除跨区间的图层，锁定轨道保持原位置', () => {
+  const m = model([['voice', 0, 10]], [['overlay', 1, 7]], { locked: true, clips: [['manual', 8, 10]] });
+  const plan = planCutRange(m, 'voice', 2000, 3000, { sync: true });
+  assert.ok(plan);
+  const next = applyOps(filmOf(m), plan.ops) as FilmValue;
+  assert.deepEqual(next.tracks[1].clips.map((c) => [c.at ?? 0, c.time]), [[1, [0, 1]], [2, [2, 6]]]);
+  assert.equal(next.tracks[2].clips[0].at, 8);
+});
+
+test('文稿目标和关联轨锁定或范围越界时不生成可提交编辑', () => {
+  assert.equal(planCutRange(model({ locked: true, clips: [['a', 0, 5]] }), 'a', 1000, 2000, { sync: true }), null);
+  assert.equal(planCutRange(model([['a', 0, 5, { link: 'pair' }]], { locked: true, clips: [['b', 0, 5, { link: 'pair' }]] }), 'a', 1000, 2000, { sync: false }), null);
+  assert.equal(planCutRange(model([['a', 0, 5]]), 'a', -2, 2000, { sync: true }), null);
+  assert.equal(planCutRange(model([['a', 0, 5]]), 'a', 1000, 1020, { sync: true }), null);
 });

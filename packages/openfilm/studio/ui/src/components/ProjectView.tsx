@@ -1,5 +1,6 @@
 import { ReviewDialog, type ReviewSelection } from './ReviewDialog';
 import { maySeekEngineering } from '@/lib/reviews';
+import { releaseSpeechPreview } from '@/lib/speech-cut';
 /**
  * A project in Studio: the top bar, then the assets, the picture and the inspector side by side, and the timeline
  * across the bottom. Every pane floats on the darker board; the seams between them are the board showing through and
@@ -60,7 +61,7 @@ import { boxNow, chatPointOf, draftBoxesAt, draftMarksOf, sameClip, NO_DRAFT, ty
 import { shortcutHint } from '@/lib/shortcut-hint';
 import { usePageChanges } from './use-page-changes';
 import { SubtitleOverlay } from './SubtitleOverlay';
-import { SubtitleInspector, subtitleLineKey, type SubtitleLineAt, type SubtitleLineRefer } from './SubtitleInspector';
+import { SubtitleInspector, subtitleLineKey, type SubtitleLineAt, type SubtitleLineRefer, type SpeechCutActions } from './SubtitleInspector';
 import { useFilmSubtitles } from '@/lib/use-film-subtitles';
 import { speakerAt, useSubtitleEdits } from '@/lib/use-subtitle-edits';
 import { cueAt, filmSubtitleStyleFor, sameFilmSubtitleLanguage } from '@/lib/subtitles';
@@ -379,6 +380,8 @@ export function ProjectView({ projectId, onProject, onLeave }: {
   const listeners = React.useRef(new Set<() => void>());
   /* where playback stops by itself (Play range: the range's end), ms; null: the film's end */
   const stopAtRef = React.useRef<number | null>(null);
+  // 原片切口预听只借用现有播放器；不生成另一条时间线，不冒称精确编码结果。
+  const speechCutPreview = React.useRef<{ base: string; start: number; end: number; skipped: boolean; stop: number } | null>(null);
   /* loop playback (⇧L, the viewer's button): the range marked, else the whole film, over and over */
   const [loop, setLoop] = React.useState(false);
   const loopRef = React.useRef(loop);
@@ -400,6 +403,18 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     let lastTick = 0;
     const tick = (now: number) => {
       const t = player.current.time();
+      const cut = speechCutPreview.current;
+      if (cut && reviewFilm.current.rev !== cut.base) {
+        speechCutPreview.current = null; stopAtRef.current = null; player.current.pause(); setPlaying(false); return;
+      }
+      if (cut && !cut.skipped && t * 1000 >= cut.start) {
+        cut.skipped = true;
+        player.current.seek(cut.end / 1000);
+        preview.current?.seek(pictureAt(cut.end / 1000));
+        setTimeMs(cut.end);
+        for (const fn of listeners.current) fn();
+        frame = requestAnimationFrame(tick); return;
+      }
       /* looping: back to the start of what loops once its end is reached */
       const back = loopRef.current ? loopBack(t * 1000, rangeNowRef.current, player.current.duration * 1000) : null;
       if (back != null) {
@@ -414,6 +429,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
       const stopAt = stopAtRef.current;
       if (stopAt != null && t * 1000 >= stopAt) {
         stopAtRef.current = null;
+        speechCutPreview.current = null;
         player.current.pause();
         player.current.seek(stopAt / 1000);
         setPlaying(false);
@@ -440,6 +456,8 @@ export function ProjectView({ projectId, onProject, onLeave }: {
   }, [playing]);
 
   const seek = React.useCallback((ms: number) => {
+    stopAtRef.current = releaseSpeechPreview(speechCutPreview.current?.stop ?? null, stopAtRef.current).stopAt;
+    speechCutPreview.current = null;
     const t = Math.max(0, Math.min(ms / 1000, player.current.duration || ms / 1000));
     player.current.seek(t);
     setTimeMs(t * 1000);
@@ -458,6 +476,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     shuttleRateRef.current = 0;
   }, []);
   const pause = React.useCallback(() => {
+    speechCutPreview.current = null;
     stopAtRef.current = null;
     /* a picture-alone shuttle stops too */
     if (shuttleFrame.current) { cancelAnimationFrame(shuttleFrame.current); shuttleFrame.current = 0; shuttleRateRef.current = 0; }
@@ -480,6 +499,47 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     void player.current.play();
     setPlaying(true);
   }, [pause, seek]);
+  const stopSpeechCutPreview = React.useCallback(() => {
+    // 只取消本次文稿试听；面板卸载不能暂停用户后来开始的一般播放。
+    const released = releaseSpeechPreview(speechCutPreview.current?.stop ?? null, stopAtRef.current);
+    speechCutPreview.current = null; stopAtRef.current = released.stopAt;
+    if (!released.pause) return;
+    player.current.pause(); setPlaying(false);
+    const at = player.current.time(); setTimeMs(at * 1000); preview.current?.seek(pictureAt(at));
+  }, []);
+  const speechCutActions = React.useMemo<SpeechCutActions>(() => ({
+    stopPreview: stopSpeechCutPreview,
+    plan: async (first, last, adjust) => {
+      await reviewFilm.current.settled();
+      const base = reviewFilm.current.rev;
+      if (!base || !first.clip || first.line == null || last.line == null || !first.sourceRevision || first.clip !== last.clip)
+        throw new Error('请从同一片段的原语言文稿中选择完整句。');
+      return api.speechCutPlan(projectId, {
+        base, clip: first.clip, sourceRevision: first.sourceRevision,
+        first: { line: first.line, ...(first.part != null ? { part: first.part } : {}) },
+        last: { line: last.line, ...(last.part != null ? { part: last.part } : {}) },
+        adjust, follow: followOf(readTimelinePrefs()),
+      });
+    },
+    apply: async (plan) => {
+      pause();
+      const why = await reviewFilm.current.editConditional(plan.base, plan.ops, plan.preconditions);
+      if (!why) seek(plan.range.filmStartMs);
+      return why;
+    },
+    preview: (plan, part) => {
+      if (reviewFilm.current.rev !== plan.base) throw new Error('影片已改变，请重新预览文稿剪辑。');
+      stopShuttle(); pause(); loopRef.current = false; setLoop(false);
+      const a = plan.range.filmStartMs, b = plan.range.filmEndMs;
+      const from = Math.max(0, (part === 'end' ? b : a) - 800);
+      const until = Math.min(player.current.duration * 1000, (part === 'start' ? a : b) + 800);
+      seek(from);
+      stopAtRef.current = until;
+      speechCutPreview.current = { base: plan.base, start: a, end: b, skipped: part !== 'join', stop: until };
+      void player.current.play(); setPlaying(true);
+    },
+  }), [projectId, pause, seek, stopShuttle, stopSpeechCutPreview]);
+
   /** J, K or L pressed (see lib/timeline-keys shuttleRate). */
   const shuttle = React.useCallback((key: 'j' | 'k' | 'l') => {
     const was = shuttleRateRef.current || (player.current.playing ? player.current.rate : 0);
@@ -2913,7 +2973,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
                     <ResourceInspector file={inspectorContent} url={(pickedSaved && inspectorContent === pickedMedia ? savedSources : mediaSources).file(inspectorContent)} width={inspectorShownWidth} onClose={closeInspector} />
                   ) : inspectorContent === 'subtitles' ? (
                     <SubtitleInspector
-                      subtitles={{ style: subs.style, onStyle: subs.patchStyle, translate: subs.translate, sourceLanguage: subs.sourceLanguage, lines: subs.captions?.cues ?? [], onEditLine: subs.setLine, timeMs, onSeek: seek, untranscribed: subs.captions?.untranscribed.length ?? 0, onMake: makeSubtitles, making: subs.transcribing, ...(subtitleRefer ? { refer: subtitleRefer } : {}) }}
+                      subtitles={{ style: subs.style, onStyle: subs.patchStyle, translate: subs.translate, sourceLanguage: subs.sourceLanguage, lines: subs.captions?.cues ?? [], onEditLine: subs.setLine, speechCut: speechCutActions, timeMs, onSeek: seek, untranscribed: subs.captions?.untranscribed.length ?? 0, onMake: makeSubtitles, making: subs.transcribing, ...(subtitleRefer ? { refer: subtitleRefer } : {}) }}
                       width={inspectorShownWidth}
                       onClose={closeInspector}
                     />

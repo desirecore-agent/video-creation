@@ -14,6 +14,7 @@ import { MenuSelect } from './MenuSelect';
 import { InspectorPanel } from './InspectorPanel';
 import { SubtitleRowToggle } from './SubtitleRow';
 import styles from './SubtitleInspector.module.css';
+import type { SpeechCutPlan } from '@/lib/speech-cut';
 
 /**
  * A line of the panel as the person points at it: the line, its number in the list (from 1), the language it is shown
@@ -43,6 +44,14 @@ export interface SubtitleLineRefer {
   shortcut: string;
 }
 
+/** 原文精剪的领域调用；预览和提交都保留同一份所见版本。 */
+export interface SpeechCutActions {
+  plan: (first: SubtitleCue, last: SubtitleCue, adjust: { startMs: number; endMs: number }) => Promise<SpeechCutPlan>;
+  apply: (plan: SpeechCutPlan) => Promise<string | null>;
+  preview: (plan: SpeechCutPlan, part: 'start' | 'end' | 'join') => void;
+  stopPreview: () => void;
+}
+
 /** The Inspector's subtitle style panel: changes show at once on the picture and are kept with the project. */
 export function SubtitleInspector({ subtitles, width, onClose }: {
   subtitles: {
@@ -64,6 +73,7 @@ export function SubtitleInspector({ subtitles, width, onClose }: {
     onMake?: () => void;
     making?: boolean;
     refer?: SubtitleLineRefer;
+    speechCut?: SpeechCutActions;
   };
   width: number;
   onClose: () => void;
@@ -102,7 +112,7 @@ export function SubtitleInspector({ subtitles, width, onClose }: {
           {subtitles.lines ? (
             <SubtitleLines lines={subtitles.lines} onEdit={subtitles.onEditLine} untranscribed={subtitles.untranscribed ?? 0}
               onMake={subtitles.onMake} making={!!subtitles.making} timeMs={subtitles.timeMs ?? 0} onSeek={subtitles.onSeek} refer={subtitles.refer}
-              language={s.language && !sameFilmSubtitleLanguage(s.language, subtitles.sourceLanguage ?? null) ? s.language : null} />
+              language={s.language && !sameFilmSubtitleLanguage(s.language, subtitles.sourceLanguage ?? null) ? s.language : null} speechCut={subtitles.speechCut} />
           ) : null}
 
           {/* word highlight first: the most visible effect here, and the one short videos ask for most */}
@@ -353,7 +363,7 @@ const lineTime = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(
  * With a translation shown (`language`), each line is that language's, to correct, with the original faint above it
  * for reference; a line not translated yet is empty and can be written.
  */
-function SubtitleLines({ lines, onEdit, untranscribed, onMake, making, timeMs, onSeek, language, refer }: {
+function SubtitleLines({ lines, onEdit, untranscribed, onMake, making, timeMs, onSeek, language, refer, speechCut }: {
   lines: readonly SubtitleCue[];
   onEdit?: (cue: SubtitleCue, text: string, language?: string) => Promise<string | null>;
   untranscribed: number;
@@ -363,10 +373,12 @@ function SubtitleLines({ lines, onEdit, untranscribed, onMake, making, timeMs, o
   onSeek?: (ms: number) => void;
   language: string | null;
   refer?: SubtitleLineRefer;
+  speechCut?: SpeechCutActions;
 }) {
   const t = useT();
   const list = React.useRef<HTMLUListElement>(null);
   const touched = React.useRef(0);
+  const [cutFirst, setCutFirst] = React.useState<SubtitleCue | null>(null);
   // 草稿只归属当前面板；保留原行而不是把旧输入搬到重分段后的另一行。
   const [draft, setDraft] = React.useState<SubtitleEditDraft | null>(null);
   const rows = React.useMemo(() => subtitleDraftRows(lines, draft), [lines, draft]);
@@ -424,10 +436,12 @@ function SubtitleLines({ lines, onEdit, untranscribed, onMake, making, timeMs, o
               language={draftKey === subtitleLineKey(cue) ? draft!.language : language}
               editable={!!onEdit && cue.src !== undefined && (!draftKey || draftKey === subtitleLineKey(cue))}
               seekable={!!onSeek} onEdit={edit} onGo={go} ask={ask}
-              draft={draftKey === subtitleLineKey(cue) ? draft : null} setDraft={setDraft} refer={lineRefer} />
+              draft={draftKey === subtitleLineKey(cue) ? draft : null} setDraft={setDraft} refer={lineRefer}
+              onCut={speechCut && !language && cue.clip && cue.src && cue.sourceRevision ? () => setCutFirst(cue) : undefined} />
           ))}
         </ul>
       ) : null}
+      {cutFirst && speechCut && !language ? <SpeechCutPanel first={cutFirst} lines={lines} actions={speechCut} onClose={() => setCutFirst(null)} /> : null}
     </StyleGroup>
   );
 }
@@ -435,7 +449,7 @@ function SubtitleLines({ lines, onEdit, untranscribed, onMake, making, timeMs, o
 /** A line's references, made by the panel's owner (SubtitleLineRefer) from what the row knows. */
 type LineRefer = { of: (line: SubtitleLineAt) => StudioRef; send: (line: SubtitleLineAt) => void; pick: (line: SubtitleLineAt) => void };
 
-const SubtitleLine = React.memo(function SubtitleLine({ cue, index, lit, language, editable, seekable, onEdit, onGo, ask, refer, draft, setDraft }: {
+const SubtitleLine = React.memo(function SubtitleLine({ cue, index, lit, language, editable, seekable, onEdit, onGo, ask, refer, draft, setDraft, onCut }: {
   cue: SubtitleCue;
   index: number;
   lit: boolean;
@@ -448,6 +462,7 @@ const SubtitleLine = React.memo(function SubtitleLine({ cue, index, lit, languag
   refer: LineRefer | null;
   draft: SubtitleEditDraft | null;
   setDraft: React.Dispatch<React.SetStateAction<SubtitleEditDraft | null>>;
+  onCut?: () => void;
 }) {
   const t = useT();
   const time = lineTime(cue.startMs);
@@ -536,6 +551,9 @@ const SubtitleLine = React.memo(function SubtitleLine({ cue, index, lit, languag
           title={!language && cue.alignment ? t('timeline.subtitleTimingAlignment').replace('{matched}', String(cue.alignment.matchedWords)).replace('{total}', String(cue.alignment.totalWords)) : undefined}>
           {t(`timeline.subtitleTiming.${language ? 'estimated' : cue.timing ?? 'unknown'}`)}
         </span>
+        {onCut ? <button type="button" data-speech-cut-select={cue.clip} aria-label={`${t('speechCut.select')} ${time}`} onClick={onCut}
+          disabled={busy || !!draft && draft.text.trim() !== text} className="self-start px-2 text-[10.5px] underline disabled:opacity-50"
+          style={{ color: 'var(--text-muted)' }}>{t('speechCut.select')}</button> : null}
         {error ? <span role="alert" className="px-2 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>{error}</span> : null}
         {draft ? <button type="button" disabled={busy} className="self-start px-2 text-[10.5px] underline" style={{ color: 'var(--text-muted)' }}
           onMouseDown={(e) => e.preventDefault()} onClick={cancel}>{t('confirm.cancel')}</button> : null}
@@ -910,4 +928,62 @@ function Segmented<T extends string>({
       </div>
     </div>
   );
+}
+
+
+/** 选择连续原句并显式确认声画删除；字幕校字仍使用原输入框。 */
+function SpeechCutPanel({ first, lines, actions, onClose }: { first: SubtitleCue; lines: readonly SubtitleCue[]; actions: SpeechCutActions; onClose: () => void }) {
+  const t = useT();
+  const options = lines.filter((cue) => cue.clip === first.clip && cue.src === first.src && cue.startMs >= first.startMs);
+  const [last, setLast] = React.useState(first);
+  const [startAdjust, setStartAdjust] = React.useState(0), [endAdjust, setEndAdjust] = React.useState(0);
+  const [plan, setPlan] = React.useState<SpeechCutPlan | null>(null);
+  const [error, setError] = React.useState<string | null>(null), [busy, setBusy] = React.useState(false);
+  const generation = React.useRef(0);
+  React.useEffect(() => { actions.stopPreview(); generation.current += 1; setLast(first); setStartAdjust(0); setEndAdjust(0); setPlan(null); setError(null); setBusy(false); }, [first, actions]);
+  React.useEffect(() => () => { generation.current += 1; actions.stopPreview(); }, [actions]);
+  const reset = () => { actions.stopPreview(); generation.current += 1; setPlan(null); setError(null); };
+  const make = async () => {
+    const seq = ++generation.current; setBusy(true); setError(null); setPlan(null);
+    try { const next = await actions.plan(first, last, { startMs: startAdjust, endMs: endAdjust }); if (seq === generation.current) setPlan(next); }
+    catch (e) { if (seq === generation.current) setError(e instanceof Error ? e.message : String(e)); }
+    finally { if (seq === generation.current) setBusy(false); }
+  };
+  const apply = async () => {
+    if (!plan) return; setBusy(true); setError(null);
+    try { const why = await actions.apply(plan); if (why) setError(why); else onClose(); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  };
+  const preview = (part: 'start' | 'end' | 'join') => {
+    if (!plan) return;
+    try { actions.preview(plan, part); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  };
+  return <div data-speech-cut-panel className="mt-2 flex flex-col gap-2 rounded-md border p-2 text-[11px]" style={{ borderColor: 'var(--border)', color: 'var(--text)' }}>
+    <div className="flex justify-between gap-2"><strong>{t('speechCut.title')}</strong><button type="button" disabled={busy} onClick={() => { actions.stopPreview(); onClose(); }}>{t('confirm.cancel')}</button></div>
+    <p>{first.text}</p>
+    <label>{t('speechCut.last')}<select aria-label={t('speechCut.last')} disabled={busy} value={subtitleLineKey(last)}
+      className="mt-1 w-full rounded border p-1" style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
+      onChange={(e) => { const chosen = options.find((cue) => subtitleLineKey(cue) === e.target.value); if (chosen) { setLast(chosen); reset(); } }}>
+      {options.map((cue) => <option key={subtitleLineKey(cue)} value={subtitleLineKey(cue)}>{lineTime(cue.startMs)} {cue.text}</option>)}
+    </select></label>
+    <p style={{ color: 'var(--text-faint)' }}>{t('speechCut.adjustNote')}</p>
+    <div className="flex gap-2">{(['start', 'end'] as const).map((edge) => <label key={edge} className="min-w-0 flex-1">{t(`speechCut.${edge}Adjust`)}
+      <input type="number" min={-10000} max={10000} step={50} disabled={busy} aria-label={t(`speechCut.${edge}Adjust`)}
+        value={edge === 'start' ? startAdjust : endAdjust} className="mt-1 w-full rounded border p-1" style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
+        onChange={(e) => { const v = Number(e.target.value); if (edge === 'start') setStartAdjust(v); else setEndAdjust(v); reset(); }} /></label>)}</div>
+    <button type="button" data-speech-cut-plan disabled={busy || !Number.isInteger(startAdjust) || !Number.isInteger(endAdjust)} className="rounded border p-1.5 disabled:opacity-50" onClick={() => { void make(); }}>{busy ? t('speechCut.busy') : t('speechCut.plan')}</button>
+    {plan ? <>
+      <p>{t('speechCut.range').replace('{start}', (plan.range.filmStartMs / 1000).toFixed(3)).replace('{end}', (plan.range.filmEndMs / 1000).toFixed(3))}</p>
+      <p>{t('speechCut.sourceRange').replace('{start}', (plan.range.sourceStartMs / 1000).toFixed(3)).replace('{end}', (plan.range.sourceEndMs / 1000).toFixed(3))}</p>
+      <p>{t('speechCut.affected').replace('{n}', String(plan.affected.length))}</p>
+      <p style={{ color: 'var(--text-faint)' }}>{t('speechCut.timingNote')} {plan.timing.map((kind) => t(`timeline.subtitleTiming.${kind}`)).join(' / ')}</p>
+      {plan.shortMs > 0 ? <p role="status">{t('speechCut.short').replace('{ms}', String(plan.shortMs))}</p> : null}
+      <div className="flex flex-wrap gap-2">{(['start', 'end', 'join'] as const).map((part) => <button key={part} type="button" disabled={busy} className="rounded border p-1" onClick={() => preview(part)}>{t(`speechCut.preview.${part}`)}</button>)}</div>
+      <p style={{ color: 'var(--text-faint)' }}>{t('speechCut.previewNote')}</p>
+      <button type="button" data-speech-cut-apply disabled={busy} onClick={() => { void apply(); }} className="rounded border p-1.5 font-medium disabled:opacity-50">{t('speechCut.apply')}</button>
+      <p>{t('speechCut.applyNote')}</p>
+    </> : null}
+    {error ? <p role="alert">{error}</p> : null}
+  </div>;
 }

@@ -31,6 +31,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends ffmpeg
       - run: pnpm test:speech
+      - run: pnpm test:speech-edit
       - run: pnpm test:motion
       - run: node --test --test-concurrency=1 packages/openfilm/studio/ui/src/lib/desirecore-host.test.ts packages/openfilm/studio/ui/src/lib/host-appearance.test.ts packages/openfilm/studio/ui/src/lib/export-jobs.test.ts
 # Distribution is owned by DesireCore. No npm publication, desktop installer or upstream feed is triggered here.
