@@ -60,7 +60,14 @@ test('MCP初始化和工具目录无需运行应用且标准输出只有JSON-RPC
   const patch = replies[1].result.tools.find((tool) => tool.name === 'video_patch');
   assert.deepEqual(patch.inputSchema.required, ['base', 'ops']);
   assert.deepEqual(replies[1].result.tools.filter((tool) => tool.name.startsWith('video_motion_')).map((tool) => tool.name), ['video_motion_catalog', 'video_motion_inspect', 'video_motion_install', 'video_motion_take', 'video_motion_patch']);
-  assert.equal(replies[1].result.tools.length, 15);
+  // 公开入口须向后兼容且名称唯一；新增工具不应让旧的固定数量断言误报失败。
+  const listedNames = replies[1].result.tools.map((tool) => tool.name);
+  const names = new Set(listedNames);
+  assert.equal(names.size, listedNames.length);
+  for (const name of ['video_inspect', 'video_captions', 'video_prepare_media', 'video_speech_cut_plan', 'video_speech_cut_apply',
+    'video_motion_catalog', 'video_motion_inspect', 'video_motion_install', 'video_motion_take', 'video_motion_patch',
+    'video_patch', 'video_check', 'video_scene_read', 'video_scene_revise', 'video_review', 'video_render', 'video_jobs', 'video_retry', 'video_cancel'])
+    assert.ok(names.has(name), `缺少公开工具：${name}`);
   assert.deepEqual(replies[1].result.tools.filter((tool) => tool.name.startsWith('video_scene_')).map((tool) => tool.name), ['video_scene_read', 'video_scene_revise']);
   assert.deepEqual(replies[1].result.tools.find((tool) => tool.name === 'video_scene_read').inputSchema.required, ['clipId']);
   assert.deepEqual(replies[1].result.tools.find((tool) => tool.name === 'video_scene_revise').inputSchema.required, ['base', 'sourcePath', 'expectedSourceSha256', 'clipIds', 'targetPath', 'content']);
