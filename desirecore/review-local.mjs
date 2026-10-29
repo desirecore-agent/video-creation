@@ -7,7 +7,7 @@ import { readReviewPNG } from '../packages/openfilm/studio/server/reviews.mjs';
 import { REVIEW_MAX_FRAMES, REVIEW_MAX_FRAME_BYTES, REVIEW_MAX_TOTAL_BYTES } from '../packages/openfilm/src/review-frames.mjs';
 
 const validate = new Ajv({ allErrors: true }).compile(reviewCLIOptionsSchema);
-const captureFlags = ['source', 'job', 'times', 'count', 'last', 'max-edge', 'target-width', 'first-last', 'sequence-start', 'sequence-end', 'sequence-count', 'compare-widths', 'compare-frame', 'before-review', 'before-frame', 'after-review', 'after-frame'];
+const captureFlags = ['source', 'job', 'times', 'count', 'last', 'max-edge', 'target-width', 'first-last', 'sequence-start', 'sequence-end', 'sequence-count', 'compare-widths', 'compare-frame', 'safe-top', 'safe-bottom', 'before-review', 'before-frame', 'after-review', 'after-frame'];
 export function reviewLocalOptionsOf(values) {
   const options = { ...(values.read !== undefined ? { read: values.read } : {}), ...(values['copy-to'] !== undefined ? { copyTo: values['copy-to'] } : {}) };
   if (!validate(options)) throw new Error('本地审片选项无效；--read须为24位review ID，--copy-to须为明确目录。');

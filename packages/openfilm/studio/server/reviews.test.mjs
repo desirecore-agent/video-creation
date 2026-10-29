@@ -304,3 +304,43 @@ test('resize返回新buffer时同inode原PNG变化在truncate前stale，不覆�
   assert.deepEqual(await readFile(join(root, 'concurrent-writer.png')), changed);
   assert.deepEqual(await (await import('node:fs/promises')).readdir(reviewRoot), []);
 }));
+
+
+test('P0 信息安全区由显式请求设置，CLI/MCP同源且不推定默认15%', () => {
+  const ask = reviewOptionsOf({ source: 'current-project', times: '1', 'safe-top': '0.15', 'safe-bottom': '0.15' });
+  assert.deepEqual(ask.informationSafeArea, { top: 0.15, bottom: 0.15 });
+  assert.equal(normalizeReviewRequest({ source: 'current-project' }).informationSafeArea, undefined);
+  for (const informationSafeArea of [{ top: .6, bottom: .5 }, { top: -.1, bottom: .15 }, { top: .15 }, { top: 15, bottom: 15 }]) assert.throws(() => normalizeReviewRequest({ source: 'current-project', informationSafeArea }));
+  assert.throws(() => reviewOptionsOf({ source: 'current-project', 'safe-top': '.15' }));
+  assert.throws(() => normalizeReviewRequest({ source: 'review-pair', before: { reviewId: 'a'.repeat(24), frameIndex: 0 }, after: { reviewId: 'b'.repeat(24), frameIndex: 0 }, informationSafeArea: { top: .15, bottom: .15 } }));
+});
+
+test('P0 外置字幕和样式冻结，单独变化使审片stale而不沿旧film版本通过', () => fixture(async ({ root, project }) => {
+  await mkdir(join(project.path, '.film'));
+  await writeFile(join(project.path, '.film/subtitles.json'), JSON.stringify({ on: true }));
+  const first = createReviews({ root: join(root, 'reviews'), drawProject: async (_snapshot, dir) => {
+    await writeFile(join(project.path, '.film/subtitles.json'), JSON.stringify({ on: false }));
+    return result(dir);
+  } });
+  await assert.rejects(first.create(project, { source: 'current-project', times: [0] }), (e) => e.code === 'stale');
+  await first.close();
+  await writeFile(join(project.path, 'voice.wav'), 'audio');
+  await writeFile(join(project.path, 'voice.vtt'), 'WEBVTT\n\n00:00.000 --> 00:01.000\n原字幕\n');
+  await writeFile(join(project.path, 'film.html'), '<meta name="viewport" content="width=640, height=360"><section><iframe src="scene.html#t=0,1"></iframe><audio src="voice.wav#t=0,1"></audio></section>');
+  const second = createReviews({ root: join(root, 'reviews2'), drawProject: async (_snapshot, dir) => {
+    await writeFile(join(project.path, 'voice.vtt'), 'WEBVTT\n\n00:00.000 --> 00:01.000\n人工改字幕\n');
+    return result(dir);
+  } });
+  await assert.rejects(second.create(project, { source: 'current-project', times: [0] }), (e) => e.code === 'stale');
+  await second.close();
+}));
+
+
+test('P0 编码安全区请求明确unknown，不借当前工程DOM测量补造', () => fixture(async ({ root, project }) => {
+  const out = join(root, 'output.mp4'); await writeFile(out, 'encoded fixture');
+  const job = { id: '123456abcdef', kind: 'video', status: 'done', out, outputs: [out], inputSnapshot: { filmRevision: 'a'.repeat(16), manifest: join(root, 'missing-manifest.json') } };
+  const reviews = createReviews({ root: join(root, 'reviews'), jobs: () => [job], decodeVideo: async (_file, dir) => result(dir, 0, 0) });
+  const r = await reviews.create(project, { source: 'export-job', job: job.id, times: [0], informationSafeArea: { top: .15, bottom: .15 } });
+  assert.equal(r.coverage.find((c) => c.code === 'information-safe-area').status, 'unknown');
+  assert.equal(r.source.subtitles, undefined); await reviews.close();
+}));
