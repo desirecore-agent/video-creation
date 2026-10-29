@@ -4,7 +4,28 @@ import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { normalizeVideoExportOptions } from '../packages/openfilm/studio/server/video-export-options.mjs';
 import { REVIEW_MAX_FRAME_BYTES } from '../packages/openfilm/src/review-frames.mjs';
-import { localJsonRequest } from './local-json-request.mjs';
+import { localJsonRequest, MAX_LOCAL_JSON_BYTES } from './local-json-request.mjs';
+
+// 审片和显式媒体观察含依赖/测量，采用8MiB客户端预算；不是服务端既有回执上限。
+export const REVIEW_RESPONSE_MAX_BYTES = 8 * 1024 * 1024;
+
+/** 读取已有审片材料的分页参数；CLI 与 MCP 共享，不创建新捕获。 */
+export const reviewListRequestSchema = {
+  $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', additionalProperties: false,
+  description: '只读列出绑定项目的已有审片回执，固定每页最多50份；根据nextOffset继续，未列出不等于从未生成。',
+  properties: { offset: { type: 'integer', minimum: 0, maximum: 10000, description: '已有材料的分页起点；省略为0。使用回执nextOffset继续，不用页数猜ID。' } },
+};
+export const reviewReadRequestSchema = {
+  $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', additionalProperties: false, required: ['reviewId'],
+  description: '按已有reviewId只读获取原始回执；默认本机读取采用8MiB客户端预算，超限保留ID、不重新捕获，不把列表摘要当完整帧来源。',
+  properties: { reviewId: { type: 'string', pattern: '^[a-f0-9]{24}$', description: '当前绑定项目已有回执的真实24位小写十六进制ID。' } },
+};
+
+export function reviewListOffset(offset = 0) {
+  const { minimum, maximum } = reviewListRequestSchema.properties.offset;
+  if (!Number.isInteger(offset) || offset < minimum || offset > maximum) throw new Error('材料分页offset必须为0..10000的整数。');
+  return offset;
+}
 
 export async function connectStudio(config, request = fetch) {
   let run;
@@ -13,12 +34,12 @@ export async function connectStudio(config, request = fetch) {
   const origin = new URL(run.origin);
   if (origin.protocol !== 'http:' || origin.hostname !== '127.0.0.1' || !origin.port || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash
     || typeof run.key !== 'string' || !/^[a-f0-9]{48}$/.test(run.key)) throw new Error('本地运行记录无效，请重新启动视频创作。');
-  const call = async (path, body, method = body === undefined ? 'GET' : 'POST', { timeoutMs = 30_000, unknownReceipt = false, localLongResponse = false } = {}) => {
+  const call = async (path, body, method = body === undefined ? 'GET' : 'POST', { timeoutMs = 30_000, unknownReceipt = false, localLongResponse = false, maxResponseBytes = MAX_LOCAL_JSON_BYTES } = {}) => {
     if (!path.startsWith('/api/')) throw new Error('无效的视频创作操作路径。');
     let response;
     try {
-      // 自定义 request 继续拥有其传输语义；仅默认媒体准备避开 fetch 更短的响应头等待上限。
-      const send = localLongResponse && request === fetch ? localJsonRequest : request;
+      // 自定义 request 继续拥有其传输语义；默认长媒体/审片响应避开 fetch 更短的响应头等待上限。
+      const send = localLongResponse && request === fetch ? (url, init) => localJsonRequest(url, init, { maxBytes: maxResponseBytes }) : request;
       response = await send(new URL(path, origin), {
         method, redirect: 'error', signal: AbortSignal.timeout(timeoutMs),
         headers: { 'x-studio-key': run.key, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
@@ -28,9 +49,16 @@ export async function connectStudio(config, request = fetch) {
       if (unknownReceipt) throw new Error('未取得导出提交回执，结果未知；后台可能仍在准备或导出。请先用 jobs 查询，勿直接重复提交。', { cause: error });
       throw error;
     }
-    const result = await response.json();
+    let result;
+    try { result = await response.json(); }
+    catch (cause) {
+      if (response.ok) throw cause;
+      const error = new Error(`视频创作返回 ${response.status}，未取得有效JSON错误回执。`, { cause });
+      error.status = response.status;
+      throw error;
+    }
     if (!response.ok) {
-      const error = new Error(result.error ?? `视频创作返回 ${response.status}`);
+      const error = new Error(result?.error ?? `视频创作返回 ${response.status}`);
       error.status = response.status;
       error.details = result;
       throw error;
@@ -61,7 +89,25 @@ export async function projectClient(config, folder, options) {
   const base = `/api/projects/${encodeURIComponent(project.id)}`;
   return { ...studio, project, base,
     inspect: () => studio.call(base),
-    captions: () => studio.call(`${base}/captions`),
+    captions: ({ withMediaDigests = false } = {}) => {
+      if (typeof withMediaDigests !== 'boolean') throw new Error('withMediaDigests必须是布尔值。');
+      if (!withMediaDigests) return studio.call(`${base}/captions`);
+      // 完整媒体摘要可能耗时，只有明确选择该观察时才沿原准备期限等待。
+      return studio.call(`${base}/captions?withMediaDigests=1`, undefined, 'GET', { timeoutMs: config.prepareTimeoutMs ?? 15 * 60_000, localLongResponse: true, maxResponseBytes: REVIEW_RESPONSE_MAX_BYTES })
+        .catch((error) => {
+          if (error?.status) throw error;
+          const budget = error?.code === 'LOCAL_JSON_RESPONSE_BUDGET' ? '超过8MiB客户端读取预算；' : '';
+          throw new Error(`字幕与媒体摘要读取未完成；${budget}未取得可用于原声窗的完整观察。请重读当前版本，勿在提交时补算新摘要替换旧观察。`, { cause: error });
+        });
+    },
+    subtitleStyle: () => studio.call(`${base}/subtitles`),
+    captionAudio: async (ask) => {
+      try { return await studio.call(`${base}/captions/audio`, ask, 'POST', { timeoutMs: config.prepareTimeoutMs ?? 15 * 60_000, localLongResponse: true }); }
+      catch (error) {
+        if (error?.status) throw error;
+        throw new Error('未取得字幕原声窗导出回执，结果未知；后台可能仍在准备或导出。请先用 jobs 查询已有输入版本与输出，勿直接重复提交。', { cause: error });
+      }
+    },
     captionSource: (src) => {
       if (typeof src !== 'string' || !src) throw new Error('请指定项目内的字幕媒体源路径。');
       return studio.call(`${base}/captions/source?src=${encodeURIComponent(src)}`);
@@ -102,8 +148,24 @@ export async function projectClient(config, folder, options) {
         throw new Error('未取得场景修订回执，结果未知；新源码可能已发布或影片已换源。请先 scene-read/inspect 查询当前源与版本，勿直接重复提交。', { cause: error });
       }
     },
-    review: (ask) => studio.call(`${base}/reviews`, ask, 'POST', { timeoutMs: 10 * 60_000 }),
-    reviewReceipt: (id) => studio.call(`${base}/reviews/${encodeURIComponent(id)}`),
+    review: async (ask) => {
+      try { return await studio.call(`${base}/reviews`, ask, 'POST', { timeoutMs: 10 * 60_000, localLongResponse: true, maxResponseBytes: REVIEW_RESPONSE_MAX_BYTES }); }
+      catch (error) {
+        if (error?.status) throw error;
+        // 断连只说明未取得回执；服务可能已经生成材料，不能据此自动重捕获。
+        const budget = error?.code === 'LOCAL_JSON_RESPONSE_BUDGET' ? '本次响应超过8MiB客户端回执预算；' : '';
+        throw new Error(`未取得审片回执，结果未知；${budget}后台可能已生成材料。请先用 reviews 查询，再按reviewId用 review --read（MCP video_review_read）读取并核来源，勿直接重复捕获。`, { cause: error });
+      }
+    },
+    reviews: (offset = 0) => studio.call(`${base}/reviews?offset=${reviewListOffset(offset)}`),
+    reviewReceipt: async (id) => {
+      try { return await studio.call(`${base}/reviews/${encodeURIComponent(id)}`, undefined, 'GET', { localLongResponse: true, maxResponseBytes: REVIEW_RESPONSE_MAX_BYTES }); }
+      catch (error) {
+        if (error?.status) throw error;
+        const budget = error?.code === 'LOCAL_JSON_RESPONSE_BUDGET' ? '超过8MiB客户端读取预算；' : '';
+        throw new Error(`已有审片回执 ${id} 读取未完成；${budget}请保留该ID并核查原材料，勿重新捕获。`, { cause: error });
+      }
+    },
     reviewImage: (id, image) => studio.png(`${base}/reviews/${encodeURIComponent(id)}/${image.artifactId ? `artifacts/${encodeURIComponent(image.artifactId)}` : `frames/${image.frameIndex}`}?expected_sha256=${encodeURIComponent(image.sha256)}`, image),
     jobs: async () => (await studio.call(`${base}/exports?statusOnly=1`)).exports,
     render: async (ask = {}, folder) => (await studio.call(`${base}/exports`, { jobs: [{ kind: 'video', ...normalizeVideoExportOptions({ fps: config.renderFps ?? 30, quality: config.renderQuality ?? 'standard', ...ask }) }], ...(folder ? { folder: resolve(folder) } : {}) }, 'POST', { timeoutMs: config.prepareTimeoutMs ?? 15 * 60_000, unknownReceipt: true })).exports[0],

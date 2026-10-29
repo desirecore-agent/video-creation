@@ -200,3 +200,7 @@ node desirecore/cli.mjs review <项目> --source review-pair --before-review <�
 字幕可用 `emphasis:[{from,to}]` 标记当句纯文本的少量重点，索引是 UTF-16 半开范围。标准 VTT 的 `<b>` / `<c.emphasis>` 读为同一强调，写回规范为 `<c.emphasis>`；文字、词时间与时间来源保持。预览和烧录共用分段/样式；拆分、合并及裁剪同步映射范围，改字清除失效标记，译文不套用原文范围。VTT旁文件保留强调与词时间，SRT降级纯文本。它独立于逐词跟读karaoke，不自动决定关键词。
 
 导演可用 `captions-source <项目> <素材相对路径>` 读完整源字幕与snapshot，`captions-save <项目> --args <JSON文件>` 以 `{src,cues,from:原snapshot}` 条件保存；必须保留其余源句与词时间，过期409后重读合并，不能替旧稿换新from。两入口 `--schema` 可离线发现合同。强调外观沿 `.film/subtitles.json` 的可选 `emphasis:{color,weight}`；缺失用默认暖黄/粗体，null关闭强调外观。场景边距、构图和重点选择仍由导演自主判断，并在最终编码和实际观看尺寸检查。
+
+## 生效布局与原声校听材料
+
+`subtitle-style` 在原字幕读取合同上同时报告保存值与实际生效的计算布局、舞台/字号和来源摘要；真实字框仍看同源审片，不由计算值宣布安全区通过。`caption-audio` 从本版真实字幕句及影片/字幕版本取有界成片原声WAV时间窗，复用原导出快照/队列并保留显式retry的版本守卫，不改词钟或人工锁；音频供试听，生成或Read二进制不等于导演已经听懂。审片长响应失败后先用 `reviews` 分页与 `review --read`（MCP `video_reviews` / `video_review_read`）查已有回执，明确结果未知并避免盲目重捕获。各入口 `--schema`、8MiB创建／按ID读取回执预算、版本与听校边界见[运行合同](desirecore/RUNTIME.md#生效字幕布局句子原声与审片恢复)。

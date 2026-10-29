@@ -51,7 +51,7 @@
  */
 import { reviewFactsDigest, exportReviewMapping } from './review-facts.mjs';
 import { execFile, fork, spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { constants as fsConstants, existsSync, readFileSync, statSync } from 'node:fs';
 import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -72,6 +72,8 @@ import { exportsRoot, studioHomeDir } from '../../src/locations.mjs';
 import { createExportJobStore } from './export-job-store.mjs';
 import { snapshotFilm } from './export-snapshot.mjs';
 import { normalizeVideoExportOptions } from './video-export-options.mjs';
+import { CAPTION_AUDIO_MAX_BYTES, normalizeCaptionAudioRequest, verifyCaptionAudioInput } from './caption-audio.mjs';
+import { HttpError } from './http.mjs';
 export { exportRuntimeSchema } from './export-snapshot.mjs';
 
 /** The exports folder: the one chosen in Settings, else the Desktop, where a file just made is found (src/locations.mjs). */
@@ -85,7 +87,7 @@ export { exportsRoot };
  * @typedef {Framing & { kind: 'video', codec?: VideoCodec, shortEdge?: number, scale?: number,
  *   fps?: number, quality?: Quality, audio?: boolean, clip?: string, preset?: string, sidecar?: 'srt' | 'vtt', hardware?: boolean, alpha?: boolean, samples?: number, shutter?: number }} VideoAsk
  * @typedef {Framing & { kind: 'gif', width?: number, fps?: number }} GifAsk
- * @typedef {{ kind: 'audio', format?: 'wav' | 'm4a' | 'mp3', mix?: boolean, stems?: boolean }} AudioAsk
+ * @typedef {{ kind: 'audio', format?: 'wav' | 'm4a' | 'mp3', mix?: boolean, stems?: boolean, captionAudio?: import('./caption-audio.mjs').CaptionAudioRequest }} AudioAsk
  * @typedef {Framing & { kind: 'stills', format?: 'png' | 'jpg', shortEdge?: number, at?: number[] }} StillsAsk
  * @typedef {Framing & { kind: 'poster', format?: 'png' | 'jpg', shortEdge?: number, at?: number }} PosterAsk
  * @typedef {{ kind: 'subtitles', format?: 'srt' | 'vtt' | 'txt' }} SubtitlesAsk
@@ -101,10 +103,10 @@ export { exportsRoot };
  * @typedef {{ id: string, project: string, name: string, label: string, kind: ExportSpec['kind'], ask: ExportAsk,
  *   status: 'waiting' | 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted', progress: number, phase: ExportPhase | null,
  *   framesDone: number, framesTotal: number, rate: number, etaMs: number | null, encoder: string | null,
- *   out?: string, outputs: string[], bytes: number | null, outputSizes?: { path: string, bytes: number }[],
+ *   out?: string, outputs: string[], bytes: number | null, outputSizes?: { path: string, bytes: number }[], outputDigests?: { path: string, bytes: number, sha256: string }[],
  *   alpha: { any: boolean } | null, error?: string, cancelling?: boolean,
  *   at: number, startedAt: number | null, finishedAt: number | null, retryOf?: string, temporaryOutputs?: string[],
- *   inputSnapshot?: { filmRevision: string, bytes: number, files: number, manifest: string, limitations: string[], reviewFactsSha256?: string | null, outputTimeToFilmTime?: ReturnType<typeof exportReviewMapping> } }} ExportJob
+ *   inputSnapshot?: { filmRevision: string, bytes: number, files: number, manifest: string, limitations: string[], reviewFactsSha256?: string | null, outputTimeToFilmTime?: ReturnType<typeof exportReviewMapping>, captionAudio?: import('./caption-audio.mjs').CaptionAudioSelection } }} ExportJob
  */
 
 export class ExportError extends Error {
@@ -285,6 +287,11 @@ function checked(/** @type {ExportAsk} */ ask) {
     case 'audio':
       if (ask.format !== undefined && !(ask.format in SOUND_CODECS)) throw new ExportError('sound as wav, m4a or mp3');
       if (ask.mix === false && !ask.stems) throw new ExportError('choose the mix, the stems, or both');
+      if (ask.captionAudio !== undefined) {
+        const guard = normalizeCaptionAudioRequest(ask.captionAudio);
+        if (ask.format !== 'wav' || ask.mix === false || ask.stems === true || !ask.range) throw new ExportError('字幕原声窗需要带范围的一份WAV成片混音。');
+        return { ...ask, range: /** @type {[number, number]} */ ([ask.range[0], ask.range[1]]), captionAudio: guard };
+      }
       break;
     case 'stills':
     case 'poster':
@@ -838,8 +845,11 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
         signal: item.abort.signal, maxFiles: snapshotMaxFiles, maxBytes: snapshotMaxBytes,
       });
       if (item.abort.signal.aborted) throw new Error('cancelled');
+      // 只对字幕原声窗核持久请求；冻结后再派生范围，排队或retry均不能错取另一版句子。
+      const captionAudio = job.ask.kind === 'audio' ? await verifyCaptionAudioInput(snapshotDir, job.ask, manifest) : undefined;
       update(job, { inputSnapshot: { filmRevision: manifest.filmRevision, bytes: manifest.bytes, files: manifest.files.length,
         manifest: join(stateDir, job.id, 'input-manifest.json'), limitations: manifest.limitations,
+        ...(captionAudio ? { captionAudio } : {}),
         reviewFactsSha256: reviewFactsDigest(manifest.reviewFacts), outputTimeToFilmTime: exportReviewMapping(job.ask, manifest.filmRevision) } });
       return snapshotDir;
     });
@@ -1440,8 +1450,17 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
       if (abort.signal.aborted) throw new Error('cancelled');
       const outputSizes = await exportOutputSizes(job.outputs);
       if (abort.signal.aborted) throw new Error('cancelled');
+      /** @type {{ path: string, bytes: number, sha256: string }[] | undefined} */
+      let outputDigests;
+      if (job.ask.kind === 'audio' && job.ask.captionAudio) {
+        if (outputSizes.length !== 1 || outputSizes[0].bytes > CAPTION_AUDIO_MAX_BYTES) throw new ExportError('字幕原声窗输出超过单份6MiB预算。');
+        const data = await readFile(outputSizes[0].path);
+        if (data.length !== outputSizes[0].bytes) throw new ExportError('字幕原声窗输出在摘要读取时发生变化。');
+        outputDigests = [{ ...outputSizes[0], sha256: createHash('sha256').update(data).digest('hex') }];
+      }
+      if (abort.signal.aborted) throw new Error('cancelled');
       const bytes = outputSizes.reduce((n, file) => n + file.bytes, 0);
-      update(job, { status: 'done', progress: 1, phase: null, etaMs: null, bytes, outputSizes, finishedAt: Date.now() });
+      update(job, { status: 'done', progress: 1, phase: null, etaMs: null, bytes, outputSizes, ...(outputDigests ? { outputDigests } : {}), finishedAt: Date.now() });
     } catch (e) {
       /* what a cancelled or failed export left half written is not an export */
       for (const f of job.outputs) await rm(f, { force: true, recursive: true }).catch(() => {});
@@ -1511,7 +1530,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
       const job = jobs.find((item) => item.id === id);
       if (!job) throw new ExportError('no such export', 404);
       try { await preparations.get(id); }
-      catch (error) { throw new ExportError(error instanceof Error ? error.message : String(error), job.status === 'cancelled' ? 409 : 422); }
+      catch (error) { throw new ExportError(error instanceof Error ? error.message : String(error), error instanceof HttpError ? error.status : job.status === 'cancelled' ? 409 : 422); }
       if (job.status === 'cancelled') throw new ExportError('this export was cancelled before submission completed', 409);
       if (job.status === 'failed') throw new ExportError(job.error ?? 'export preparation failed', 422);
       return { ...job, outputs: [...job.outputs] };

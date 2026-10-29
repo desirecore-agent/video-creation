@@ -25,7 +25,7 @@ import { clipKind, clipSpan, kindOf, soundRole } from '../../src/film-doc.mjs';
 import { probe } from './derived.mjs';
 import { readProjectFilm, withProjectFilmEdit } from './film.mjs';
 import { HttpError, json, readJson } from './http.mjs';
-import { TOOL_DIR } from './projects.mjs';
+import { SUBTITLE_STYLE_FILE, readSubtitleStyleInfo } from './subtitle-layout.mjs';
 import { filmSubtitleLanguageOf, filmSubtitleLanguagesIn, isFilmSubtitleLanguage, parseFilmSubtitleStyle, sameFilmSubtitleLanguage } from './film-subtitle.mjs';
 import { writeAtomic } from './atomic.mjs';
 import { inProject } from './files.mjs';
@@ -33,15 +33,15 @@ import { alignTranslation, segmentLine, subtitleEnd } from './subtitle-segments.
 import { normalizeEmphasis, sliceEmphasis } from './subtitle-emphasis.mjs';
 import { readTranscript, transcriptIsCurrent, transcriptPath, translationsOf, writeTranscript } from './transcripts.mjs';
 import { assertSourceSnapshot, readSourceSnapshot, sourceSnapshotRevision, subtitleEditRoutes, writeSubtitleLine } from './subtitle-edits.mjs';
+import { observeCaptionMedia } from './caption-media-snapshot.mjs';
 
 export { spokenLines, stripAudioTags } from './transcripts.mjs';
 export { SUBTITLE_SEGMENT_RULES } from './subtitle-segments.mjs';
+export { SUBTITLE_STYLE_FILE, SUBTITLE_LAYOUT_RESPONSE_SCHEMA, readSubtitleStyleInfo } from './subtitle-layout.mjs';
 
 /** @typedef {import('./film-subtitle.mjs').FilmSubtitleCue} FilmSubtitleCue @typedef {import('./film-subtitle.mjs').FilmSubtitleStyle} FilmSubtitleStyle */
 /** @typedef {{ token: string, startSec: number, endSec?: number }} Word */
 /** @typedef {import('./transcripts.mjs').SpokenLine} SpokenLine */
-
-export const SUBTITLE_STYLE_FILE = `${TOOL_DIR}/subtitles.json`;
 
 export class CaptionError extends Error {
   /** @param {string} message @param {number} status @param {string} [code] */
@@ -270,14 +270,19 @@ export function transcriptOutlasts(lines, seconds) {
  *   untranscribed  the speech heard in the film that has no transcript yet
  * A film.html that cannot be read has no subtitles (its problems are shown elsewhere).
  * @param {string} root
- * @param {{ duration?: (src: string) => Promise<number | undefined> }} [options] the length of a source in seconds
+ * @param {{ duration?: (src: string) => Promise<number | undefined>, withMediaDigests?: boolean }} [options] the length of a source in seconds
  *   when the clip's trim does not say it (ffprobe by default)
  */
 export async function filmCaptions(root, options = {}) {
   const film = await readProjectFilm(root);
   const empty = { cues: /** @type {FilmSubtitleCue[]} */ ([]), sourceLanguage: null, languages: /** @type {string[]} */ ([]), untranscribed: /** @type {string[]} */ ([]) };
   const doc = /** @type {import('../../src/film-doc.d.mts').FilmDoc | null} */ (film.doc);
-  if (!doc) return empty;
+  if (!doc) {
+    if (options.withMediaDigests) throw new HttpError(422, '影片不可读取，不能绑定字幕媒体观察。');
+    return empty;
+  }
+  // 默认读取不hash大媒体；显式选句观察才在同一窗口绑定媒体、影片和字幕来源。
+  const media = options.withMediaDigests ? await observeCaptionMedia(root, heardClips(root, doc).map((clip) => clip.src)) : null;
   const duration = options.duration ?? ((/** @type {string} */ src) => probe(root, src).then((p) => p.duration, () => undefined));
   /** @type {Map<string, { lines: SpokenLine[], speaker?: string, alt: AltLines, cut?: boolean, sourceRevision: string } | null>} */
   const known = new Map();
@@ -326,11 +331,18 @@ export async function filmCaptions(root, options = {}) {
   cues.sort((a, b) => a.startMs - b.startMs);
   /* a speaker's name tells voices apart; with one voice in the film it tells nothing, and would open every line */
   if (new Set(cues.map((c) => c.speaker).filter(Boolean)).size <= 1) for (const c of cues) delete c.speaker;
+  if (media) {
+    if ((await readProjectFilm(root)).rev !== film.rev) throw new HttpError(409, '影片在字幕媒体观察期间改变。', { code: 'caption-media-changed' });
+    for (const [src, said] of known) if (said && sourceSnapshotRevision(await readSourceSnapshot(root, src)) !== said.sourceRevision)
+      throw new HttpError(409, '源字幕在媒体观察期间改变。', { code: 'caption-media-changed' });
+    await media.verify();
+  }
   return {
     cues,
     sourceLanguage: filmSubtitleLanguageOf(cues.map((c) => c.text).join(' ')),
     languages: filmSubtitleLanguagesIn(cues),
     untranscribed: [...untranscribed],
+    ...(media ? { filmRevision: film.rev, mediaSnapshots: media.snapshots } : {}),
   };
 }
 
@@ -473,7 +485,9 @@ export async function captionRoutes(req, res, root, rest, { translate = async ()
   /* the subtitle row's edits of one source (subtitle-edits.mjs) */
   if (await subtitleEditRoutes(req, res, root, rest)) return true;
   if (rest === 'captions' && req.method === 'GET') {
-    json(res, 200, await filmCaptions(root));
+    const media = new URL(req.url ?? '/', 'http://localhost').searchParams.get('withMediaDigests');
+    if (media !== null && media !== '1') throw new HttpError(400, 'withMediaDigests仅接受显式1。');
+    json(res, 200, await filmCaptions(root, { withMediaDigests: media === '1' }));
     return true;
   }
   if (rest === 'captions/line' && req.method === 'PUT') {
@@ -487,7 +501,7 @@ export async function captionRoutes(req, res, root, rest, { translate = async ()
     return true;
   }
   if (rest === 'subtitles') {
-    if (req.method === 'GET') { json(res, 200, { style: await readSubtitleStyle(root) }); return true; }
+    if (req.method === 'GET') { json(res, 200, await readSubtitleStyleInfo(root)); return true; }
     if (req.method === 'PUT') {
       const body = /** @type {{ style?: unknown }} */ (await readJson(req));
       if (!isRecord(body.style)) throw new HttpError(400, 'which style? { style: { … } }');
