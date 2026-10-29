@@ -275,3 +275,82 @@ test('P1真实Chromium在同求帧窗口测文字与裁切，目标图和组合�
     assert.equal(await readFile(join(project.path, 'film.html'), 'utf8'), film); assert.equal(await readFile(join(project.path, 'scene.html'), 'utf8'), scene);
   } finally { await reviews?.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+
+test('P0 真实完整工程图含隔离字幕和强调，测完整边界/同刻信息碰撞并保留锁与原字节', { skip: !enabled, timeout: 90_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'video-review-composition-'));
+  try {
+    const project = { id: 'complete-picture', path: join(root, 'project') }; await mkdir(project.path); await mkdir(join(project.path, '.film'));
+    execFileSync('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'anullsrc=r=16000:cl=mono', '-t', '1', join(project.path, 'voice.wav')]);
+    const scene = '<body style="margin:0;background:#123"><div id="info" style="position:absolute;left:40px;top:500px;width:240px;height:50px;background:#345;color:white">锁定的信息</div><script>window.film={duration:1,width:320,height:640,frame(t){}}</script>';
+    const intent = JSON.stringify({ text: [{ role: 'essential', selector: '#info', description: '必要图解' }] });
+    const film = filmHtml({ stage: { w: 320, h: 640 }, tracks: [{ locked: true, clips: [{ id: 'scene', src: 'scene.html', at: 0, duration: 1, attrs: { 'data-review-intent': intent }, overrides: [{ at: '#info', text: '人工锁定信息' }] }] }, { clips: [{ id: 'voice', src: 'voice.wav', time: [0, 1], at: 0 }] }] });
+    const vtt = 'WEBVTT\n\n00:00.000 --> 00:00.600\nOne <c.emphasis>KEYWORD</c.emphasis>\n';
+    const style = JSON.stringify({ on: true, pos: { x: .5, y: .82 }, font: { sizePct: 10 }, stroke: { widthEm: .1, color: '#000000' }, shadow: { dxEm: 0, dyEm: .1, blurEm: .1, color: '#000000' }, karaoke: null });
+    await writeFile(join(project.path, 'film.html'), film); await writeFile(join(project.path, 'scene.html'), scene); await writeFile(join(project.path, 'voice.vtt'), vtt); await writeFile(join(project.path, '.film/subtitles.json'), style);
+    const reviews = createReviews({ root: join(root, 'reviews') });
+    const r = await reviews.create(project, { source: 'current-project', times: [.3, .8], maxEdge: 640, informationSafeArea: { top: .15, bottom: .15 }, compareWidths: [180, 320] });
+    assert.equal(r.source.subtitles.enabled, true); assert.equal(r.source.subtitles.cueCount, 1); assert.equal(r.source.subtitles.styleInput.sha256, sha(style));
+    assert.equal(r.source.inputs.files.find((f) => f.path === 'voice.vtt').sha256, sha(vtt));
+    const caption = r.findings.find((f) => f.code === 'subtitle-information-bounds');
+    assert.equal(caption.status, 'observed'); assert.equal(caption.bounds.coordinateSpace, 'film-pixels'); assert.equal(caption.measurement.safeAreaRelation, 'outside'); assert.equal(caption.severity, 'warning');
+    assert.ok(r.findings.some((f) => f.code === 'subtitle-information-overlap'));
+    assert.ok(r.coverage.some((c) => c.code === 'studio-subtitle-layer' && c.details.rendered === true));
+    assert.ok(r.coverage.some((c) => c.code === 'studio-subtitle-layer' && c.details.reason === 'no-active-cue'));
+    const active = await reviews.frame(project, r.reviewId, 0), silent = await reviews.frame(project, r.reviewId, 1);
+    assert.notEqual(sha(active.data), sha(silent.data));
+    const rgba = execFileSync('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-f', 'image2pipe', '-i', 'pipe:0', '-frames:v', '1', '-pix_fmt', 'rgba', '-f', 'rawvideo', 'pipe:1'], { input: active.data });
+    let yellow = 0; for (let i = 0; i < rgba.length; i += 4) if (rgba[i] > 180 && rgba[i + 1] > 130 && rgba[i + 2] < 80 && rgba[i + 3] > 200) yellow++;
+    assert.ok(yellow > 20, `semantic emphasis yellow pixels=${yellow}`);
+    for (const [name, original] of [['film.html', film], ['scene.html', scene], ['voice.vtt', vtt], ['.film/subtitles.json', style]]) assert.equal(await readFile(join(project.path, name), 'utf8'), original);
+    await reviews.close();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('P0 字幕关闭与空字幕明确覆盖，序列合成不遗漏外置字幕且不受场景CSS污染', { skip: !enabled, timeout: 90_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'video-review-composition-state-'));
+  try {
+    const project = { id: 'complete-picture-states', path: join(root, 'project') }; await mkdir(project.path); await mkdir(join(project.path, '.film'));
+    execFileSync('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'anullsrc=r=16000:cl=mono', '-t', '1', join(project.path, 'voice.wav')]);
+    await writeFile(join(project.path, 'film.html'), filmHtml({ stage: { w: 320, h: 640 }, tracks: [{ clips: [{ id: 'page', src: 'scene.html', at: 0, duration: 1 }] }, { clips: [{ id: 'voice', src: 'voice.wav', time: [0, 1], at: 0 }] }] }).replace('</head>', '<style>html{opacity:.2;filter:blur(4px)}</style></head>'));
+    await writeFile(join(project.path, 'scene.html'), '<style>div,span{font-size:99px!important;color:lime!important}</style><body style="margin:0;background:#123"><script>window.film={duration:1,width:320,height:640,frame(t){}}</script>');
+    await writeFile(join(project.path, 'voice.vtt'), 'WEBVTT\n\n00:00.000 --> 00:01.000\nA <c.emphasis>word</c.emphasis>\n');
+    await writeFile(join(project.path, '.film/subtitles.json'), JSON.stringify({ on: false }));
+    const reviews = createReviews({ root: join(root, 'reviews') });
+    const off = await reviews.create(project, { source: 'current-project', times: [.5], maxEdge: 640 });
+    assert.ok(off.coverage.some((c) => c.code === 'studio-subtitle-layer' && c.details.reason === 'subtitles-off'));
+    await writeFile(join(project.path, '.film/subtitles.json'), JSON.stringify({ on: true }));
+    const sequence = await reviews.create(project, { source: 'current-project', times: [.5], maxEdge: 640, sequence: { start: 0, end: 1, count: 8 } });
+    assert.equal(sequence.coverage.filter((c) => c.code === 'studio-subtitle-layer' && c.details.rendered).length, 9);
+    assert.equal(sequence.artifacts[0].derivedFrom.length, 8);
+    const bounds = sequence.findings.filter((f) => f.code === 'subtitle-information-bounds'); assert.equal(bounds.length, 9);
+    assert.ok(bounds.every((f) => f.bounds.width < 180 && f.bounds.y > 400));
+    assert.notEqual(sequence.frames[0].sha256, off.frames[0].sha256);
+    const composed = (await reviews.frame(project, sequence.reviewId, 0)).data;
+    const rgba = execFileSync('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-f', 'image2pipe', '-i', 'pipe:0', '-frames:v', '1', '-pix_fmt', 'rgba', '-f', 'rawvideo', 'pipe:1'], { input: composed });
+    let yellow = 0; for (let i = 0; i < rgba.length; i += 4) if (rgba[i] > 180 && rgba[i + 1] > 130 && rgba[i + 2] < 80 && rgba[i + 3] > 200) yellow++;
+    assert.ok(yellow > 10, `film root opacity/filter must not attenuate Studio subtitle pixels: ${yellow}`);
+    await writeFile(join(project.path, 'voice.vtt'), 'WEBVTT\n');
+    const empty = await reviews.create(project, { source: 'current-project', times: [.5], maxEdge: 640 });
+    assert.ok(empty.coverage.some((c) => c.code === 'studio-subtitle-layer' && c.details.reason === 'no-cues'));
+    assert.equal(empty.frames[0].sha256, off.frames[0].sha256);
+    await reviews.close();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test('P0 SVG零高度线条描边越界不能被遗漏后判为inside', { skip: !enabled, timeout: 90_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'video-review-degenerate-stroke-'));
+  try {
+    const project = { id: 'svg-stroke', path: join(root, 'project') }; await mkdir(project.path);
+    const intent = JSON.stringify({ text: [{ role: 'essential', selector: '#info', description: '含水平描边的信息图' }] });
+    await writeFile(join(project.path, 'film.html'), filmHtml({ stage: { w: 320, h: 640 }, tracks: [{ clips: [{ id: 'scene', src: 'scene.html', duration: 1, attrs: { 'data-review-intent': intent } }] }] }));
+    await writeFile(join(project.path, 'scene.html'), '<body style="margin:0;background:#123"><svg id="info" width="100" height="50" style="position:absolute;left:40px;top:500px;overflow:visible"><line x1="0" y1="48" x2="100" y2="48" stroke="white" stroke-width="20" stroke-linecap="round"/></svg><script>window.film={duration:1,width:320,height:640,frame(t){}}</script>');
+    const reviews = createReviews({ root: join(root, 'reviews') });
+    const r = await reviews.create(project, { source: 'current-project', times: [.5], maxEdge: 640, informationSafeArea: { top: 0, bottom: 85 / 640 } });
+    const info = r.findings.find((f) => f.code === 'information-bounds' && f.selector === '#info');
+    assert.equal(info.status, 'unknown'); assert.equal(info.measurement.safeAreaRelation, 'unknown'); assert.equal(info.measurement.reason, 'degenerate-svg-stroke');
+    assert.equal(info.bounds.y + info.bounds.height, 550); // 真正可见stroke到558；此几何盒不能冒充完整绘制范围。
+    await reviews.close();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

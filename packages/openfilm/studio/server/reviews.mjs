@@ -29,6 +29,7 @@ export function normalizeReviewRequest(value) {
     if (!value.before || !value.after || Object.keys(value).some((key) => !['source', 'before', 'after', 'maxEdge', 'targetWidth'].includes(key))) throw new ReviewError('review-pair只接受before/after已有帧与观看尺寸。', 400, 'invalid-request');
     return { ...value, maxEdge: value.maxEdge ?? 1280 };
   }
+  if (value.informationSafeArea && value.informationSafeArea.top + value.informationSafeArea.bottom >= 1) throw new ReviewError('上下信息禁入区之和必须小于1。', 400, 'invalid-request');
   if (value.before || value.after) throw new ReviewError('before/after只用于review-pair。', 400, 'invalid-request');
   if ((value.source === 'export-job') !== Boolean(value.job)) throw new ReviewError('只有 export-job 需要且必须提供 job。', 400, 'invalid-request');
   if (value.times && value.count !== undefined) throw new ReviewError('times 与 count 不能同时提供。', 400, 'invalid-request');
@@ -314,6 +315,7 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
         source = { kind: 'current-project', inputs: { filmRevision, ...snapshot, digestOrigin: 'review-static-local-snapshot', limitations: manifest.limitations },
           consistency: 'local-snapshot-with-live-before-after-checks', limitations: ['静态本地依赖沿既有 filmClosure 冻结。远端资源、未解析的动态依赖和浏览器/字体环境不属于这个摘要，不能宣称原子冻结整个运行环境。'] };
         result = await drawProject(frozen, dir, request, film.doc.stage, { signal });
+        if (result.subtitleSource) source.subtitles = result.subtitleSource;
         if (!sameDigest(snapshot, await localInputs(project.path, signal)) || (await readProjectFilm(project.path)).rev !== filmRevision) throw new ReviewError('工程在审片期间变化，请按当前版本重新审片。', 409, 'stale');
       }
       cleanup.push(...(result.decodedFiles ?? []), ...(result.sequenceFiles ?? []));
@@ -402,6 +404,7 @@ export function createReviews({ root = join(studioHomeDir(), 'reviews'), jobs, d
       const limitations = ['编码帧不能提供 DOM 字号、裁切选择器或复杂背景对比度事实；没有 finding 不表示通过。'];
       const findings = request.source === 'export-job' ? [{ code: 'dom-analysis', severity: 'info', status: 'unknown', time: null, source: { kind: 'export-job' }, selector: null, bounds: null, measurement: {}, evidence: [], limitations }] : result.findings ?? [];
       const coverage = request.source === 'export-job' ? [{ code: 'dom-analysis', status: 'unknown', time: null, source: { kind: 'export-job' }, details: { measured: false, reason: 'encoded-output-has-no-current-dom' }, limitations }] : result.coverage ?? [];
+      if (request.source === 'export-job' && request.informationSafeArea) coverage.push({ code: 'information-safe-area', status: 'unknown', time: null, source: { kind: 'export-job' }, details: { requested: request.informationSafeArea, measured: false, reason: 'encoded-output-has-no-dom-or-semantic-objects' }, limitations });
       const temporal = result.sequence ? { ...result.sequence.temporal, source: { kind: request.source, reviewId, filmRevision, ...(source.output ? { outputSha256: source.output.sha256 } : { inputSha256: source.inputs.sha256 }) } } : null;
       const receipt = { version: request.sequence || request.compareWidths ? 3 : 2, sourceFacts, reviewId, sourceKind: request.source, projectId: project.id, filmRevision, createdAt: new Date().toISOString(), request, source,
         duration: result.duration, durationOrigin: result.durationOrigin ?? 'project-duration', timeOrigin: result.timeOrigin ?? 'project-timeline', timeOriginPTS: result.timeOriginPTS ?? null, ...(result.timeOriginPTSTicks !== undefined ? { timeOriginPTSTicks: result.timeOriginPTSTicks } : {}), ...(result.encodedRange ? { encodedRange: result.encodedRange } : {}), lastFramePolicy: result.lastFramePolicy,

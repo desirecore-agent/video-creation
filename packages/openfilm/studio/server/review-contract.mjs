@@ -10,8 +10,9 @@ const reviewFrameReference = { type: 'object', additionalProperties: false, requ
 export const reviewRequestSchema = {
   $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', additionalProperties: false, required: ['source'],
   description: '只读审片请求。生成材料不等于看图，不限制导演自主创作或人工锁。',
-  allOf: [{ if: { properties: { source: { const: 'review-pair' } }, required: ['source'] }, then: { required: ['before', 'after'], properties: { job: false, times: false, last: false, count: false, firstLast: false, sequence: false, compareWidths: false, compareFrame: false } }, else: { properties: { before: false, after: false } } }],
+  allOf: [{ if: { properties: { source: { const: 'review-pair' } }, required: ['source'] }, then: { required: ['before', 'after'], properties: { job: false, times: false, last: false, count: false, firstLast: false, sequence: false, compareWidths: false, compareFrame: false, informationSafeArea: false } }, else: { properties: { before: false, after: false } } }],
   properties: {
+    informationSafeArea: { type: 'object', additionalProperties: false, required: ['top', 'bottom'], description: '可选的上/下实质信息禁入区高度比例，和须小于1；只观察字幕与显式essential/supporting DOM目标完整边界，不自动移动、裁切、评分或修改锁。编码来源没有DOM，返回unknown而非安全通过。', properties: { top: { type: 'number', minimum: 0, exclusiveMaximum: 1, description: '从画面上沿起的高度比例，例如0.15，不是15。' }, bottom: { type: 'number', minimum: 0, exclusiveMaximum: 1, description: '从画面下沿起的高度比例，例如0.15。' } } },
     source: { enum: ['current-project', 'export-job', 'review-pair'], description: 'current-project为冻结工程预览；export-job解码完成视频；review-pair仅组合before/after已有帧，不再渲染。' },
     before: reviewFrameReference, after: reviewFrameReference,
     job: { type: 'string', pattern: '^[a-f0-9]{12}$', description: 'export-job 必须指定 video_jobs 返回的 done 视频任务 ID，不接受任意路径。' },

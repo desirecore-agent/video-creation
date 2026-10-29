@@ -50,6 +50,7 @@ node desirecore/cli.mjs <命令> [项目目录] [选项]
     [--target-width <64-4096>] [--first-last]
     [--sequence-start <秒> --sequence-end <秒> --sequence-count <8-24>]
     [--compare-widths <180,360,720> --compare-frame <本回执index>]
+    [--safe-top <0.15> --safe-bottom <0.15>]        只读核实质信息完整边界，不自动排版
     或 --source review-pair --before-review <ID> --after-review <ID> [--before-frame 0 --after-frame 0]
                                                    生成带版本、实际帧时间和 SHA-256 的审片 PNG 与结构化测量
   review --schema                                 离线发现同源请求、finding 和组合图 Schema
@@ -80,7 +81,7 @@ export function argumentsOf(args) {
     'no-browser': { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
     base: { type: 'string' }, ops: { type: 'string' }, output: { type: 'string' },
     source: { type: 'string' }, job: { type: 'string' }, times: { type: 'string' }, count: { type: 'string' }, last: { type: 'boolean' }, 'max-edge': { type: 'string' }, 'target-width': { type: 'string' }, 'first-last': { type: 'boolean' },
-    'sequence-start': { type: 'string' }, 'sequence-end': { type: 'string' }, 'sequence-count': { type: 'string' }, 'compare-widths': { type: 'string' }, 'compare-frame': { type: 'string' }, 'before-review': { type: 'string' }, 'before-frame': { type: 'string' }, 'after-review': { type: 'string' }, 'after-frame': { type: 'string' },
+    'sequence-start': { type: 'string' }, 'sequence-end': { type: 'string' }, 'sequence-count': { type: 'string' }, 'compare-widths': { type: 'string' }, 'compare-frame': { type: 'string' }, 'safe-top': { type: 'string' }, 'safe-bottom': { type: 'string' }, 'before-review': { type: 'string' }, 'before-frame': { type: 'string' }, 'after-review': { type: 'string' }, 'after-frame': { type: 'string' },
     args: { type: 'string' }, via: { type: 'string' }, model: { type: 'string' },
     wait: { type: 'boolean' }, fps: { type: 'string' }, timeout: { type: 'string' },
     codec: { type: 'string' }, alpha: { type: 'boolean' }, quality: { type: 'string' },
@@ -127,6 +128,7 @@ export function reviewOptionsOf(values) {
       start: Number(values['sequence-start']), end: Number(values['sequence-end']), count: Number(values['sequence-count']),
     } } : {}),
     ...(values['compare-widths'] !== undefined ? { compareWidths: values['compare-widths'].split(',').map((n) => n.trim() ? Number(n) : NaN) } : {}),
+    ...(['safe-top', 'safe-bottom'].some((key) => values[key] !== undefined) ? { informationSafeArea: { top: Number(values['safe-top']), bottom: Number(values['safe-bottom']) } } : {}),
     ...(values['compare-frame'] !== undefined ? { compareFrame: Number(values['compare-frame']) } : {}),
   });
 }

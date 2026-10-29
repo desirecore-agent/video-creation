@@ -298,3 +298,11 @@ probe补充编码/显示尺寸、旋转、颜色原语及视频/音轨首PTS与�
 `SourceCue` / 派生字幕可有 `emphasis:[{from,to}]`，针对其plain text的UTF-16半开范围，不能切开代理对，不能越界或反向。原VTT的 `<b>` 与 `<c.emphasis>` 被读取，统一写为 `<c.emphasis>`；任意HTML/CSS仍不执行。仅增标记不改正文、marks、时标时保留原timing来源。范围随规范化/分句/裁剪/拆合映射；改字后失效范围清除，翻译清原文范围。UI和烧录共用纯run/CSS函数，支持和原karaoke独立叠加；强调外观为可选 `style.emphasis:{color,weight}`（受限hex、100至900，Draft07含description），缺失用默认值，null停用强调外观。VTT导出仍有词时间和强调，SRT是明确纯文本降级。
 
 平台不选重点词、不固定场景边距；导演基于实际素材/人工锁选择构图和语义强调，再读最终编码的180/360px图与连续画面。源字幕保存不提供新的外观锁或跨进程CAS承诺；原有人工整行/位置/时间约束必须继续遵守。
+
+### 完整工程画面与可选信息区域
+
+`review` 的 `current-project` PNG沿既有FilmPage画面合成同一冻结输入的Studio字幕，字幕使用 `subtitlesForExport` / `filmSubtitleFrameHtml`，不修改作品、源字幕、样式、人工锁或渲染队列。普通times、首尾、尺寸对照和sequence均使用同一合成。回执 `source.subtitles` 记录cue投影SHA、各源字幕revision、样式原字节SHA或明确缺失使用默认；这些文件同时保留在原有完整输入清单中，任一live输入变化仍stale拒绝。
+
+HTTP/MCP可选 `informationSafeArea:{top:0.15,bottom:0.15}`；CLI对应 `--safe-top 0.15 --safe-bottom 0.15`，须成对提供、比例非负且总和小于1，省略不默认任何比例。review-pair不接受此新测量。`subtitle-information-bounds`、`information-bounds` 的 `bounds.coordinateSpace=film-pixels` 只用于已核轴对齐映射的完整信息框，沿实际画布高度判断 `safeAreaRelation=inside/outside/unknown/not-requested`。字幕层含行盒/描边及3倍模糊半径的保守阴影范围；复杂变换、滤镜、伪元素、Canvas等标未知，不把stage裁切后的剩余部分当完整边界。场景只检查已有审片意图中明确essential/supporting并带selector的对象，未标注不自动猜测信息角色。
+
+`studio-subtitle-layer` coverage显式区分rendered、subtitles-off、no-cues与no-active-cue。`subtitle-information-overlap` 是同一采样时刻字幕和已声明场景信息框的交集提示，不是像素遮挡或审美评分。工程seek、DOM与PNG是同次采样窗口而非原子快照；离散采样不证明全片每帧。export-job没有DOM/语义对象，信息区域请求返回unknown，不借新字幕反推旧编码的安全性。原有图数/字节预算、来源检查、目录权限和人工锁合同不变。

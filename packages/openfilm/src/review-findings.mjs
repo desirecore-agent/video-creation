@@ -27,7 +27,7 @@ const boundsSchema = {
   type: ['object', 'null'], description: 'DOM Range 的轴对齐包围盒；不是逐像素字形，也不证明没有遮挡。',
   required: ['coordinateSpace', 'x', 'y', 'width', 'height'], additionalProperties: false,
   properties: {
-    coordinateSpace: { const: 'page-css-pixels', description: '当前 page/iframe 本地 CSS 像素；不能直接当作整部影片像素。' },
+    coordinateSpace: { enum: ['page-css-pixels', 'film-pixels'], description: 'page-css-pixels为页面本地坐标，film-pixels仅用于已核轴对齐变换的工程信息/字幕完整边界；不等于实际字形像素。' },
     x: { type: 'number', description: '本地视口横坐标。' }, y: { type: 'number', description: '本地视口纵坐标。' },
     width: { type: 'number', minimum: 0, description: '轴对齐包围盒宽度。' }, height: { type: 'number', minimum: 0, description: '轴对齐包围盒高度。' },
   },

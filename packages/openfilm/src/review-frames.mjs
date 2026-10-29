@@ -1,6 +1,7 @@
 /** 审片只复用 look 所用的 FilmPage 和 FFmpeg；工程预览与真实编码帧保持不同时间口径。 */
 import { createHash } from 'node:crypto';
-import { collectFrameFindings } from './review-findings.mjs';
+import { collectFrameFindings, MAX_REVIEW_FINDINGS } from './review-findings.mjs';
+import { prepareReviewComposition } from '../studio/server/review-composition.mjs';
 import { spawn } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -70,17 +71,26 @@ export async function reviewProjectFrames(root, dir, request, stage, { signal } 
     const lastTime = Math.max(0, duration - 0.001);
     const points = requestedPoints(request, duration, lastTime);
     const frames = [], findings = [], coverage = [];
+    const composition = await prepareReviewComposition(root, stage);
+    let droppedFindings = 0, droppedCoverage = 0;
+    const append = (measured) => {
+      for (const row of measured.findings) if (findings.length < MAX_REVIEW_FINDINGS) findings.push(row); else droppedFindings++;
+      for (const row of measured.coverage) if (coverage.length < 256) coverage.push(row); else droppedCoverage++;
+    };
     for (const [index, point] of points.entries()) {
       signal?.throwIfAborted();
       await session.film.seek(point.actualTime);
-      const png = await session.film.capture({ format: 'png' });
+      const layer = await composition.draw(session.film, { ...point, actualPTS: null, timeBasis: 'project-seek' }, { safeArea: request.informationSafeArea, targetWidth: request.targetWidth });
+      let png;
+      try { png = await (layer.capture ? layer.capture() : session.film.capture({ format: 'png' })); } finally { await layer.cleanup(); }
+      append(layer);
       if (png.length > REVIEW_MAX_FRAME_BYTES) throw new Error('单帧 PNG 超过 4 MiB 审片预算。');
       const file = join(dir, `frame-${index}.png`);
       await writeFile(file, png, { flag: 'wx', mode: 0o600 });
       const time = { ...point, actualPTS: null, timeBasis: 'project-seek' };
       const dimensions = pngSize(png);
       const measured = await collectFrameFindings(session.film, { time, stage, targetWidth: Math.min(dimensions.width, request.targetWidth ?? dimensions.width), source: { kind: 'current-project', consistency: 'same-seek-capture-window-not-atomic' } });
-      findings.push(...measured.findings); coverage.push(...measured.coverage);
+      append(measured);
       frames.push({ ...time, ...dimensions, sourceWidth: stage.w, sourceHeight: stage.h, captureSha256: createHash('sha256').update(png).digest('hex'), captureBytes: png.length, file });
     }
     let sequence;
@@ -89,7 +99,10 @@ export async function reviewProjectFrames(root, dir, request, stage, { signal } 
       for (const [i, point] of projectSequencePoints(duration, request.sequence).entries()) {
         signal?.throwIfAborted();
         await session.film.seek(point.actualTime);
-        const png = await session.film.capture({ format: 'png' });
+        const layer = await composition.draw(session.film, { ...point, actualPTS: null, timeBasis: 'project-seek' }, { safeArea: request.informationSafeArea, targetWidth: request.targetWidth });
+        let png;
+        try { png = await (layer.capture ? layer.capture() : session.film.capture({ format: 'png' })); } finally { await layer.cleanup(); }
+        append(layer);
         if (png.length > REVIEW_MAX_FRAME_BYTES) throw new Error('序列观察图超过4MiB预算。');
         const file = join(dir, `sequence-${i}.png`);
         await writeFile(file, png, { flag: 'wx', mode: 0o600 });
@@ -99,7 +112,8 @@ export async function reviewProjectFrames(root, dir, request, stage, { signal } 
       sequence = { frames: samples, temporal: { status: 'partial', method: 'discrete-project-seeks', requestedWindow: request.sequence,
         observedSamples: samples.length, limitations: ['工程预览只做离散seek；不能据此宣称区间每帧、连续播放或音频已检查。'] } };
     }
-    return { duration, frames, findings, coverage, ...(sequence ? { sequence, sequenceFiles: sequence.frames.map((s) => s.file) } : {}), lastFramePolicy: 'project-duration-minus-0.001s' };
+    if (droppedFindings || droppedCoverage) coverage.push({ code: 'review-composition-limit', status: 'partial', time: null, source: { kind: 'current-project' }, details: { findingLimit: MAX_REVIEW_FINDINGS, coverageLimit: 256, droppedFindings, droppedCoverage }, limitations: ['超过明细预算的采样未完整返回；不能据剩余finding宣称整片检查通过。'] });
+    return { duration, frames, findings, coverage, subtitleSource: composition.subtitleSource, ...(sequence ? { sequence, sequenceFiles: sequence.frames.map((s) => s.file) } : {}), lastFramePolicy: 'project-duration-minus-0.001s' };
   } finally { await session.close(); }
 }
 

@@ -94,6 +94,10 @@ node desirecore/cli.mjs review <项目> --source current-project --times 1,3 --l
 
 每次最多六个 timed 帧和一个独立组合制品；每图最多 4 MiB、两类合计 12 MiB。正式关闭服务会停止接收观察、结束并等待本实例审片资源及等待队列清理，不在后台暗中继续。完整暂存视频与工程输入在成功或失败后清理，只有帧、请求的组合图和回执留在本应用数据根的 `reviews/<reviewId>/`；没有自动过期或隐式重建。清理精确审片目录后旧引用明确不可用。新导出输入清单逐项记录冻结副本的 SHA-256；历史清单可能只有路径与字节，没有场景/资源的历史摘要；远端或未解析动态依赖、系统字体与浏览器环境不能由本地摘要证明冻结。详细请求和 HTTP 读取合同见 [RUNTIME.md](desirecore/RUNTIME.md)。
 
+工程 `current-project` 审片现在把Studio外置字幕与FilmPage画面合成为同一PNG，使用与导出相同的字幕时钟、样式、语言和语义强调；字幕关闭、没有字幕或当前无活动句分别写进 `studio-subtitle-layer` coverage。`source.subtitles` 绑定本次冻结样式文件、字幕源版本和完整cue投影摘要；旧编码审片仍只解码真实成片，不借当前工程DOM补造测量。
+
+需要按本次用途检查竖向信息区域时，可给 `--safe-top 0.15 --safe-bottom 0.15`，对应同源请求 `informationSafeArea:{top:0.15,bottom:0.15}`，比例之和须小于1。不提供就不预设安全区。`subtitle-information-bounds` 和显式 `data-review-intent` 的essential/supporting场景目标以影片坐标给出包含行盒、描边和保守阴影的完整边界；`subtitle-information-overlap` 仅提示同一采样时刻的框相交。未标注、Canvas/WebGL、复杂变换和未覆盖图层保留unknown，不能把无finding当整体安全或审美通过。测量不自动排版、裁切、改锁或限制原创场景。
+
 ## 公开时间线修改合同
 
 无需读取应用材料源码、打开服务或指定工程/home，即可查询本版本支持的全部时间线操作：

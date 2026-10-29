@@ -1,6 +1,6 @@
 export interface ReviewTime { requestedTime: number | string | null; actualTime: number | null; actualPTS: number | null; timeBasis: string; [key: string]: unknown }
 export interface ReviewSource { kind: string; page?: string | null; clipId?: string | null; inputSha256?: string | null; consistency?: string; [key: string]: unknown }
-export interface ReviewBounds { coordinateSpace: 'page-css-pixels'; x: number; y: number; width: number; height: number }
+export interface ReviewBounds { coordinateSpace: 'page-css-pixels' | 'film-pixels'; x: number; y: number; width: number; height: number }
 export interface ReviewFinding {
   code: string; severity: 'info' | 'warning' | 'error'; status: 'observed' | 'unknown'; time: ReviewTime | null; source: ReviewSource;
   selector: string | null; bounds: ReviewBounds | null; measurement: Record<string, unknown>; evidence: Record<string, unknown>[]; limitations: string[];
