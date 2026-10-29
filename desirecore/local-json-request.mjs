@@ -1,4 +1,4 @@
-/** 仅供已核身份的本地长媒体请求使用；沿原 AbortSignal 等待，不另设较短的响应头期限。 */
+/** 仅供已核身份的本地长请求使用；沿原 AbortSignal 等待，不另设较短的响应头期限。 */
 import { request as httpRequest } from 'node:http';
 
 export const MAX_LOCAL_JSON_BYTES = 256 << 10;
@@ -7,9 +7,12 @@ export const MAX_LOCAL_JSON_BYTES = 256 << 10;
  * 返回标准 Response，继续由既有客户端解析 HTTP 状态和 JSON；不跟随重定向、不执行媒体。
  * @param {URL} url
  * @param {RequestInit} [init]
+ * @param {{ maxBytes?: number }} [options] 内部调用者选择的有界响应预算；媒体准备仍默认256KiB。
  * @returns {Promise<Response>}
  */
-export function localJsonRequest(url, init = {}) {
+export function localJsonRequest(url, init = {}, { maxBytes = MAX_LOCAL_JSON_BYTES } = {}) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 8 * 1024 * 1024)
+    return Promise.reject(new Error('本地JSON响应预算必须为1字节至8MiB的整数。'));
   if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port || url.username || url.password || url.hash)
     return Promise.reject(new Error('本地长请求只接受已核身份的回环 HTTP 地址。'));
   const body = init.body;
@@ -29,9 +32,11 @@ export function localJsonRequest(url, init = {}) {
       cleanup();
       response?.destroy();
       request.destroy();
-      fail(error);
+      // 已收到明确HTTP失败时保留状态；2xx断流仍只表示未取得完整结果。
+      fail(response?.statusCode >= 400 ? Object.assign(error instanceof Error ? error : new Error(String(error)), { status: response.statusCode }) : error);
     };
     const abort = () => reject(signal?.reason ?? new DOMException('请求已取消。', 'AbortError'));
+    const budgetError = () => Object.assign(new Error(`本地 JSON 响应超出回执预算（${maxBytes} 字节）。`), { code: 'LOCAL_JSON_RESPONSE_BUDGET', maxBytes });
     const request = httpRequest(url, {
       method: init.method ?? 'GET',
       headers: Object.fromEntries(new Headers(init.headers)),
@@ -41,15 +46,14 @@ export function localJsonRequest(url, init = {}) {
         if (incoming.statusCode && incoming.statusCode >= 300 && incoming.statusCode < 400)
           throw new Error('本地长请求拒绝重定向。');
         const declared = incoming.headers['content-length'];
-        if (declared !== undefined && (!/^\d+$/.test(declared) || Number(declared) > MAX_LOCAL_JSON_BYTES))
-          throw new Error('本地 JSON 响应超出回执预算。');
+        if (declared !== undefined && (!/^\d+$/.test(declared) || Number(declared) > maxBytes)) throw budgetError();
         /** @type {Buffer[]} */
         const chunks = [];
         let bytes = 0;
         for await (const chunk of incoming) {
           if (settled) return;
           bytes += chunk.length;
-          if (bytes > MAX_LOCAL_JSON_BYTES) throw new Error('本地 JSON 响应超出回执预算。');
+          if (bytes > maxBytes) throw budgetError();
           chunks.push(chunk);
         }
         if (settled) return;

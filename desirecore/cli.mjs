@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { runtimeConfig, applyRuntimeEnvironment, runtimeIdentity, managedDocumentNavigation } from './config.mjs';
-import { projectClient } from './client.mjs';
+import { projectClient, reviewListRequestSchema, reviewListOffset } from './client.mjs';
 import { acquireApplicationLock } from './application-lock.mjs';
 import { sceneSourceContract, projectSceneSourceErrorReceipt, SCENE_SOURCE_LIMITS } from '../packages/openfilm/studio/server/scene-source.mjs';
 import { timelineOpsSchema } from '../packages/openfilm/studio/server/op-schema.mjs';
@@ -17,6 +17,8 @@ import { reviewLocalOptionsOf, reviewCopyRoot, copyReviewImages } from './review
 import { workingMediaRequestSchema } from '../packages/openfilm/studio/server/working-media.mjs';
 import { speechCutContract } from '../packages/openfilm/studio/server/speech-cut.mjs';
 import { CAPTION_SOURCE_READ_SCHEMA, CAPTION_SOURCE_SAVE_SCHEMA } from '../packages/openfilm/studio/server/subtitle-edits.mjs';
+import { SUBTITLE_LAYOUT_RESPONSE_SCHEMA } from '../packages/openfilm/studio/server/captions.mjs';
+import { captionAudioContract, captionMediaObservationRequestSchema } from '../packages/openfilm/studio/server/caption-audio.mjs';
 
 export const HELP = `视频创作 — 本地影片编辑与视频导演协作
 
@@ -24,7 +26,12 @@ node desirecore/cli.mjs <命令> [项目目录] [选项]
   start [--project <目录>] [--port 0] [--no-browser]   启动编辑器和后台服务
   setup-runtime                                    准备本机 FFmpeg 与 Chromium
   inspect <项目>                                    读取影片、片段和真实 revision
-  captions <项目>                                   读取真实字幕句、源时间与字幕版本
+  captions <项目> [--with-media-digests]             读取真实字幕句；显式选项另核完整媒体摘要供原声窗使用
+  captions --schema                                离线读取字幕观察参数，默认不为全部源计算摘要
+  subtitle-style <项目>                             读取保存的字幕样式、实际生效布局和来源；不是DOM字形测量
+  subtitle-style --schema                           离线读取样式与布局响应合同
+  caption-audio <项目> --args <JSON文件> [--wait]     按真实字幕及影片版本导出短WAV，完成后仍需实际试听
+  caption-audio --schema                            离线读取原声窗请求、来源与输出预算合同
   captions-source <项目> <素材相对路径>               读取完整源字幕及原文件 snapshot
   captions-save <项目> --args <JSON文件>              用原 snapshot 作为 from 保存完整源字幕/局部强调
   captions-source --schema | captions-save --schema  离线读取源字幕参数合同
@@ -56,6 +63,8 @@ node desirecore/cli.mjs <命令> [项目目录] [选项]
   review --schema                                 离线发现同源请求、finding 和组合图 Schema
   review <项目> --read <已有reviewId>              读取原回执，不重新捕获
     [--copy-to <已授权目录>]                        可用于捕获或已有回执，把核SHA的PNG存入本地供Read读取
+  reviews <项目> [--offset <0-10000整数>]           只读列出已有审片回执；断连后先查询，不直接重复捕获
+  reviews --schema                                离线读取材料列表参数；按nextOffset继续分页
   get <项目> [媒体动词] --args <JSON文件>             复用已连接媒体服务；无动词时只读能力目录
     --via <provider> --model <model>                明确选择服务与模型；不从参数读取密钥
   render <项目> [--output <目录>] [--wait]           提交固定输入的视频导出
@@ -77,7 +86,7 @@ export function argumentsOf(args) {
   return parseArgs({ args, allowPositionals: true, options: {
     home: { type: 'string' }, project: { type: 'string' }, port: { type: 'string' },
     schema: { type: 'boolean' },
-    read: { type: 'string' }, 'copy-to': { type: 'string' },
+    read: { type: 'string' }, 'copy-to': { type: 'string' }, offset: { type: 'string' }, 'with-media-digests': { type: 'boolean' },
     'no-browser': { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
     base: { type: 'string' }, ops: { type: 'string' }, output: { type: 'string' },
     source: { type: 'string' }, job: { type: 'string' }, times: { type: 'string' }, count: { type: 'string' }, last: { type: 'boolean' }, 'max-edge': { type: 'string' }, 'target-width': { type: 'string' }, 'first-last': { type: 'boolean' },
@@ -198,6 +207,10 @@ export async function command(args, output = (value) => process.stdout.write(`${
   const [name, folder, target] = positionals;
   if (['scene-read', 'scene-revise'].includes(name) && values.schema) return output(sceneSourceContract());
   if (name === 'review' && values.schema) return output(reviewContract);
+  if (name === 'reviews' && values.schema) return output(reviewListRequestSchema);
+  if (name === 'subtitle-style' && values.schema) return output(SUBTITLE_LAYOUT_RESPONSE_SCHEMA);
+  if (name === 'caption-audio' && values.schema) return output(captionAudioContract);
+  if (name === 'captions' && values.schema) return output(captionMediaObservationRequestSchema);
   if (name === 'patch' && values.schema) return output(timelineOpsSchema);
   if (name === 'prepare-media' && values.schema) return output({ contractVersion: 1, requestSchema: workingMediaRequestSchema });
   if (['speech-cut', 'speech-cut-apply'].includes(name) && values.schema) return output(speechCutContract());
@@ -217,10 +230,29 @@ export async function command(args, output = (value) => process.stdout.write(`${
     if (!values.project && !folder) throw new Error('MCP 必须绑定明确的 --project。');
     return (await import('./mcp.mjs')).serveMcp(config, resolve(values.project ?? folder));
   }
-  if (!['inspect', 'captions', 'captions-source', 'captions-save', 'prepare-media', 'speech-cut', 'speech-cut-apply', 'patch', 'check', 'review', 'scene-read', 'scene-revise', 'get', 'render', 'jobs', 'retry', 'cancel', 'motion-catalog', 'motion-inspect', 'motion-install', 'motion-take', 'motion-patch'].includes(name)) throw new Error(`未知命令：${name}；运行 --help 查看用法。`);
+  if (!['inspect', 'captions', 'subtitle-style', 'caption-audio', 'captions-source', 'captions-save', 'prepare-media', 'speech-cut', 'speech-cut-apply', 'patch', 'check', 'review', 'reviews', 'scene-read', 'scene-revise', 'get', 'render', 'jobs', 'retry', 'cancel', 'motion-catalog', 'motion-inspect', 'motion-install', 'motion-take', 'motion-patch'].includes(name)) throw new Error(`未知命令：${name}；运行 --help 查看用法。`);
+  const reviewOffset = name === 'reviews' ? reviewListOffset(values.offset === undefined ? 0 : values.offset.trim() ? Number(values.offset) : NaN) : 0;
   const client = await projectClient(config, folder);
   if (name === 'inspect') return output(await client.inspect());
-  if (name === 'captions') return output(await client.captions());
+  if (name === 'captions') return output(await client.captions({ withMediaDigests: values['with-media-digests'] ?? false }));
+  if (name === 'subtitle-style') return output(await client.subtitleStyle());
+  if (name === 'caption-audio') {
+    if (!values.args) throw new Error('caption-audio需要--args JSON文件；先运行caption-audio --schema。');
+    const ask = JSON.parse(readFileSync(resolve(values.args), 'utf8'));
+    if (!ask || typeof ask !== 'object' || Array.isArray(ask)) throw new Error('caption-audio --args必须是JSON对象。');
+    const receipt = await client.captionAudio(ask);
+    if (!values.wait) return output(receipt);
+    let job;
+    try { job = await waitForJob(client, receipt.export.id, { timeoutMs: Number(values.timeout ?? 1800) * 1000 }); }
+    catch (cause) {
+      output({ ...receipt, wait: { status: 'not-completed', reason: cause.message } });
+      throw new Error(`字幕原声窗等待未完成；已取得导出 ${receipt.export.id}。请用 jobs 查询原任务，勿直接重复提交。`, { cause });
+    }
+    output({ ...receipt, export: job });
+    if (job.status !== 'done') process.exitCode = 1;
+    return;
+  }
+  if (name === 'reviews') return output(await client.reviews(reviewOffset));
   if (name === 'captions-source') return output(await client.captionSource(target));
   if (['prepare-media', 'speech-cut', 'speech-cut-apply', 'captions-save'].includes(name)) {
     if (!values.args) throw new Error(`${name} 需要 --args JSON 文件；先运行 ${name} --schema。`);

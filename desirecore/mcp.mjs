@@ -2,7 +2,7 @@
 import { createInterface } from 'node:readline';
 import { readFileSync } from 'node:fs';
 import { Ajv } from 'ajv';
-import { projectClient } from './client.mjs';
+import { projectClient, reviewListRequestSchema, reviewReadRequestSchema } from './client.mjs';
 import { videoExportOptionsSchema } from '../packages/openfilm/studio/server/video-export-options.mjs';
 import { reviewRequestSchema } from '../packages/openfilm/studio/server/reviews.mjs';
 import { SCENE_READ_SCHEMA, SCENE_REVISE_SCHEMA, projectSceneSourceErrorReceipt } from '../packages/openfilm/studio/server/scene-source.mjs';
@@ -11,6 +11,7 @@ import { motionChangesSchema } from '../packages/openfilm/studio/server/motion-e
 import { workingMediaRequestSchema } from '../packages/openfilm/studio/server/working-media.mjs';
 import { speechCutRequestSchema, speechCutApplySchema } from '../packages/openfilm/studio/server/speech-cut.mjs';
 import { CAPTION_SOURCE_READ_SCHEMA, CAPTION_SOURCE_SAVE_SCHEMA } from '../packages/openfilm/studio/server/subtitle-edits.mjs';
+import { captionAudioRequestSchema, captionMediaObservationRequestSchema } from '../packages/openfilm/studio/server/caption-audio.mjs';
 
 const packageVersion = JSON.parse(readFileSync(new URL('../packages/openfilm/package.json', import.meta.url), 'utf8')).version;
 
@@ -18,7 +19,9 @@ const revision = { type: 'string', pattern: '^[a-f0-9]{16}$', description: 'insp
 const jobId = { type: 'string', pattern: '^[a-f0-9]{12}$', description: '此项目的真实导出记录 ID。' };
 export const tools = [
   { name: 'video_inspect', description: '读取绑定影片的项目路径、revision、时间线和检查问题。', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-  { name: 'video_captions', description: '读取所见字幕句、clip、源时间、line/part与sourceRevision；不猜测转写词时间真值。', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'video_captions', description: '读取所见字幕句、clip、源时间、line/part与sourceRevision。原声窗选句显式withMediaDigests=true时另核完整媒体SHA/bytes并返回mediaSnapshots；默认不作媒体摘要。不猜测转写词时间真值。', inputSchema: captionMediaObservationRequestSchema },
+  { name: 'video_subtitle_style', description: '只读获取保存的字幕样式与实际生效舞台、位置、计算字号和来源。保存值不是原JSON正文，原字节摘要另列；计算布局不是DOM字形/描边/阴影边界，实际边界用同源review。', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'video_caption_audio', description: '按真实影片和字幕源版本取得一句及同片段上下文的短WAV导出回执；沿既有jobs查询done及outputDigests。可能含同窗其他音轨，不是分离人声；成功生成不证明已听，不能从音频二进制猜改字幕。', inputSchema: captionAudioRequestSchema },
   { name: 'video_captions_source', description: '读取一个媒体源的完整字幕 cues 和原文件 snapshot，供保留文字、词时间和人工修订后条件保存。', inputSchema: CAPTION_SOURCE_READ_SCHEMA },
   { name: 'video_captions_save', description: '保存完整源字幕 cues（含可选局部强调范围），from必须是原读取的snapshot；不自动换成最新快照。过期冲突后重读，不丢其他句或词时间。', inputSchema: CAPTION_SOURCE_SAVE_SCHEMA },
   { name: 'video_prepare_media', description: '将本项目整源媒体准备为可追溯的SDR工作副本，保留源时钟与原声关系；不自动修改影片、不调用模型服务。', inputSchema: workingMediaRequestSchema },
@@ -34,6 +37,8 @@ export const tools = [
   { name: 'video_scene_read', description: '按真实片段读取当前本地场景原字节 SHA/bytes、影片版本与共享引用；全文超预算明确省略，不是审片像素或文件系统原子快照。', inputSchema: SCENE_READ_SCHEMA },
   { name: 'video_scene_revise', description: '以 strict film base、旧场景 SHA 和明确片段集合发布完整新源码，再只切这些 src；不覆盖不同内容、不解除人工锁。发布后冲突保留新源码并返回有限 recovery；断连时先重读，勿盲重试。', inputSchema: SCENE_REVISE_SCHEMA },
   { name: 'video_review', description: '按准确版本和时间点生成真实审片帧：current-project为工程预览，export-job为完成视频解码。返回来源、实际PTS、图片SHA及findings/coverage。review-pair通过before/after复用两份已有帧做版本对照；可选firstLast、sequence时间窗总览/活动事实、compareWidths同捕获多尺寸对照（一次一种artifact）；不评分，不等于已看图。随后用Read(path, expected_sha256)读取必要图。', inputSchema: reviewRequestSchema },
+  { name: 'video_reviews', description: '只读列出绑定项目已有审片回执；按nextOffset继续分页，unavailable保持未知。断连后先查询并按来源、请求和时间核对候选，不把最新记录自动当作刚才请求成功。', inputSchema: reviewListRequestSchema },
+  { name: 'video_review_read', description: '按已有reviewId读取原始完整回执，不重新捕获；列表摘要不能代替图片来源，之后仍按原path/sha256实际Read。', inputSchema: reviewReadRequestSchema },
   { name: 'video_render', description: '提交固定本地输入快照的视频导出，立即返回任务回执；以 video_jobs 查询。', inputSchema: { ...videoExportOptionsSchema, properties: { ...videoExportOptionsSchema.properties, output: { type: 'string', minLength: 1, maxLength: 4000, description: '可选输出目录。目录相对本次工具进程工作目录解析；省略时使用应用默认导出目录。' } } } },
   { name: 'video_jobs', description: '读取绑定影片的持久导出记录、输入快照范围与实际输出。', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'video_retry', description: '用户选择重试后，为失败/取消/中断的任务创建新导出，读取当前项目的新快照。', inputSchema: { type: 'object', required: ['id'], properties: { id: jobId }, additionalProperties: false } },
@@ -52,7 +57,9 @@ export async function callTool(config, folder, name, args = {}) {
     return summary;
   }
   if (name === 'video_motion_catalog') return client.motionCatalog();
-  if (name === 'video_captions') return client.captions();
+  if (name === 'video_captions') return client.captions(args);
+  if (name === 'video_subtitle_style') return client.subtitleStyle();
+  if (name === 'video_caption_audio') return client.captionAudio(args);
   if (name === 'video_captions_source') return client.captionSource(args.src);
   if (name === 'video_captions_save') return client.saveCaptionSource(args);
   if (name === 'video_prepare_media') return client.prepareMedia(args);
@@ -66,6 +73,8 @@ export async function callTool(config, folder, name, args = {}) {
   if (name === 'video_scene_read') return client.sceneRead(args);
   if (name === 'video_scene_revise') return client.sceneRevise(args);
   if (name === 'video_review') return client.review(args);
+  if (name === 'video_reviews') return client.reviews(args.offset);
+  if (name === 'video_review_read') return client.reviewReceipt(args.reviewId);
   if (name === 'video_jobs') return client.jobs();
   if (name === 'video_render') { const { output, ...ask } = args; return client.render(ask, output); }
   if (name === 'video_retry') return client.retry(args.id);

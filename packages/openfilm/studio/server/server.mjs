@@ -50,6 +50,7 @@ import { listSkills, skillOrigins } from '../../src/skills.mjs';
 import { providersRoute } from './providers/index.mjs';
 import { captionRoutes } from './captions.mjs';
 import { prepareWorkingMedia } from './working-media.mjs';
+import { planCaptionAudio } from './caption-audio.mjs';
 import { planSpeechCut } from './speech-cut.mjs';
 import { projectSettingsRoute } from './project-settings.mjs';
 import { markersRoute } from './markers.mjs';
@@ -833,6 +834,14 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
       }
       res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=86400', 'content-length': jpeg.length });
       return res.end(jpeg);
+    }
+    // 字幕只定位一个有版本的原声窗；仍由原exports快照/队列生成WAV，不新增音频执行器。
+    if (rest === 'captions/audio' && req.method === 'POST') {
+      const plan = await planCaptionAudio(project.path, await readJson(req));
+      exportRoots.set(project.id, project.path);
+      const job = exports.start(project, plan.exportAsk);
+      const prepared = await exports.prepare(job.id);
+      return json(res, 200, { selection: prepared.inputSnapshot?.captionAudio, export: prepared });
     }
     /* exports (what one asks: see exports.mjs). GET also says where they go by default, what this machine encodes and
        how many subtitle cues the film has (the subtitle choices need some), and how big the project and its parts are */

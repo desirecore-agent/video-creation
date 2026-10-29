@@ -306,3 +306,28 @@ probe补充编码/显示尺寸、旋转、颜色原语及视频/音轨首PTS与�
 HTTP/MCP可选 `informationSafeArea:{top:0.15,bottom:0.15}`；CLI对应 `--safe-top 0.15 --safe-bottom 0.15`，须成对提供、比例非负且总和小于1，省略不默认任何比例。review-pair不接受此新测量。`subtitle-information-bounds`、`information-bounds` 的 `bounds.coordinateSpace=film-pixels` 只用于已核轴对齐映射的完整信息框，沿实际画布高度判断 `safeAreaRelation=inside/outside/unknown/not-requested`。字幕层含行盒/描边及3倍模糊半径的保守阴影范围；复杂变换、滤镜、伪元素、Canvas等标未知，不把stage裁切后的剩余部分当完整边界。场景只检查已有审片意图中明确essential/supporting并带selector的对象，未标注不自动猜测信息角色。
 
 `studio-subtitle-layer` coverage显式区分rendered、subtitles-off、no-cues与no-active-cue。`subtitle-information-overlap` 是同一采样时刻字幕和已声明场景信息框的交集提示，不是像素遮挡或审美评分。工程seek、DOM与PNG是同次采样窗口而非原子快照；离散采样不证明全片每帧。export-job没有DOM/语义对象，信息区域请求返回unknown，不借新字幕反推旧编码的安全性。原有图数/字节预算、来源检查、目录权限和人工锁合同不变。
+
+## 生效字幕布局、句子原声与审片恢复
+
+`subtitle-style <项目>` / `video_subtitle_style` 只读既有 `GET subtitles`；`subtitle-style --schema` 发现同源响应Schema。原 `style` 字段仍是规范化保存值或null，不是原JSON正文；追加 `layout` 报告本次计算的stage、effectiveStyle、fontSizePx、positionPolicy及film/样式原字节来源摘要。缺文件/无可用stage/非有限结果明确unknown，源在读取期间变化返回409，不把多次live读取称原子快照。竖屏默认(.5,.94)按原规则生效为(.5,.72)，显式(.5,.8)保持；这些计算值属于export与current-project review口径，不证明编辑器未保存草稿、浏览器已记住的样式、实际字体像素框或其他OS一致。完整边界仍由同源P0审片测量，不在此静态回执假算。
+
+```bash
+node desirecore/cli.mjs subtitle-style --schema
+node desirecore/cli.mjs subtitle-style <项目> --home <数据根>
+node desirecore/cli.mjs caption-audio --schema
+node desirecore/cli.mjs caption-audio <项目> --args <本版真实句参数JSON> --wait --home <数据根>
+```
+
+`caption-audio` / `video_caption_audio` 通过 `POST captions/audio`，只从当前 `captions` 返回的真实clip、line、part、sourceRevision与影片base定位一句。请求 `{base,clip,sourceRevision,mediaSnapshot:{bytes,sha256},cue:{line,part?},contextSeconds?}`，上下文默认1秒、0至2秒，派生窗口受同片段及30秒上界约束；不拿TXT行号、相同秒数或估计词序猜对象。返回selection和普通export回执，音频沿既有WAV/range快照与导出队列，提交成功不表示文件已done；CLI `--wait` 或 `jobs` 核最终状态和实际输出。媒体来自该冻结影片的成片音轨时间窗，不伪称未经转码的HDR母版原始音频。
+
+选句用 `captions --with-media-digests` / `video_captions {withMediaDigests:true}` 显式请求既有GET的媒体摘要观察，默认普通列表不hash大媒体；按句src从 `mediaSnapshots:[{src,snapshot}]` 取原 `{bytes,sha256}`，mediaSnapshot必须取自该同次观察，不在提交时用最新值代填。来源媒体在同路径被换掉时，即使影片与VTT未变，冻结副本的原manifest SHA/size不符也拒绝。原请求作为普通AudioAsk中的captionAudio版本守卫持久化，在本次输入快照完成后复核影片base、字幕sourceRevision和派生range；过期或伪区间明确失败，不输出别句，重启后的显式retry也保留该守卫。队列已经冻结后发生的外部编辑不混入原job。它不改正文、词钟、人工锁或影片，不新增ASR/Provider/音频任务系统。修改字幕仍使用已有完整源快照/CAS保存并保留edited来源；timing/alignment不是识别置信度或文字真值。当前通用Read不能据音频二进制声称已听，材料供原生试听、具备听觉能力的观察者或人工校听；无法确认的疑词保持未知，不用波形或推测自动改字。
+
+审片创建的默认本地长响应沿既有localJsonRequest等待原10分钟Abort；调用者注入自定义request时继续拥有其传输语义。创建及按ID读取回执均有显式8MiB客户端JSON预算（后者仍30秒读取期限），不是服务端元数据原有上限，也不保证所有巨大回执可接收；媒体准备仍保留默认256KiB预算。普通captions仍30秒；仅显式媒体摘要观察按原config.prepareTimeoutMs（默认15分钟）和8MiB客户端元数据预算读取，音频提交沿相同准备期限；只读观察未完成与可能已提交音频的未知结果分开报告。网络断连、超预算或未取得可解析成功回执均表示结果未知，后台可能已经生成材料，不自动重捕获。明确HTTP错误继续保留status/details，不把400/409或500伪称没有副作用。已知reviewId读取超预算或失败只表示读取未完成，保持原ID，不因恢复自动重捕获。
+
+```bash
+node desirecore/cli.mjs reviews --schema
+node desirecore/cli.mjs reviews <项目> --offset 0 --home <数据根>
+node desirecore/cli.mjs review <项目> --read <已有reviewId> --home <数据根>
+```
+
+`reviews` / `video_reviews` 薄封装原分页GET，offset取返回的nextOffset，沿原50项/limited/unavailable规则，不把不可读项当通过；`video_review_read` 薄封装按ID读取，CLI原 `review --read` 保持。先比较已有回执的source、版本、创建时间、参数和实际时间，核图时继续携带同PNG的path/sha256；结果未知没有exactly-once承诺，也不根据相同参数推断是哪一次请求。原有已完成材料可以复用，查询和读取不新生成图片或作品版本。

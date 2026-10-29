@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
+import { createServer } from 'node:http';
 import { startStudio } from '../packages/openfilm/studio/server/server.mjs';
 import { projectClient } from './client.mjs';
 import { command } from './cli.mjs';
@@ -83,24 +84,48 @@ test('真实鉴权HTTP读取已有review后保存副本，未触发捕获且原P
   } finally { await studio.close(); for (const key of keys) { if (old[key] === undefined) delete process.env[key]; else process.env[key] = old[key]; } }
 }));
 test('捕获携本地副本只提交一次；复制失败返回原ID供read恢复', () => fixture(async (root) => {
-  const originalFetch = globalThis.fetch, home = join(root, 'home'), destination = join(root, 'images');
+  const home = join(root, 'home'), destination = join(root, 'images');
   const keys = ['OPENFILM_HOME', 'VIDEO_CREATION_HOME', 'APP_DATA_DIR'], old = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
-  await mkdir(home); await mkdir(destination); await writeFile(join(home, 'run.json'), JSON.stringify({ origin: 'http://127.0.0.1:12233', key: 'a'.repeat(48) }));
-  let captures = 0, corrupt = false;
+  await mkdir(home); await mkdir(destination);
+  let captures = 0, corrupt = false, failure;
+  const sockets = new Set();
   const one = { ...receipt, artifacts: [] };
-  globalThis.fetch = async (url, options) => {
-    const path = new URL(url).pathname;
-    if (path === '/api/health') return Response.json({ product: 'video-creation-studio', home: createHash('sha256').update(home).digest('hex') });
-    if (path === '/api/projects') return Response.json({ project: { id: 'project', path: root } });
-    if (path.endsWith('/reviews')) { captures++; assert.deepEqual(JSON.parse(options.body), { source: 'current-project', times: [0], maxEdge: 1280 }); return Response.json(one); }
-    if (path.endsWith('/frames/0')) return new Response(corrupt ? Buffer.alloc(png.length) : png, { headers: { 'content-type': 'image/png' } });
-    throw new Error('unexpected test request');
-  };
+  // 默认长审片传输使用node:http；真实回环夹具同时覆盖它和PNG的fetch读取，不拦截生产传输。
+  const server = createServer((req, res) => void (async () => {
+    assert.equal(req.headers['x-studio-key'], 'a'.repeat(48));
+    const url = new URL(req.url, 'http://127.0.0.1'), path = url.pathname;
+    const chunks = []; for await (const chunk of req) chunks.push(chunk);
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : undefined;
+    const json = (value) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(value)); };
+    if (path === '/api/health') { assert.equal(req.method, 'GET'); return json({ product: 'video-creation-studio', home: createHash('sha256').update(home).digest('hex') }); }
+    if (path === '/api/projects') { assert.equal(req.method, 'POST'); assert.deepEqual(body, { path: root, create: false }); return json({ project: { id: 'project', path: root } }); }
+    if (path === '/api/projects/project/reviews') { assert.equal(req.method, 'POST'); captures++; assert.deepEqual(body, { source: 'current-project', times: [0], maxEdge: 1280 }); return json(one); }
+    if (path === `/api/projects/project/reviews/${id}`) { assert.equal(req.method, 'GET'); return json(one); }
+    if (path === `/api/projects/project/reviews/${id}/frames/0`) {
+      assert.equal(req.method, 'GET'); assert.equal(url.searchParams.get('expected_sha256'), sha256);
+      res.writeHead(200, { 'content-type': 'image/png' }); res.end(corrupt ? Buffer.alloc(png.length) : png); return;
+    }
+    throw new Error(`unexpected test request: ${req.method} ${path}`);
+  })().catch((error) => { failure ??= error; res.destroy(error); }));
+  server.on('connection', (socket) => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
   try {
+    for (const key of keys) process.env[key] = home;
+    await new Promise((done, fail) => { server.once('error', fail); server.listen(0, '127.0.0.1', () => { server.off('error', fail); done(); }); });
+    await writeFile(join(home, 'run.json'), JSON.stringify({ origin: `http://127.0.0.1:${server.address().port}`, key: 'a'.repeat(48) }));
     let output; await command(['review', root, '--source', 'current-project', '--times', '0', '--copy-to', destination, '--home', home], (value) => { output = value; });
     assert.equal(captures, 1); assert.equal(output.localCopies.images[0].sha256, sha256);
+    const firstCopy = output.localCopies.images[0].path; assert.deepEqual(await readFile(firstCopy), png);
     corrupt = true; const next = join(root, 'next'); await mkdir(next);
     await assert.rejects(command(['review', root, '--source', 'current-project', '--times', '0', '--copy-to', next, '--home', home], (value) => { output = value; }), /--read/);
     assert.equal(captures, 2); assert.equal(output.reviewId, id); assert.equal(output.localCopies.status, 'failed');
-  } finally { globalThis.fetch = originalFetch; for (const key of keys) { if (old[key] === undefined) delete process.env[key]; else process.env[key] = old[key]; } }
+    assert.deepEqual(await readFile(firstCopy), png);
+    corrupt = false;
+    await command(['review', root, '--read', id, '--copy-to', next, '--home', home], (value) => { output = value; });
+    assert.equal(captures, 2); assert.equal(output.reviewId, id); assert.deepEqual(await readFile(output.localCopies.images[0].path), png);
+    assert.deepEqual(await readFile(firstCopy), png); assert.equal(failure, undefined);
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    if (server.listening) await new Promise((done) => server.close(done));
+    for (const key of keys) { if (old[key] === undefined) delete process.env[key]; else process.env[key] = old[key]; }
+  }
 }));

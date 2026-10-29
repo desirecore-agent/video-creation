@@ -13,6 +13,10 @@ import { HttpError, json } from './http.mjs';
 import { readTranscript, vttOf } from './transcripts.mjs';
 import { readSourceSnapshot } from './subtitle-edits.mjs';
 import { filmHtml } from '../../src/film-doc.mjs';
+import { readSubtitleStyleInfo, SUBTITLE_LAYOUT_RESPONSE_SCHEMA } from './subtitle-layout.mjs';
+import { createHash } from 'node:crypto';
+import { readFile, writeFile } from 'node:fs/promises';
+import { Ajv } from 'ajv';
 
 /* "One two three. Four five six.", said in 2.5 s of a 3 s file */
 const TEXT = 'One two three. Four five six.';
@@ -239,7 +243,9 @@ test('the routes: captions, style, and translation without a service', async () 
   try {
     const captions = await (await fetch(`${base}/captions`)).json();
     assert.equal(captions.cues.length, 2);
-    assert.deepEqual(await (await fetch(`${base}/subtitles`)).json(), { style: null });
+    const initialStyle = await (await fetch(`${base}/subtitles`)).json();
+    assert.equal(initialStyle.style, null, 'the editor keeps its original nullable style field');
+    assert.equal(initialStyle.layout.status, 'computed');
     const put = await fetch(`${base}/subtitles`, { method: 'PUT', body: JSON.stringify({ style: { ...FILM_SUBTITLE_DEFAULT, on: false } }) });
     assert.equal((await put.json()).style.on, false);
     assert.equal((await (await fetch(`${base}/subtitles`)).json()).style.on, false);
@@ -250,6 +256,105 @@ test('the routes: captions, style, and translation without a service', async () 
     assert.equal((await fetch(`${base}/subtitles/translate`, { method: 'POST', body: JSON.stringify({ language: 'klingon' }) })).status, 400);
   } finally {
     close();
+  }
+});
+
+test('只读布局公开竖屏默认锚点映射、计算字号及同源原字节摘要', async () => {
+  const root = project([]);
+  const film = filmHtml({ stage: { w: 1080, h: 1920 }, tracks: [] });
+  writeFileSync(join(root, 'film.html'), film);
+  const before = readFileSync(join(root, 'film.html'));
+  const response = await readSubtitleStyleInfo(root);
+  const validate = new Ajv({ allErrors: true }).compile(SUBTITLE_LAYOUT_RESPONSE_SCHEMA);
+  assert.equal(validate(response), true, JSON.stringify(validate.errors));
+  assert.equal(response.style, null, 'absence keeps the existing GET style:null contract');
+  assert.equal(response.layout.status, 'computed');
+  assert.deepEqual(response.layout.stage, { w: 1080, h: 1920 });
+  assert.deepEqual(response.layout.effectiveStyle.pos, { x: 0.5, y: 0.72 });
+  assert.equal(response.layout.positionPolicy, 'portrait-default');
+  assert.equal(response.layout.source.style.status, 'absent');
+  assert.equal(response.layout.source.style.usingDefault, true);
+  assert.equal(response.layout.source.style.sha256, null);
+  const digest = createHash('sha256').update(before).digest('hex');
+  assert.equal(response.layout.source.film.sha256, digest);
+  assert.equal(response.layout.source.film.revision, digest.slice(0, 16));
+  assert.ok(response.layout.limitations.some((s) => s.includes('未测量实际字体')));
+  assert.deepEqual(readFileSync(join(root, 'film.html')), before);
+  assert.equal(existsSync(join(root, SUBTITLE_STYLE_FILE)), false, 'reading defaults never persists a style');
+});
+
+test('显式竖屏位置与人工参数保持，横屏默认位置也不重映射', async () => {
+  const root = project([{ clips: [{ id: 'title', src: 'page.html', motion: { version: 1, params: { title: '人工标题' }, locked: ['params.title'] } }] }]);
+  const portrait = filmHtml({ stage: { w: 1080, h: 1920 }, tracks: [{ clips: [{ id: 'title', src: 'page.html', motion: { version: 1, params: { title: '人工标题' }, locked: ['params.title'] } }] }] });
+  writeFileSync(join(root, 'film.html'), portrait);
+  const saved = await writeSubtitleStyle(root, { ...FILM_SUBTITLE_DEFAULT, pos: { x: 0.5, y: 0.8 }, font: { ...FILM_SUBTITLE_DEFAULT.font, sizePct: 6.5 } });
+  const beforeFilm = readFileSync(join(root, 'film.html')), beforeStyle = readFileSync(join(root, SUBTITLE_STYLE_FILE));
+  const out = await readSubtitleStyleInfo(root);
+  assert.deepEqual(out.style, saved);
+  assert.deepEqual(out.layout.effectiveStyle.pos, { x: 0.5, y: 0.8 });
+  assert.equal(out.layout.fontSizePx, 70);
+  assert.equal(out.layout.positionPolicy, 'preserved');
+  assert.equal(out.layout.source.style.sha256, createHash('sha256').update(beforeStyle).digest('hex'));
+  assert.deepEqual(readFileSync(join(root, 'film.html')), beforeFilm, 'all motion locks and parameters remain original bytes');
+  assert.deepEqual(readFileSync(join(root, SUBTITLE_STYLE_FILE)), beforeStyle);
+  const landscape = project([]);
+  const horizontal = await readSubtitleStyleInfo(landscape);
+  assert.deepEqual(horizontal.layout.effectiveStyle.pos, { x: 0.5, y: 0.94 });
+  assert.equal(horizontal.layout.positionPolicy, 'preserved');
+});
+
+test('缺失或无效影片不猜舞台，非法样式沿原GET默认语义并明示来源', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'of-layout-missing-'));
+  const absent = await readSubtitleStyleInfo(root);
+  assert.equal(absent.layout.status, 'unknown');
+  assert.equal(absent.layout.reason, 'film-missing');
+  assert.equal(absent.layout.stage, null);
+  assert.equal(absent.layout.fontSizePx, null);
+  assert.equal(absent.layout.effectiveStyle, null);
+  writeFileSync(join(root, 'film.html'), 'not a valid film');
+  const invalid = await readSubtitleStyleInfo(root);
+  assert.equal(invalid.layout.status, 'unknown');
+  assert.equal(invalid.layout.reason, 'film-invalid');
+  for (const text of ['', ' \n\t']) {
+    writeFileSync(join(root, 'film.html'), text);
+    const empty = await readSubtitleStyleInfo(root);
+    assert.equal(empty.layout.status, 'unknown', 'empty film matches readProjectFilm, not format default stage');
+    assert.equal(empty.layout.reason, 'film-empty');
+    assert.equal(empty.layout.stage, null);
+  }
+  const valid = project([], { [SUBTITLE_STYLE_FILE]: '{invalid JSON' });
+  const style = await readSubtitleStyleInfo(valid);
+  assert.equal(style.style, await readSubtitleStyle(valid));
+  assert.equal(style.layout.status, 'computed');
+  assert.equal(style.layout.source.style.status, 'invalid');
+  assert.equal(style.layout.source.style.usingDefault, true);
+  assert.equal(style.layout.source.style.bytes, '{invalid JSON'.length);
+});
+
+test('旧样式不可表示的字号仅返回unknown，不把NaN当有效布局或改写原文件', async () => {
+  const root = project([], { [SUBTITLE_STYLE_FILE]: JSON.stringify({ size: 'constructor' }) });
+  const before = readFileSync(join(root, SUBTITLE_STYLE_FILE));
+  const out = await readSubtitleStyleInfo(root);
+  assert.equal(out.layout.status, 'unknown');
+  assert.equal(out.layout.reason, 'subtitle-layout-non-finite');
+  assert.deepEqual(out.layout.stage, { w: 1920, h: 1080 }, 'known stage remains separate from unknown style projection');
+  assert.equal(out.layout.effectiveStyle, null);
+  assert.equal(out.layout.fontSizePx, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(out.style)), JSON.parse(JSON.stringify(await readSubtitleStyle(root))), 'legacy GET serialisation remains unchanged');
+  assert.deepEqual(readFileSync(join(root, SUBTITLE_STYLE_FILE)), before);
+});
+
+test('布局读期间舞台或样式变化时409，不把两个版本拼成有效布局', async () => {
+  for (const target of ['film.html', SUBTITLE_STYLE_FILE]) {
+    const root = project([], { [SUBTITLE_STYLE_FILE]: JSON.stringify(FILM_SUBTITLE_DEFAULT) });
+    let reads = 0;
+    const reader = async (path) => {
+      if (path === join(root, target) && ++reads === 2) {
+        await writeFile(path, target === 'film.html' ? filmHtml({ stage: { w: 1080, h: 1920 }, tracks: [] }) : JSON.stringify({ ...FILM_SUBTITLE_DEFAULT, on: false }));
+      }
+      return readFile(path);
+    };
+    await assert.rejects(readSubtitleStyleInfo(root, { read: reader }), (e) => e.status === 409 && e.extra.code === 'subtitle-layout-stale');
   }
 });
 
