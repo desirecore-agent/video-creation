@@ -22,7 +22,7 @@ test('真实受管服务隔离数据、签入、导演上下文与HTTP编辑共�
   writeFileSync(join(project, 'scene.html'), '<div id="title">样例</div><script>window.film={duration:1,frame(t){}}</script>');
   writeFileSync(join(home, 'runtime-config.json'), '{"directorAgentId":"installed-director-test"}');
   const child = spawn(process.execPath, [fileURLToPath(new URL('./cli.mjs', import.meta.url)), 'start', '--home', join(home, 'ignored-candidate'), '--project', project, '--no-browser'], {
-    env: { ...process.env, APP_DATA_DIR: home, PORT: '0', DESIRECORE_APP_RUNTIME_PROOF: 'test-only-process-proof', DESIRECORE_APP_RELEASE_DIGEST: 'a'.repeat(64), DESIRECORE_APP_SCOPE_ID: 'test-installation', DESIRECORE_APP_RUNTIME_GENERATION: 'test-generation' },
+    env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: '', APP_DATA_DIR: home, PORT: '0', DESIRECORE_APP_RUNTIME_PROOF: 'test-only-process-proof', DESIRECORE_APP_RELEASE_DIGEST: 'a'.repeat(64), DESIRECORE_APP_SCOPE_ID: 'test-installation', DESIRECORE_APP_RUNTIME_GENERATION: 'test-generation' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const exited = once(child, 'exit');
@@ -55,6 +55,12 @@ test('真实受管服务隔离数据、签入、导演上下文与HTTP编辑共�
     const manual = await client.patch(original.rev, [{ op: 'set', clip: 'intro', field: 'overrides', value: [{ at: '#title', text: '人工修改' }] }]);
     await assert.rejects(client.patch(original.rev, [{ op: 'set', clip: 'intro', field: 'overrides', value: [] }]), (error) => error.status === 409);
     assert.equal((await client.inspect()).rev, manual.rev);
+    // 实际 HTTP 审片进入同一 renderer；空临时缓存必须报告该根的默认 shell 缺失，不能退回用户缓存。
+    await assert.rejects(client.review({ source: 'current-project', times: [0], maxEdge: 180 }), (error) => {
+      assert.ok(error.message.includes(join(home, 'runtime', 'ms-playwright')), error.message);
+      assert.match(error.message, /chromium_headless_shell/);
+      return true;
+    });
     const alias = join(home, '应用目录链接');
     symlinkSync(fileURLToPath(new URL('..', import.meta.url)), alias, process.platform === 'win32' ? 'junction' : 'dir');
     for (const flags of [[], ['--preserve-symlinks-main']]) {
