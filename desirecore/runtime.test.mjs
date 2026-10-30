@@ -6,11 +6,128 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { runtimeConfig, runtimeIdentity, managedDocumentNavigation } from './config.mjs';
+import { runtimeConfig, runtimeEnvironment, runtimeIdentity, managedDocumentNavigation } from './config.mjs';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { setupRuntime } from './setup-runtime.mjs';
 import { connectStudio } from './client.mjs';
 import { createHash } from 'node:crypto';
 import { serveMcp } from './mcp.mjs';
 import { waitForJob } from './cli.mjs';
+
+test('首次CLI导入后初始化：真实SDK完整路径与默认shell、显式channel均在同一根，缺失不回退', () => {
+  const root = mkdtempSync(join(tmpdir(), 'video-browser-root-'));
+  const before = { ...process.env };
+  try {
+    for (const override of [undefined, join(root, 'explicit'), 'relative-cache', '0']) {
+      const env = { ...process.env, APP_DATA_DIR: join(root, 'formal'), INIT_CWD: root };
+      delete env.PLAYWRIGHT_BROWSERS_PATH;
+      if (override !== undefined) env.PLAYWRIGHT_BROWSERS_PATH = override;
+      const script = `
+        await import(${JSON.stringify(new URL('./cli.mjs', import.meta.url).href)});
+        const {runtimeConfig,applyRuntimeEnvironment} = await import(${JSON.stringify(new URL('./config.mjs', import.meta.url).href)});
+        applyRuntimeEnvironment(runtimeConfig({home:'unused-candidate'}));
+        const {launch} = await import(${JSON.stringify(new URL('../packages/openfilm/src/host.mjs', import.meta.url).href)});
+        const failures=[];
+        if(process.env.PLAYWRIGHT_BROWSERS_PATH !== '0') {
+          for(const options of [{},{channel:'chromium'}]) {
+            try { const browser=await launch(options); await browser.close(); throw Error('unexpected browser'); }
+            catch(e) { failures.push(e.message); }
+          }
+        }
+        const {createRequire} = await import('node:module');
+        const require=createRequire(${JSON.stringify(new URL('../packages/openfilm/package.json', import.meta.url).href)});
+        const {chromium}=require('playwright-core');
+        const path=chromium.executablePath();
+        let changed;
+        if(failures.length) { process.env.PLAYWRIGHT_BROWSERS_PATH += '-changed'; try { await launch(); } catch(e) { changed=e.message; } }
+        console.log(JSON.stringify({path,failures,changed}));`;
+      const result = spawnSync(process.execPath, ['--input-type=module', '-'], { input: script, env, encoding: 'utf8', timeout: 15000 });
+      assert.equal(result.status, 0, result.stderr);
+      const observed = JSON.parse(result.stdout);
+      if (override === '0') { assert.match(observed.path, /playwright-core[/\\].local-browsers/); continue; }
+      const cache = override === 'relative-cache' ? join(root, override) : override ?? join(root, 'formal', 'runtime', 'ms-playwright');
+      assert.ok(observed.path.startsWith(cache), observed.path);
+      assert.equal(observed.failures.length, 2);
+      assert.match(observed.changed, /首次加载后发生变化/);
+      for (const failure of observed.failures) { assert.ok(failure.includes(cache), failure); assert.match(failure, /Executable doesn't exist/); }
+      assert.match(observed.failures[0], /chromium_headless_shell/);
+      assert.ok(observed.failures[1].includes(observed.path), observed.failures[1]);
+    }
+    assert.deepEqual({ ...process.env }, before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('首次SDK异步导入窗口漂移永久拒绝复用，同环境并发保持可用', () => {
+  const root = mkdtempSync(join(tmpdir(), 'video-browser-import-window-'));
+  try {
+    for (const drift of [false, true]) {
+      const first = join(root, 'first'), second = join(root, 'second');
+      const script = `
+        const {launch}=await import(${JSON.stringify(new URL('../packages/openfilm/src/host.mjs', import.meta.url).href)});
+        const message=promise=>promise.then(async browser=>{await browser.close();return 'unexpected browser';},error=>error.message);
+        // launch 在第一个 await 之前发起 SDK import；同步改值确定落在导入完成之前。
+        const pending=[message(launch()),message(launch())];
+        if (${JSON.stringify(drift)}) process.env.PLAYWRIGHT_BROWSERS_PATH=${JSON.stringify(second)};
+        const failures=await Promise.all(pending);
+        process.env.PLAYWRIGHT_BROWSERS_PATH=${JSON.stringify(first)};
+        const restored=await message(launch());
+        console.log(JSON.stringify({failures,restored}));`;
+      const child = spawnSync(process.execPath, ['--input-type=module', '-'], {
+        input: script, encoding: 'utf8', timeout: 15000,
+        env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: first, INIT_CWD: root },
+      });
+      assert.equal(child.status, 0, child.stderr);
+      const { failures, restored } = JSON.parse(child.stdout);
+      assert.equal(failures.length, 2);
+      for (const failure of [...failures, restored]) {
+        if (drift) {
+          assert.match(failure, /首次加载后发生变化/);
+          assert.doesNotMatch(failure, /Executable doesn't exist/);
+        } else {
+          assert.match(failure, /Executable doesn't exist/);
+          assert.ok(failure.includes(first), failure);
+          assert.match(failure, /chromium_headless_shell/);
+        }
+      }
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('setup真实spawn消费同根env，受控安装GC只触临时目标且不污染父环境', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'video-setup-cache-'));
+  const sentinel = join(root, 'shared-sentinel');
+  writeFileSync(sentinel, 'keep');
+  // 测试固定使用临时根，不继承开发者或CI的显式共享缓存；结束后恢复原值。
+  const inheritedCache = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  delete process.env.PLAYWRIGHT_BROWSERS_PATH;
+  const before = { ...process.env };
+  const spawnReal = childProcess.spawn;
+  try {
+    t.mock.method(childProcess, 'spawnSync', (file) => {
+      assert.ok(['ffmpeg','ffprobe'].includes(file)); return { status: 0 };
+    });
+    t.mock.method(childProcess, 'spawn', (exe, args, options) => {
+      assert.deepEqual(args.slice(1), ['install', '--only-shell', 'chromium']);
+      assert.equal(options.env.PLAYWRIGHT_BROWSERS_PATH, runtimeEnvironment({home:root}).PLAYWRIGHT_BROWSERS_PATH);
+      // 替身仅允许临时目标；模拟安装器在缓存内写入/GC，不执行真实下载或共享GC。
+      const cache = options.env.PLAYWRIGHT_BROWSERS_PATH;
+      assert.ok(cache.startsWith(root), '测试环境显式缓存不得指向真实用户缓存');
+      const code = `const fs=require('node:fs'),p=require('node:path');const root=process.env.PLAYWRIGHT_BROWSERS_PATH;fs.mkdirSync(root,{recursive:true});fs.writeFileSync(p.join(root,'stale'),'old');fs.unlinkSync(p.join(root,'stale'));fs.writeFileSync(p.join(root,'installed'),'shell');`;
+      return spawnReal(exe, ['-e', code], options);
+    });
+    syncBuiltinESMExports();
+    await setupRuntime({ home: root });
+    assert.equal(readFileSync(join(root, 'runtime', 'ms-playwright', 'installed'), 'utf8'), 'shell');
+    assert.equal(readFileSync(sentinel, 'utf8'), 'keep');
+    assert.deepEqual({ ...process.env }, before);
+  } finally {
+    t.mock.restoreAll(); syncBuiltinESMExports();
+    if (inheritedCache === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH;
+    else process.env.PLAYWRIGHT_BROWSERS_PATH = inheritedCache;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 const identity = { DESIRECORE_APP_RUNTIME_PROOF: 'opaque-proof', DESIRECORE_APP_RELEASE_DIGEST: 'digest', DESIRECORE_APP_SCOPE_ID: 'installed-a', DESIRECORE_APP_RUNTIME_GENERATION: 'generation-a' };
 

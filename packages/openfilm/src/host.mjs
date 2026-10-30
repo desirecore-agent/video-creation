@@ -4,7 +4,30 @@ import { createServer } from 'node:http';
 import { createReadStream, readFileSync, realpathSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { extname, join, normalize, resolve, sep } from 'node:path';
-import { chromium } from 'playwright-core';
+// SDK 在首次导入时固定缓存目录。CLI 的合同读取会提前加载 host，但不能提前加载 SDK。
+// 真实 launch 在应用初始化环境之后才到达；保留 SDK 的默认 headless-shell/channel 选择。
+let browserSdk;
+let browserCacheEnvironment;
+let browserEnvironmentError;
+const currentBrowserEnvironment = () => JSON.stringify([process.env.PLAYWRIGHT_BROWSERS_PATH, process.env.INIT_CWD, process.cwd()]);
+function assertBrowserEnvironment() {
+  // 导入期间发生漂移后，SDK 可能已缓存错误目录；即使恢复原值也不能复用。
+  if (!browserEnvironmentError && currentBrowserEnvironment() !== browserCacheEnvironment) {
+    browserEnvironmentError = new Error('浏览器运行环境在首次加载后发生变化；请在正确环境中重新启动应用。');
+  }
+  if (browserEnvironmentError) throw browserEnvironmentError;
+}
+function chromiumForLaunch() {
+  if (browserSdk) assertBrowserEnvironment();
+  if (!browserSdk) {
+    browserCacheEnvironment = currentBrowserEnvironment();
+    browserSdk = import('playwright-core').then(({ chromium }) => {
+      assertBrowserEnvironment();
+      return chromium;
+    });
+  }
+  return browserSdk;
+}
 import { DEFAULT_STAGE, FILM_FILE, readFilmFile } from './film-doc.mjs';
 import { readableLink } from './media-links.mjs';
 
@@ -236,6 +259,8 @@ export async function launch({ headed = false, channel = headed ? 'chromium' : n
   /* CanvasDrawElement: HTML-in-Canvas (drawElementImage, texElementImage2D), so a page can draw its own DOM into 2D or WebGL */
   const args = ['--ignore-gpu-blocklist', '--enable-gpu-rasterization', '--autoplay-policy=no-user-gesture-required', '--hide-scrollbars', '--enable-blink-features=CanvasDrawElement', ...extra];
   if (process.platform === 'darwin') args.push('--use-angle=metal');
+  const chromium = await chromiumForLaunch();
+  assertBrowserEnvironment();
   const browser = await chromium.launch({ ...(channel ? { channel } : {}), headless: !headed, args, ...(env ? { env } : {}) });
   LIVE.add(browser);
   browser.on('disconnected', () => LIVE.delete(browser));
