@@ -31,11 +31,19 @@ jobs:
           pnpm --filter @desirecore-agent/video-creation exec playwright-core install-deps chromium
           node desirecore/cli.mjs setup-runtime --home "$RUNNER_TEMP/video-creation-smoke/应用 数据"
       - run: node --test desirecore/platform-smoke.test.mjs
+      # 直接调用 SDK 的测试不经过 CLI 环境初始化，显式复用上一步准备的浏览器。
+      # 仅限这些测试；下方正式 smoke 仍自行验证各应用 home 的运行环境。
       - name: Verify project rename in the actual editor
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/video-creation-smoke/应用 数据/runtime/ms-playwright
         run: node --test desirecore/project-sync.runtime.test.mjs
       - name: Verify text drafts and selected-clip subtitles in the actual runtime
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/video-creation-smoke/应用 数据/runtime/ms-playwright
         run: VIDEO_CREATION_CLIP_SIDECAR_RUNTIME=1 node --test --test-concurrency=1 desirecore/text-draft.runtime.test.mjs desirecore/clip-sidecar.runtime.test.mjs
       - run: pnpm test:motion:runtime
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/video-creation-smoke/应用 数据/runtime/ms-playwright
       - name: Exercise the local service, MCP and MP4 export
         shell: bash
         run: node desirecore/platform-smoke.mjs --workdir "$RUNNER_TEMP/video-creation-smoke" --evidence "$RUNNER_TEMP/video-creation-linux-evidence.json" --label github-linux-x64
