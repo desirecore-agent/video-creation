@@ -176,19 +176,23 @@ export async function fetchFilmCaptions(projectId: string, signal?: AbortSignal)
   return await res.json() as FilmCaptions;
 }
 
-/** The project's style, or null when it was never changed. */
-export async function fetchSubtitleStyle(projectId: string, signal?: AbortSignal): Promise<SubtitleStyle | null> {
+export type SubtitleStyleFrom = { filmRevision: string; styleSha256: string | null };
+export type SubtitleStyleSnapshot = { style: SubtitleStyle | null; from: SubtitleStyleFrom | null };
+
+/** Read style and its original write preconditions together; never fetch a new version during save. */
+export async function fetchSubtitleStyle(projectId: string, signal?: AbortSignal): Promise<SubtitleStyleSnapshot> {
   const res = await fetch(subtitlesApi(projectId, 'subtitles'), { signal });
   if (!res.ok) throw new Error(`Studio answered ${res.status}`);
-  const body = await res.json() as { style: unknown };
-  return body.style ? parseFilmSubtitleStyle(body.style) : null;
+  const body = await res.json() as { style: unknown; from?: SubtitleStyleFrom | null };
+  return { style: body.style ? parseFilmSubtitleStyle(body.style) : null, from: body.from ?? null };
 }
 
-export async function saveSubtitleStyle(projectId: string, style: SubtitleStyle): Promise<void> {
+export async function saveSubtitleStyle(projectId: string, style: SubtitleStyle, from: SubtitleStyleFrom): Promise<SubtitleStyleSnapshot> {
   const res = await fetch(subtitlesApi(projectId, 'subtitles'), {
-    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ style }),
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ style, from }),
   });
-  if (!res.ok) throw new Error(`Studio answered ${res.status}`);
+  if (!res.ok) throw new Error(`字幕样式未保存（${res.status}）；请保留草稿，重新打开项目并核对合并。`);
+  return await res.json() as SubtitleStyleSnapshot;
 }
 
 /** How making subtitles went: `needsTranscriber` when no service can transcribe (the error says so). */

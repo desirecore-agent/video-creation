@@ -307,6 +307,14 @@ HTTP/MCP可选 `informationSafeArea:{top:0.15,bottom:0.15}`；CLI对应 `--safe-
 
 `studio-subtitle-layer` coverage显式区分rendered、subtitles-off、no-cues与no-active-cue。`subtitle-information-overlap` 是同一采样时刻字幕和已声明场景信息框的交集提示，不是像素遮挡或审美评分。工程seek、DOM与PNG是同次采样窗口而非原子快照；离散采样不证明全片每帧。export-job没有DOM/语义对象，信息区域请求返回unknown，不借新字幕反推旧编码的安全性。原有图数/字节预算、来源检查、目录权限和人工锁合同不变。
 
+## 字幕样式条件保存
+
+`GET subtitles` / `subtitle-style` 同次字节观察返回 `from:{filmRevision,styleSha256}`；样式文件缺失时 `styleSha256:null`，无有效影片时 `from:null` 不可保存。`PUT subtitles` 现在必须提交 `{style,from}`，旧客户端只传style返回428且不写；格式错误400、影片或样式过期409。不在后端补取最新版本、不从影片版本推断样式未变。UI保留本地草稿，保存失败明确提示并停止自动重放；重新打开前需保留草稿并人工核对合并。
+
+CLI：`subtitle-style-save <项目> --args <JSON文件> --home <原数据根>`；离线 `subtitle-style-save --schema` 为Draft-07合同。SDK：先 `client.subtitleStyle()`，保留原from和未改样式字段，再 `client.saveSubtitleStyle({style,from})`；成功返回保存的style和下一次from。发生409或回执未知时先重读核对，不能给旧稿自动套新from。仅修改全局样式，不改变影片、VTT、原声或切句；调用者仍须核人工整行外观/位置/时间，不能用祖先样式绕人锁。
+
+条件校验和原子写复用 `withProjectFilmEdit` / `writeAtomic`。同服务项目串行，不新增锁系统，也不承诺任意外部磁盘手写的跨进程强一致；GET前后字节校验仍是观察窗口。
+
 ## 生效字幕布局、句子原声与审片恢复
 
 `subtitle-style <项目>` / `video_subtitle_style` 只读既有 `GET subtitles`；`subtitle-style --schema` 发现同源响应Schema。原 `style` 字段仍是规范化保存值或null，不是原JSON正文；追加 `layout` 报告本次计算的stage、effectiveStyle、fontSizePx、positionPolicy及film/样式原字节来源摘要。缺文件/无可用stage/非有限结果明确unknown，源在读取期间变化返回409，不把多次live读取称原子快照。竖屏默认(.5,.94)按原规则生效为(.5,.72)，显式(.5,.8)保持；这些计算值属于export与current-project review口径，不证明编辑器未保存草稿、浏览器已记住的样式、实际字体像素框或其他OS一致。完整边界仍由同源P0审片测量，不在此静态回执假算。

@@ -246,10 +246,10 @@ test('the routes: captions, style, and translation without a service', async () 
     const initialStyle = await (await fetch(`${base}/subtitles`)).json();
     assert.equal(initialStyle.style, null, 'the editor keeps its original nullable style field');
     assert.equal(initialStyle.layout.status, 'computed');
-    const put = await fetch(`${base}/subtitles`, { method: 'PUT', body: JSON.stringify({ style: { ...FILM_SUBTITLE_DEFAULT, on: false } }) });
+    const put = await fetch(`${base}/subtitles`, { method: 'PUT', body: JSON.stringify({ style: { ...FILM_SUBTITLE_DEFAULT, on: false }, from: initialStyle.from }) });
     assert.equal((await put.json()).style.on, false);
     assert.equal((await (await fetch(`${base}/subtitles`)).json()).style.on, false);
-    assert.equal((await fetch(`${base}/subtitles`, { method: 'PUT', body: '{}' })).status, 400);
+    assert.equal((await fetch(`${base}/subtitles`, { method: 'PUT', body: '{}' })).status, 428);
     const translate = await fetch(`${base}/subtitles/translate`, { method: 'POST', body: JSON.stringify({ language: 'ja' }) });
     assert.equal(translate.status, 409);
     assert.equal((await translate.json()).code, 'no-translator');
