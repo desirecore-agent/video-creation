@@ -39,6 +39,8 @@ pnpm test:motion:runtime  # 实际 Chromium 求帧与本地 SDK 集成
 
 应用通过 DesireCore 安装与更新；源码版更新本仓库后重新构建。CLI 和服务均不查询或执行上游 npm 自更新，也不引导下载上游独立桌面版。`apps/desktop` 和 `packages/shared` 保留作来源参考，排除在默认工作区、构建及测试之外。
 
+默认浏览器准备和应用渲染共用实际数据根的 `runtime/ms-playwright`，正式/预览 owner 数据根仍优先于 `--home`。已有非空 `PLAYWRIGHT_BROWSERS_PATH` 保留 Playwright 的显式语义（包括 `0` 和相对路径）；准备与启动应使用相同配置。SDK 延迟到首次渲染才加载，默认仍选择 `--only-shell` 对应的 headless-shell，不用完整 Chromium 路径替换；缺失时失败，不回退到共享缓存。不会迁移或清理旧用户缓存；显式选择共享路径时安装器仍遵循 Playwright 自身的安装/GC 语义。环境仅在应用进程及其准备子进程内生效，不修改平台父进程。HTTP 健康不代表 FFmpeg 或浏览器可用，仍需实际短合成验证。
+
 ## 界面与主题
 
 在支持外观同步的 DesireCore 原生窗口中，编辑器随宿主切换明暗，字体、表面与控件沿用宿主风格，设置中显示“跟随 DesireCore”。独立浏览器仍可选择浅色、深色或跟随系统；宿主的临时覆盖不会改写已保存的浏览器偏好。未提供外观同步的旧版宿主继续使用本地偏好。

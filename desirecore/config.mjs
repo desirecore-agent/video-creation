@@ -25,16 +25,21 @@ export function runtimeConfig(overrides = {}, env = process.env) {
   return { ...data, home };
 }
 
+/** 为本次应用/安装子进程构造环境，不修改调用者；显式 Playwright 路径交给 SDK 解释（包括 0 和相对路径）。 */
+export function runtimeEnvironment(config, env = process.env) {
+  const result = { ...env, VIDEO_CREATION_HOME: config.home, OPENFILM_HOME: config.home,
+    OPENFILM_NO_UPDATE_CHECK: '1', OPENFILM_NO_BROWSER: '1',
+    PLAYWRIGHT_BROWSERS_PATH: env.PLAYWRIGHT_BROWSERS_PATH || join(config.home, 'runtime', 'ms-playwright') };
+  if (config.directorAgentId) result.VIDEO_DIRECTOR_AGENT_ID = config.directorAgentId;
+  const media = join(config.home, 'runtime', 'ffmpeg-b6.1.1');
+  if (existsSync(media) && !(result.PATH ?? '').split(delimiter).includes(media)) result.PATH = `${media}${delimiter}${result.PATH ?? ''}`;
+  return result;
+}
+
+/** 仅由应用 CLI 自己的进程初始化；父平台进程环境不变。须在首次渲染 SDK 导入前调用。 */
 export function applyRuntimeEnvironment(config) {
   mkdirSync(config.home, { recursive: true, mode: 0o700 });
-  process.env.VIDEO_CREATION_HOME = config.home;
-  // 兼容原内核环境接口，所有数据仍写入此应用独立的 home。
-  process.env.OPENFILM_HOME = config.home;
-  process.env.OPENFILM_NO_UPDATE_CHECK = '1';
-  process.env.OPENFILM_NO_BROWSER = '1';
-  if (config.directorAgentId) process.env.VIDEO_DIRECTOR_AGENT_ID = config.directorAgentId;
-  const media = join(config.home, 'runtime', 'ffmpeg-b6.1.1');
-  if (existsSync(media) && !(process.env.PATH ?? '').split(delimiter).includes(media)) process.env.PATH = `${media}${delimiter}${process.env.PATH ?? ''}`;
+  Object.assign(process.env, runtimeEnvironment(config));
 }
 
 export function runtimeIdentity(env = process.env) {
