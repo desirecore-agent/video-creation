@@ -56,6 +56,7 @@ export interface SpeechCutActions {
 export function SubtitleInspector({ subtitles, width, onClose }: {
   subtitles: {
     style: SubtitleStyle;
+    styleError?: string | null;
     onStyle: (next: Partial<SubtitleStyle>) => void;
     /** Translate the film's voices into this language (useFilmSubtitles().translate). Without it, no translating. */
     translate?: (language: string) => Promise<SubtitleTranslateResult>;
@@ -93,6 +94,7 @@ export function SubtitleInspector({ subtitles, width, onClose }: {
   return (
     <InspectorPanel title={t('timeline.subtitleStyle')} width={width} onClose={onClose}>
       <div data-subtitle-inspector className="py-2">
+          {subtitles.styleError ? <p role="alert">{subtitles.styleError}</p> : null}
           {/* the looks are shown as samples, not names: "heavy outline" and "bold" sound alike and look nothing alike.
               Picked = the style is exactly that look (worked out, not stored: change a color and it is no longer it) */}
           <div className="flex gap-1.5 pb-1.5 pt-0.5">

@@ -20,6 +20,7 @@
  * (`alt`), cut to follow the original's pieces, and the person's style picks one.
  */
 import { mkdir, readFile, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { clipKind, clipSpan, kindOf, soundRole } from '../../src/film-doc.mjs';
 import { probe } from './derived.mjs';
@@ -373,6 +374,29 @@ export async function writeSubtitleStyle(root, style) {
   return parsed;
 }
 
+/** Conditional public save. The existing project queue also serializes film edits.
+ * No claim of cross-process CAS against arbitrary disk writers.
+ * @param {string} root @param {unknown} body
+ */
+export async function saveSubtitleStyle(root, body) {
+  if (!isRecord(body) || body.from == null) throw new HttpError(428, '字幕样式保存需要原GET的from前置条件。');
+  const from = body.from;
+  if (!isRecord(from) || Object.keys(from).some((k) => !['filmRevision', 'styleSha256'].includes(k))
+    || typeof from.filmRevision !== 'string' || !/^[a-f0-9]{16}$/.test(from.filmRevision)
+    || !(from.styleSha256 === null || typeof from.styleSha256 === 'string' && /^[a-f0-9]{64}$/.test(from.styleSha256))
+    || !isRecord(body.style) || Object.keys(body).some((k) => !['style', 'from'].includes(k)))
+    throw new HttpError(400, '需要 { style, from: { filmRevision, styleSha256 } }。');
+  return withProjectFilmEdit(root, async () => {
+    const current = await readSubtitleStyleInfo(root);
+    if (!current.from || current.from.filmRevision !== from.filmRevision || current.from.styleSha256 !== from.styleSha256)
+      throw new HttpError(409, '影片或字幕样式已改变；重读合并，不自动重放旧样式。', { code: 'subtitle-style-stale' });
+    const style = parseFilmSubtitleStyle(body.style);
+    const text = `${JSON.stringify(style, null, 2)}\n`;
+    await writeWhole(join(root, SUBTITLE_STYLE_FILE), text);
+    return { style, from: { filmRevision: from.filmRevision, styleSha256: createHash('sha256').update(text).digest('hex') } };
+  });
+}
+
 /** @param {string} path @param {string} body */
 async function writeWhole(path, body) {
   await mkdir(dirname(path), { recursive: true });
@@ -471,7 +495,7 @@ export const CONNECT_TRANSCRIBER = 'Connect a service that transcribes in Studio
  *                              `line` ms reads `text`, or its translation into `language` does; with `part`, only that
  *                              subtitle of the line (a cue's `part`); empty text takes it out)
  *   GET  subtitles             → { style: FilmSubtitleStyle | null } (null: never changed)
- *   PUT  subtitles             { style } → { style } (as kept)
+ *   PUT  subtitles             { style, from: { filmRevision, styleSha256 } } → { style, from }; missing 428, stale 409
  *   POST subtitles/transcribe  → { transcribed, failed } for the speech heard with no transcript yet; 409 { error, code:
  *                              'no-transcriber' } when no service can
  *   POST subtitles/translate   { language } → translateFilmSubtitles' result (502 when every voice failed);
@@ -503,9 +527,7 @@ export async function captionRoutes(req, res, root, rest, { translate = async ()
   if (rest === 'subtitles') {
     if (req.method === 'GET') { json(res, 200, await readSubtitleStyleInfo(root)); return true; }
     if (req.method === 'PUT') {
-      const body = /** @type {{ style?: unknown }} */ (await readJson(req));
-      if (!isRecord(body.style)) throw new HttpError(400, 'which style? { style: { … } }');
-      json(res, 200, { style: await writeSubtitleStyle(root, body.style) });
+      json(res, 200, await saveSubtitleStyle(root, await readJson(req)));
       return true;
     }
   }

@@ -101,6 +101,13 @@ export async function projectClient(config, folder, options) {
         });
     },
     subtitleStyle: () => studio.call(`${base}/subtitles`),
+    saveSubtitleStyle: async (ask) => {
+      try { return await studio.call(`${base}/subtitles`, ask, 'PUT'); }
+      catch (error) {
+        if (error?.status) throw error;
+        throw new Error('未取得字幕样式保存回执，结果未知；先读取当前样式核对，不自动刷新from重放旧稿。', { cause: error });
+      }
+    },
     captionAudio: async (ask) => {
       try { return await studio.call(`${base}/captions/audio`, ask, 'POST', { timeoutMs: config.prepareTimeoutMs ?? 15 * 60_000, localLongResponse: true }); }
       catch (error) {

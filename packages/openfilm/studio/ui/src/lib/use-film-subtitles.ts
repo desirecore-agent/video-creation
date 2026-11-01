@@ -35,6 +35,7 @@ export interface FilmSubtitles {
   cues: SubtitleCue[];
   count: number;
   style: SubtitleStyle;
+  styleError: string | null;
   setStyle: React.Dispatch<React.SetStateAction<SubtitleStyle>>;
   patchStyle: (next: Partial<SubtitleStyle>) => void;
   toggle: () => void;
@@ -52,7 +53,7 @@ export interface FilmSubtitles {
 
 export function useFilmSubtitles(projectId: string): FilmSubtitles {
   const [captions, setCaptions] = React.useState<FilmCaptions | null>(null);
-  const [style, setStyle] = useSubtitleStyle(projectId);
+  const [style, setStyle, styleError] = useSubtitleStyle(projectId);
   const [transcribing, setTranscribing] = React.useState(false);
 
   const latest = React.useRef(0);
@@ -109,7 +110,7 @@ export function useFilmSubtitles(projectId: string): FilmSubtitles {
   }, [projectId, refresh]);
 
   return {
-    cues, count, style, setStyle, patchStyle, toggle, move, translate, transcribe, transcribing, setLine,
+    cues, count, style, styleError, setStyle, patchStyle, toggle, move, translate, transcribe, transcribing, setLine,
     sourceLanguage: captions?.sourceLanguage ?? null, captions, refresh,
   };
 }

@@ -17,7 +17,7 @@ import { reviewLocalOptionsOf, reviewCopyRoot, copyReviewImages } from './review
 import { workingMediaRequestSchema } from '../packages/openfilm/studio/server/working-media.mjs';
 import { speechCutContract } from '../packages/openfilm/studio/server/speech-cut.mjs';
 import { CAPTION_SOURCE_READ_SCHEMA, CAPTION_SOURCE_SAVE_SCHEMA } from '../packages/openfilm/studio/server/subtitle-edits.mjs';
-import { SUBTITLE_LAYOUT_RESPONSE_SCHEMA } from '../packages/openfilm/studio/server/captions.mjs';
+import { SUBTITLE_LAYOUT_RESPONSE_SCHEMA, SUBTITLE_STYLE_WRITE_SCHEMA } from '../packages/openfilm/studio/server/subtitle-layout.mjs';
 import { captionAudioContract, captionMediaObservationRequestSchema } from '../packages/openfilm/studio/server/caption-audio.mjs';
 
 export const HELP = `视频创作 — 本地影片编辑与视频导演协作
@@ -30,6 +30,8 @@ node desirecore/cli.mjs <命令> [项目目录] [选项]
   captions --schema                                离线读取字幕观察参数，默认不为全部源计算摘要
   subtitle-style <项目>                             读取保存的字幕样式、实际生效布局和来源；不是DOM字形测量
   subtitle-style --schema                           离线读取样式与布局响应合同
+  subtitle-style-save <项目> --args <JSON文件>        按原GET的from条件保存样式，不自动刷新旧稿
+  subtitle-style-save --schema                      离线读取样式条件写合同
   caption-audio <项目> --args <JSON文件> [--wait]     按真实字幕及影片版本导出短WAV，完成后仍需实际试听
   caption-audio --schema                            离线读取原声窗请求、来源与输出预算合同
   captions-source <项目> <素材相对路径>               读取完整源字幕及原文件 snapshot
@@ -209,6 +211,7 @@ export async function command(args, output = (value) => process.stdout.write(`${
   if (name === 'review' && values.schema) return output(reviewContract);
   if (name === 'reviews' && values.schema) return output(reviewListRequestSchema);
   if (name === 'subtitle-style' && values.schema) return output(SUBTITLE_LAYOUT_RESPONSE_SCHEMA);
+  if (name === 'subtitle-style-save' && values.schema) return output(SUBTITLE_STYLE_WRITE_SCHEMA);
   if (name === 'caption-audio' && values.schema) return output(captionAudioContract);
   if (name === 'captions' && values.schema) return output(captionMediaObservationRequestSchema);
   if (name === 'patch' && values.schema) return output(timelineOpsSchema);
@@ -230,12 +233,16 @@ export async function command(args, output = (value) => process.stdout.write(`${
     if (!values.project && !folder) throw new Error('MCP 必须绑定明确的 --project。');
     return (await import('./mcp.mjs')).serveMcp(config, resolve(values.project ?? folder));
   }
-  if (!['inspect', 'captions', 'subtitle-style', 'caption-audio', 'captions-source', 'captions-save', 'prepare-media', 'speech-cut', 'speech-cut-apply', 'patch', 'check', 'review', 'reviews', 'scene-read', 'scene-revise', 'get', 'render', 'jobs', 'retry', 'cancel', 'motion-catalog', 'motion-inspect', 'motion-install', 'motion-take', 'motion-patch'].includes(name)) throw new Error(`未知命令：${name}；运行 --help 查看用法。`);
+  if (!['inspect', 'captions', 'subtitle-style', 'subtitle-style-save', 'caption-audio', 'captions-source', 'captions-save', 'prepare-media', 'speech-cut', 'speech-cut-apply', 'patch', 'check', 'review', 'reviews', 'scene-read', 'scene-revise', 'get', 'render', 'jobs', 'retry', 'cancel', 'motion-catalog', 'motion-inspect', 'motion-install', 'motion-take', 'motion-patch'].includes(name)) throw new Error(`未知命令：${name}；运行 --help 查看用法。`);
   const reviewOffset = name === 'reviews' ? reviewListOffset(values.offset === undefined ? 0 : values.offset.trim() ? Number(values.offset) : NaN) : 0;
   const client = await projectClient(config, folder);
   if (name === 'inspect') return output(await client.inspect());
   if (name === 'captions') return output(await client.captions({ withMediaDigests: values['with-media-digests'] ?? false }));
   if (name === 'subtitle-style') return output(await client.subtitleStyle());
+  if (name === 'subtitle-style-save') {
+    if (!values.args) throw new Error('subtitle-style-save需要--args JSON文件；先读取subtitle-style及subtitle-style-save --schema。');
+    return output(await client.saveSubtitleStyle(JSON.parse(readFileSync(resolve(values.args), 'utf8'))));
+  }
   if (name === 'caption-audio') {
     if (!values.args) throw new Error('caption-audio需要--args JSON文件；先运行caption-audio --schema。');
     const ask = JSON.parse(readFileSync(resolve(values.args), 'utf8'));

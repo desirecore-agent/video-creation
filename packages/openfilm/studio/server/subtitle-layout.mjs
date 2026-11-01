@@ -23,10 +23,27 @@ const fileSchema = {
     usingDefault: { type: 'boolean', description: '样式缺失或非有效JSON对象时，服务端沿既有默认值渲染，不回写文件。' },
   },
 };
+export const SUBTITLE_STYLE_FROM_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['filmRevision', 'styleSha256'],
+  description: '原GET返回的影片与样式字节前置条件。缺失样式用null；冲突须重读合并，不自动替换版本重放。',
+  properties: {
+    filmRevision: { type: 'string', pattern: '^[a-f0-9]{16}$', description: '观察时有效film.html版本，严格匹配。' },
+    styleSha256: { type: ['string', 'null'], pattern: '^[a-f0-9]{64}$', description: '观察时样式原字节SHA256；null明确要求文件仍不存在。' },
+  },
+};
+export const SUBTITLE_STYLE_WRITE_SCHEMA = {
+  $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', additionalProperties: false,
+  required: ['style', 'from'], description: 'PUT subtitles条件保存完整样式；复用项目串行队列及原子替换，不保证外部磁盘写跨进程强一致。仅改样式，不改VTT/切句/原声；调用者须保护人工整行外观位置时间。',
+  properties: {
+    style: { type: 'object', additionalProperties: true, description: '完整样式对象，沿既有parseFilmSubtitleStyle规范化；先保留所见未改字段。' },
+    from: SUBTITLE_STYLE_FROM_SCHEMA,
+  },
+};
 export const SUBTITLE_LAYOUT_RESPONSE_SCHEMA = {
-  $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', additionalProperties: false, required: ['style', 'layout'],
+  $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', additionalProperties: false, required: ['style', 'layout', 'from'],
   description: 'GET subtitles的兼容只读响应。style保持原有规范化保存样式或null，layout是服务端导出/工程审片的计算投影，不是浏览器草稿或像素测量。',
   properties: {
+    from: { anyOf: [SUBTITLE_STYLE_FROM_SCHEMA, { type: 'null' }], description: '本次条件写版本；无有效影片时为null，不可保存。' },
     style: { type: ['object', 'null'], additionalProperties: true, description: '原GET已有字段：按既有parseFilmSubtitleStyle读取的保存样式；缺失或非JSON对象仍为null。' },
     layout: {
       type: 'object', additionalProperties: false,
@@ -104,7 +121,7 @@ export async function readSubtitleStyleInfo(root, { read = readFile } = {}) {
     reason = 'subtitle-layout-non-finite'; styleSource.status = 'invalid'; effectiveStyle = null; fontSizePx = null;
   }
   const computed = Boolean(stage && effectiveStyle);
-  return { style, layout: {
+  return { style, from: stage && filmSource.revision ? { filmRevision: filmSource.revision, styleSha256: styleSource.sha256 } : null, layout: {
     status: computed ? 'computed' : 'unknown', ...(!computed ? { reason } : {}), stage, effectiveStyle, fontSizePx,
     positionPolicy: effectiveStyle ? (effectiveStyle === base ? 'preserved' : 'portrait-default') : 'unknown',
     source: { film: filmSource, style: styleSource },
