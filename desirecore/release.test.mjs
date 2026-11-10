@@ -3,11 +3,20 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, test } from 'node:test';
 import { canonicalizeRelease, createReleaseManifest, readRuntimePayload, writeRelease, writeDependencyLicenses } from './release.mjs';
 
 const roots = [];
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+
+test('the reviewed release matches the actual built runtime and installed licenses', () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  writeDependencyLicenses({ root, check: true });
+  const actual = createReleaseManifest(readRuntimePayload(root));
+  const reviewed = JSON.parse(readFileSync(join(root, 'desirecore/app-release.json'), 'utf8'));
+  assert.deepEqual(actual, reviewed, 'build and freeze the release before changing the Registry pin');
+});
 function put(root, path, bytes = path) {
   mkdirSync(dirname(join(root, path)), { recursive: true });
   writeFileSync(join(root, path), bytes);
