@@ -4,6 +4,14 @@
 
 ## 准备材料
 
+正式安装应读取 Registry 固定的 Release ZIP、归档 SHA-256、appRelease.releaseDigest 与 studio/embedded-web 入口声明，核验解压材料后沿原作者合同安装。不要在安装时重建另一份材料迁就目录摘要。下述构建步骤用于开发者准备新发布。
+
+Managed installs consume the Registry-pinned ZIP, archive hash, release digest and studio entrypoint. The following source build prepares a new release; do not rebuild different material during a pinned installation.
+
+导出附件：核当前受管实例与原 job 完成回执，将其返回的结果 URL 经正常工具/审批下载到智能体已有授权工作目录，核大小、摘要与媒体后交付工作目录路径。应用数据根不因安装、关联或 MCP 成为通用读取根。下载/审批失败应保留，不直接附未授权源路径，也不以旧结果补位。
+
+For attachments, verify the runtime/job and download its returned output URL through normal authorized tools into the Agent's existing workspace. Verify the real file before attaching it. Approval/download failures remain explicit and do not authorize the application data root.
+
 开发机需要 Node.js 22.18 或更高版本、pnpm 9.15.9。先在源码仓库根目录执行：
 
 ```sh
