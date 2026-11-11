@@ -17,7 +17,7 @@ Managed installation uses the Registry's pinned release ZIP, SHA-256 and `app-re
 
 After rendering, verify the current managed instance/job. Download its returned output URL through normal authorized tools into the Agent's existing workspace, verify it, and attach the workspace copy. Installation, association and MCP do not grant attachment access to the application data root; preserve approval/download failures rather than retrying unauthorized source paths.
 
-Requires Node.js 22.18+, pnpm 9, Git, and FFmpeg/FFprobe on PATH. Inspection, preview and export also need Playwright Chromium; install it explicitly before offline use.
+Requires Node.js 22.18+, pnpm 9 and Git. Runtime preparation checks FFmpeg audio mixing filters, H.264/AAC encoders and ffprobe; an extraction-only build is insufficient. On supported platforms it fetches the checksum-pinned application copy and gives it precedence. Inspection, preview and export also need Playwright Chromium; prepare the runtime explicitly before offline use.
 
 ```sh
 git clone git@github.com:desirecore-agent/video-creation.git

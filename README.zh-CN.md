@@ -17,7 +17,7 @@
 
 ## 开发与运行
 
-需要 Node.js 22.18+、pnpm 9、Git 与 PATH 中的 FFmpeg/FFprobe。首次检查、预览或导出还需要 Playwright 的 Chromium；可显式安装后离线使用。
+需要 Node.js 22.18+、pnpm 9 与 Git。运行时准备核验 FFmpeg 混音滤镜、H.264/AAC 编码器及 ffprobe；仅支持媒体抽取的版本不能用于渲染。支持的平台会下载固定摘要的应用副本并优先使用。检查、预览和导出也需要 Playwright 的 Chromium；显式准备后可离线使用。
 
 ```sh
 git clone git@github.com:desirecore-agent/video-creation.git

@@ -50,12 +50,26 @@ export const ffmpegDir = (dataDir) => join(dataDir, 'runtime', `ffmpeg-${RELEASE
 /** Whether a folder holds both programs (the installer's, or a download that finished). */
 export const ffmpegIn = (dir, platform = process.platform) => ['ffmpeg', 'ffprobe'].every((n) => existsSync(join(dir, exe(n, platform))));
 
-/** Whether both programs run from this PATH. */
+// Baseline used by mixGraph() and the default H.264/AAC MP4 export.
+const MIX_AND_MP4_FILTERS = ['asetpts', 'volume', 'adelay', 'aresample', 'aformat', 'amix', 'apad',
+  'atrim', 'asplit', 'atempo', 'afade', 'scale', 'format'];
+const MP4_ENCODERS = ['libx264', 'aac'];
+
+/** A version banner alone also succeeds on extraction-only FFmpeg builds. */
 export function ffmpegOnPath(path) {
-  return ['ffmpeg', 'ffprobe'].every((bin) => {
-    const r = spawnSync(bin, ['-version'], { stdio: 'ignore', env: { ...process.env, PATH: path }, windowsHide: true });
-    return !r.error && r.status === 0;
-  });
+  const options = { encoding: 'utf8', env: { ...process.env, PATH: path }, windowsHide: true,
+    // First execution of freshly downloaded binaries may incur platform validation.
+    timeout: 20_000, maxBuffer: 1024 * 1024 };
+  const has = (option, line, required) => {
+    const r = spawnSync('ffmpeg', ['-hide_banner', option], options);
+    if (r.error || r.status !== 0) return false;
+    const names = new Set([...String(r.stdout).matchAll(line)].map((match) => match[1]));
+    return required.every((name) => names.has(name));
+  };
+  if (!has('-filters', /^\s*[TSC.]{3}\s+(\S+)\s+/gm, MIX_AND_MP4_FILTERS)
+    || !has('-encoders', /^\s*[VA][A-Z.]{5}\s+(\S+)\s+/gm, MP4_ENCODERS)) return false;
+  const probe = spawnSync('ffprobe', ['-version'], options);
+  return !probe.error && probe.status === 0;
 }
 
 /** Whether this machine has a build to download. */

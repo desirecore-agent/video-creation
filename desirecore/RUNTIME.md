@@ -38,7 +38,9 @@ pnpm install --prod --ignore-scripts --frozen-lockfile
 node desirecore/cli.mjs setup-runtime --home <明确的应用数据目录>
 ```
 
-该步骤沿已锁定的 Playwright 版本准备 Chromium headless shell；先检查系统的 FFmpeg/ffprobe，缺少时只在有固定哈希构建的 macOS arm64/x64 与 Windows x64 下载核验的制品，并在同一运行目录保存许可及源码来源。Linux 或其他无预置构建的架构需先自行安装实际可用的 FFmpeg/ffprobe，再运行 `setup-runtime`。Git 仍需系统已有。准备动作会联网下载第三方制品，不是启动器的隐式行为；应在真实输出中核对实际结果，再做影片检查和视频导出，不能仅凭依赖安装宣称可用。本快照不附带浏览器、FFmpeg 或自有第二套桌面安装器。Windows、macOS、Linux 是本清单声明的目标，未分别运行验证时不可声称全部平台已通过。
+该步骤沿已锁定的 Playwright 版本准备 Chromium headless shell，并核验 FFmpeg 混音滤镜、H.264/AAC 编码器与 ffprobe；能返回版本号的抽取工具不算就绪。系统能力不足时，macOS arm64/x64 与 Windows x64 下载固定 SHA-256 的应用副本、保存许可与源码来源，并用优先于系统 PATH 的应用运行时复验。其他平台须先准备支持这些能力的系统 FFmpeg/ffprobe。候选与正式数据根不同时，通过 `AppAuthoring.release_history` 的实际 `currentData.dataRoot` 定位正式根，并在正式根显式运行准备；已有正式进程按原授权停止后重开以采用新环境。Git 仍需系统已有。准备可能联网，不是启动器的隐式行为；还须用真实影片检查和导出验证。归档不附带浏览器或 FFmpeg，也不自带桌面安装器。
+
+English: Preparation rejects extraction-only FFmpeg even when its version command succeeds. It checks the mix filters, H.264/AAC encoders and ffprobe, then uses the pinned application copy where available and verifies it again. Prepare the actual registered data root and restart an already running instance through its original runtime owner before testing a real export.
 
 ## 纳管原执行与启动
 
