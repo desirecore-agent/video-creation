@@ -32,7 +32,7 @@ export function runtimeEnvironment(config, env = process.env) {
     PLAYWRIGHT_BROWSERS_PATH: env.PLAYWRIGHT_BROWSERS_PATH || join(config.home, 'runtime', 'ms-playwright') };
   if (config.directorAgentId) result.VIDEO_DIRECTOR_AGENT_ID = config.directorAgentId;
   const media = join(config.home, 'runtime', 'ffmpeg-b6.1.1');
-  if (existsSync(media) && !(result.PATH ?? '').split(delimiter).includes(media)) result.PATH = `${media}${delimiter}${result.PATH ?? ''}`;
+  if (existsSync(media)) result.PATH = [media, ...(result.PATH ?? '').split(delimiter).filter((entry) => entry && entry !== media)].join(delimiter);
   return result;
 }
 

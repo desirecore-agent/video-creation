@@ -5,7 +5,7 @@
     "id": "video-creation",
     "name": "视频创作",
     "iconLetter": "影",
-    "version": "0.3.1",
+    "version": "0.3.2",
     "entrypoints": [
       {
         "id": "studio",
@@ -51,8 +51,8 @@
     },
     {
       "path": "desirecore/RUNTIME.md",
-      "sha256": "96cad1dbb057a1641efe5cd0d039ed9e1b2d16007555a7383dd3f0652e38804b",
-      "size": 57225,
+      "sha256": "592a1611ffdfb67449705912ea6e07c904f6cc6debc4b764064e1437f1c7cc16",
+      "size": 57667,
       "role": "documentation"
     },
     {
@@ -75,8 +75,8 @@
     },
     {
       "path": "desirecore/config.mjs",
-      "sha256": "5cfdb83303b776424e2db3b2f4379948968723228c33d754e9589ca20e6feb5a",
-      "size": 3519,
+      "sha256": "05d0d878bd84f64c93602ad2fb36b0c12fbeaa55e91bc6ef693a96e26fd83b16",
+      "size": 3528,
       "role": "runtime"
     },
     {
@@ -87,8 +87,8 @@
     },
     {
       "path": "desirecore/ffmpeg-runtime.mjs",
-      "sha256": "681c4e364b7954083ddca201a8b5aee887debbd02ec582fd9aa21d8af8fe0b0e",
-      "size": 6998,
+      "sha256": "8bff3b99c220e52fde030458b189c144b1a2ad7a7d64192f2a27464c57b0f3ad",
+      "size": 7890,
       "role": "runtime"
     },
     {
@@ -213,8 +213,8 @@
     },
     {
       "path": "desirecore/setup-runtime.mjs",
-      "sha256": "ab6b99ec818ffc457dcc91af2e1de726274e9804c69a9adf2b4209c208d4017f",
-      "size": 1619,
+      "sha256": "c8140d9d7705caecbd14c6f798662caef3106f790a2f6447f031f7e2125c27fa",
+      "size": 1866,
       "role": "runtime"
     },
     {
@@ -387,7 +387,7 @@
     },
     {
       "path": "packages/openfilm/package.json",
-      "sha256": "208cda9c7d1e1c6f654a999e47109006a5c6d0d0e98df1a6d7c9f04f73ed9eec",
+      "sha256": "3d801b0a12b872c92168169729129084007f1778d980d0cd157b5b5c9317a82b",
       "size": 2966,
       "role": "dependency"
     },
@@ -1318,7 +1318,7 @@
   ],
   "source": {
     "kind": "worktree",
-    "sha256": "f9e73c3bf863d151608c7ab850868d64c45d3046f9a8f18a14043f24a2db5b75"
+    "sha256": "6a48eb7c405e82ec9967af169383d8e2a86afea3b985366861447239c444ba93"
   },
   "supportedPlatforms": [
     "darwin",
@@ -1351,5 +1351,5 @@
     "restoreInstructionsPath": "desirecore/RUNTIME.md"
   },
   "instructionsPath": "desirecore/RUNTIME.md",
-  "releaseDigest": "9e920eb96caec2ca4fb470e0acacb4afa503644b415dc9d7e2f3af3f4370fec1"
+  "releaseDigest": "3e9db34f598b4f4ae4d74958cc4039e2d13be113e8f539043687ba780be66ca2"
 }

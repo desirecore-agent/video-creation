@@ -10,6 +10,7 @@ import { runtimeConfig, runtimeEnvironment, runtimeIdentity, managedDocumentNavi
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { setupRuntime } from './setup-runtime.mjs';
+import { ffmpegOnPath } from './ffmpeg-runtime.mjs';
 import { connectStudio } from './client.mjs';
 import { createHash } from 'node:crypto';
 import { serveMcp } from './mcp.mjs';
@@ -94,6 +95,16 @@ test('首次SDK异步导入窗口漂移永久拒绝复用，同环境并发保�
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('精简 FFmpeg 即使能报版本，也不能作为支持混音和 MP4 的运行时', (t) => {
+  try {
+    t.mock.method(childProcess, 'spawnSync', (_file, args) => ({ status: 0,
+      stdout: args.includes('-filters') ? 'Filters:\n ... aformat A->A Format audio\n' : 'ffmpeg version 6.1.1\n',
+    }));
+    syncBuiltinESMExports();
+    assert.equal(ffmpegOnPath('/fixture/bin'), false);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+});
+
 test('setup真实spawn消费同根env，受控安装GC只触临时目标且不污染父环境', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'video-setup-cache-'));
   const sentinel = join(root, 'shared-sentinel');
@@ -104,8 +115,12 @@ test('setup真实spawn消费同根env，受控安装GC只触临时目标且不�
   const before = { ...process.env };
   const spawnReal = childProcess.spawn;
   try {
-    t.mock.method(childProcess, 'spawnSync', (file) => {
-      assert.ok(['ffmpeg','ffprobe'].includes(file)); return { status: 0 };
+    t.mock.method(childProcess, 'spawnSync', (file, args) => {
+      assert.ok(['ffmpeg','ffprobe'].includes(file));
+      const stdout = args.includes('-filters')
+        ? 'asetpts volume adelay aresample aformat amix apad atrim asplit atempo afade scale format'.split(' ').map((name) => ` ... ${name} A->A`).join('\n')
+        : args.includes('-encoders') ? ' V....D libx264 encoder\n A....D aac encoder\n' : 'ffprobe version 6.1.1';
+      return { status: 0, stdout };
     });
     t.mock.method(childProcess, 'spawn', (exe, args, options) => {
       assert.deepEqual(args.slice(1), ['install', '--only-shell', 'chromium']);
